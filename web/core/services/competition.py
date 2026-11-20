@@ -3,7 +3,7 @@
 import logging
 import threading
 from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from contextlib import aclosing, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
@@ -12,9 +12,11 @@ from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
 
 from core.authentik_utils import set_team_account_active
-from core.discord_tasks import BroadcastMessage
-from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, DiscordTask
-from core.utils import advisory_lock, format_competition_time
+from core.heartbeat import beat
+from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
+from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
+from core.team_accounts import accounts_by_team, blueteam_kinds, team_folder
+from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,10 @@ COUNTDOWN_SENDER = "Gold Team"
 COMPETITION_STARTED = "competition_started"
 # The audit action a stop records, with the same details
 COMPETITION_STOPPED = "competition_stopped"
+# A start's reason for an active team whose group has no account matching its pattern, or that has no group
+NO_TEAM_ACCOUNT = "no team account in its group"
+# The same reason in team folder mode
+NO_FOLDER_ACCOUNT = "no team account in the team folder"
 TIMER_GAVE_UP = "competition_timer_gave_up"
 COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
 
@@ -102,7 +108,8 @@ class CompetitionRunResult:
     account_failures: list[tuple[str, str]] = field(default_factory=list)
     nextcloud_ok: int = 0
     nextcloud_failed: list[tuple[str, str]] = field(default_factory=list)
-    quotient_synced: bool | None = None
+    scores_synced: bool | None = None  # The stop's Quotient service score sync; None on a start
+    metadata_sync_queued: bool = False  # The start queued the worker's Quotient metadata sync
     start_message_queued: bool = False
     error: str | None = None
     refused: bool = False
@@ -137,9 +144,10 @@ class CompetitionRunResult:
             nc_total = self.nextcloud_ok + len(self.nextcloud_failed)
             lines.append(f"Nextcloud accounts provisioned: {self.nextcloud_ok}/{nc_total}")
             lines.extend(f"Failed Nextcloud: {username}: {error}" for username, error in self.nextcloud_failed)
-        if self.quotient_synced is not None:
-            what = "Quotient metadata" if self.enable else "Quotient service scores"
-            lines.append(f"{what}: {'synced' if self.quotient_synced else 'sync failed'}")
+        if self.scores_synced is not None:
+            lines.append(f"Quotient service scores: {'synced' if self.scores_synced else 'sync failed'}")
+        if self.metadata_sync_queued:
+            lines.append("Quotient metadata sync queued")
         if self.start_message_queued:
             lines.append("Start message queued for every active team")
         return "\n".join(lines)
@@ -154,6 +162,15 @@ def run_competition(
         if not locked:
             return CompetitionRunResult(enable=enable, error=RUN_IN_PROGRESS, refused=True)
         return (yield from _locked_run(enable, actor, timer))
+
+
+async def arun_competition(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
+    """run_competition from async code: a step at a time on a pool thread of its own, beating the caller's heartbeat
+    after each."""
+    async with aclosing(BlockingSteps(run_competition(enable, actor, timer))) as steps:
+        async for _step in steps:
+            beat()
+        return steps.result
 
 
 def _locked_run(
@@ -266,12 +283,13 @@ def _run(
 
     Toggles each controlled application's BlueTeam binding and the team accounts (start enables the
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
-    follow at once, syncs Quotient metadata on start or final service scores on stop, then records the
-    new state and an audit entry. The first start of an event also queues the start message to every
-    active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
+    follow at once, syncs final service scores from Quotient on stop, then records the new state and an audit entry,
+    queueing a status refresh with them and, on start, the worker's Quotient metadata sync (which reads Proxmox and
+    pushes to aweful-proxy, so a start needs neither). The first start of an event also queues the start message to
+    every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
-    from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
+    from scoring.quotient_sync import sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
     from core.nextcloud import NextcloudAPIError, NextcloudManager, nextcloud_configured
@@ -289,15 +307,30 @@ def _run(
     # Inactive teams' accounts stay in their groups between events, so start must not enable them. Stop
     # disables every team account, closing any that was left enabled.
     numbers = active_team_numbers() if enable else list(range(1, MAX_TEAMS + 1))
-    result.accounts_total = len(numbers)
     provision_nextcloud = enable and nextcloud_configured()
-    total = len(result.controlled_apps) + len(numbers) + 2 + (1 if provision_nextcloud else 0)
-    step = 0
     with AuthentikManager() as manager:
+        # One step per team account; when Authentik couldn't list them, one failed step per team. On start, an active
+        # team with no account is one failed step; a stop skips it, having nothing to disable.
+        account_steps: list[tuple[str, str | None]] = []  # (username, None) or (team, why it has no account)
+        try:
+            accounts = accounts_by_team(manager, numbers)
+        except AuthentikAPIError as e:
+            logger.warning(f"Failed to list the team accounts: {e}")
+            account_steps = [(f"team {n:02d}", reason_for(e)) for n in numbers]
+        else:
+            no_account = NO_FOLDER_ACCOUNT if team_folder() else NO_TEAM_ACCOUNT
+            for number in numbers:
+                matched = accounts[number].matched
+                account_steps.extend((username, None) for username in matched)
+                if not matched and enable:
+                    account_steps.append((f"team {number:02d}", no_account))
+        result.accounts_total = len(account_steps)
+        total = len(result.controlled_apps) + len(account_steps) + 2 + (1 if provision_nextcloud else 0)
+        step = 0
         for slug in result.controlled_apps:
             step += 1
             try:
-                manager.set_application_enabled(slug, enable)
+                manager.set_application_enabled(slug, enable, blueteam_kinds())
             except AuthentikAPIError as e:
                 logger.warning(f"Failed to {'enable' if enable else 'disable'} application '{slug}': {e}")
                 why = reason_for(e)
@@ -307,20 +340,21 @@ def _run(
                 result.apps_ok.append(slug)
                 yield CompetitionStep(f"{verb} {slug}", step, total)
 
-        for number in numbers:
-            username = team_username(number)
+        for name, problem in account_steps:
             step += 1
-            try:
-                set_team_account_active(manager, number, enable)
-            except AuthentikAPIError as e:
-                logger.warning(f"Failed to set {username} active={enable}: {e}")
-                why = reason_for(e)
+            if problem is None:
+                try:
+                    set_team_account_active(manager, name, enable)
+                except AuthentikAPIError as e:
+                    logger.warning(f"Failed to set {name} active={enable}: {e}")
+                    problem = reason_for(e)
+            if problem is not None:
                 result.accounts_failed += 1
-                result.account_failures.append((username, why))
-                yield CompetitionStep(f"Failed {username}: {why}", step, total, ok=False)
+                result.account_failures.append((name, problem))
+                yield CompetitionStep(f"Failed {name}: {problem}", step, total, ok=False)
             else:
                 result.accounts_ok += 1
-                yield CompetitionStep(f"{verb} {username}", step, total)
+                yield CompetitionStep(f"{verb} {name}", step, total)
 
         # Permissions follow each account's enabled state; don't make teams wait for the periodic refresh.
         step += 1
@@ -356,24 +390,14 @@ def _run(
             yield CompetitionStep(f"Nextcloud provisioned ({result.nextcloud_ok} teams)", step, total)
 
     step += 1
-    actor_user = User.objects.filter(username=actor).first()
-    if enable:
+    if not enable:
         try:
-            sync_quotient_metadata(actor_user)
-            result.quotient_synced = True
-            yield CompetitionStep("Quotient metadata synced", step, total)
-        except Exception as e:
-            logger.warning(f"Failed to sync Quotient metadata: {e}")
-            result.quotient_synced = False
-            yield CompetitionStep(f"Quotient sync failed: {e}", step, total, ok=False)
-    else:
-        try:
-            sync_service_scores(actor_user)
-            result.quotient_synced = True
+            sync_service_scores(User.objects.filter(username=actor).first())
+            result.scores_synced = True
             yield CompetitionStep("Quotient service scores synced", step, total)
         except Exception as e:
             logger.warning(f"Failed to sync Quotient service scores: {e}")
-            result.quotient_synced = False
+            result.scores_synced = False
             yield CompetitionStep(f"Quotient score sync failed: {e}", step, total, ok=False)
 
     # Only the fields this run owns and the schedule times it consumes: other edits made meanwhile survive
@@ -402,12 +426,15 @@ def _run(
         elif locked.end_passed() or locked.competition_end_time is None or "competition_end_time" in changes:
             changes["started_this_window"] = False
         if enable and not locked.applications_enabled and not locked.start_broadcasts and locked.start_message.strip():
-            task = DiscordTask.enqueue(
+            tasks = QueuedTask.enqueue(
                 BroadcastMessage(target="all-teams", message=locked.start_message, sender=START_MESSAGE_SENDER)
             )
-            changes["start_broadcasts"] = [task.pk]
-            result.start_message_queued = True
+            changes["start_broadcasts"] = [t.pk for t in tasks]
+            result.start_message_queued = bool(tasks)
         CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
+        QueuedTask.enqueue(CompetitionStatusChanged())
+        if enable:
+            result.metadata_sync_queued = bool(QueuedTask.enqueue(SyncQuotientMetadata(requested_by=actor)))
 
         AuditLog.objects.create(
             action=COMPETITION_STARTED if enable else COMPETITION_STOPPED,
@@ -420,7 +447,11 @@ def _run(
                 "accounts_ok": result.accounts_ok,
                 "accounts_failed": result.accounts_failed,
                 "account_failures": dict(result.account_failures),
-                "quotient_synced": result.quotient_synced,
+                **(
+                    {"metadata_sync_queued": result.metadata_sync_queued}
+                    if enable
+                    else {"scores_synced": result.scores_synced}
+                ),
                 "start_message_queued": result.start_message_queued,
                 **(
                     {"nextcloud_ok": result.nextcloud_ok, "nextcloud_failed": dict(result.nextcloud_failed)}
@@ -430,6 +461,8 @@ def _run(
                 **({"timer_attempt": timer.number} if timer is not None else {}),
             },
         )
+    if enable:
+        yield CompetitionStep("Quotient metadata sync queued", step, total)
     return result
 
 
@@ -467,6 +500,7 @@ def give_up_timer_series(plan: GiveUp) -> bool:
         ).update(**no_timer_series())
         if ended:
             CompetitionConfig.objects.filter(pk=pk, **{schedule: plan.schedule}).update(**{schedule: None})
+            QueuedTask.enqueue(CompetitionStatusChanged())
             AuditLog.objects.create(
                 action=TIMER_GAVE_UP,
                 admin_user=TIMER_ACTOR,
@@ -523,7 +557,7 @@ def queue_due_countdown(now: datetime) -> str | None:
             f"There {verb} {label} remaining in the competition. "
             f"The competition ends at {end_display} (<t:{int(end_time.timestamp())}:t>)."
         )
-        task = DiscordTask.enqueue(BroadcastMessage(target="all-teams", message=message, sender=COUNTDOWN_SENDER))
+        tasks = QueuedTask.enqueue(BroadcastMessage(target="all-teams", message=message, sender=COUNTDOWN_SENDER))
         AuditLog.objects.create(
             action=COMPETITION_COUNTDOWN_QUEUED,
             admin_user=TIMER_ACTOR,
@@ -532,7 +566,7 @@ def queue_due_countdown(now: datetime) -> str | None:
             details={
                 "end_time": end_iso,
                 "minutes_remaining": minutes,
-                "task_id": task.pk,
+                "task_ids": [t.pk for t in tasks],
             },
         )
         return label
@@ -583,7 +617,8 @@ KEEP = Keep.KEEP
 def set_schedule(
     actor: str = "", *, start: datetime | None | Keep = KEEP, end: datetime | None | Keep = KEEP
 ) -> CompetitionConfig:
-    """Set the start and/or end time, None clearing one (or both); a time not given stays. Returns the saved config."""
+    """Set the start and/or end time, None clearing one (or both); a time not given stays; queues a status refresh.
+    Returns the saved config."""
     config = CompetitionConfig.locked()
     new_start = config.competition_start_time if isinstance(start, Keep) else start
     new_end = config.competition_end_time if isinstance(end, Keep) else end
@@ -608,6 +643,7 @@ def set_schedule(
     _audit_config(
         "competition_schedule_set", actor, config, {**details, "controlled_apps": config.controlled_applications}
     )
+    QueuedTask.enqueue(CompetitionStatusChanged())
     return config
 
 
@@ -629,10 +665,12 @@ END_AFTER_STOP = "end_after_stop"
 
 @transaction.atomic
 def set_controlled_apps(change: Callable[[list[str]], list[str]], actor: str, **details: object) -> list[str]:
-    """Store change(the stored list of controlled app slugs), read under the row lock; returns the new list."""
+    """Store change(the stored list of controlled app slugs), read under the row lock, and queue a status refresh;
+    returns the new list."""
     config = CompetitionConfig.locked()
     apps = change(list(config.controlled_applications or []))
     config.controlled_applications = apps
     config.save(update_fields=["controlled_applications", "updated_at"])
     _audit_config("competition_apps_configured", actor, config, {"controlled_apps": apps, **details})
+    QueuedTask.enqueue(CompetitionStatusChanged())
     return apps

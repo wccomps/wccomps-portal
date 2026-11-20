@@ -8,8 +8,8 @@ import pytest
 
 from bot.discord_queue import DiscordQueueProcessor
 from bot.tests.discord_fakes import competition_thread
-from core.discord_tasks import SyncMemberRoles
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import SyncMemberRoles
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
@@ -65,7 +65,7 @@ async def test_an_open_ticket_whose_thread_was_deleted_gets_a_new_one(threaded_t
     chat.create_thread = AsyncMock(return_value=new_thread)
     bot, guild = _bot_after_recreate(chat)
     comment = await threaded_ticket.comments.acreate(comment_text="still there?")
-    task = await DiscordTask.objects.acreate(**_task_for(kind, threaded_ticket, comment.id))
+    task = await QueuedTask.objects.acreate(**_task_for(kind, threaded_ticket, comment.id))
 
     with patch("bot.discord_queue.competition_guild", return_value=guild):
         await DiscordQueueProcessor(bot)._process_task(task)
@@ -90,7 +90,7 @@ async def test_a_closed_ticket_whose_thread_was_deleted_forgets_it(threaded_tick
     chat.create_thread = AsyncMock()
     bot, _guild = _bot_after_recreate(chat)
     comment = await threaded_ticket.comments.acreate(comment_text="still there?")
-    task = await DiscordTask.objects.acreate(**_task_for(kind, threaded_ticket, comment.id))
+    task = await QueuedTask.objects.acreate(**_task_for(kind, threaded_ticket, comment.id))
 
     await DiscordQueueProcessor(bot)._process_task(task)
 
@@ -106,7 +106,7 @@ async def test_an_unreachable_thread_is_still_retried(threaded_ticket: Ticket) -
     bot.unified_dashboard = MagicMock()
     bot.get_channel.return_value = None
     bot.fetch_channel = AsyncMock(side_effect=discord.HTTPException(MagicMock(status=503), "Service Unavailable"))
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_ticket_update",
         ticket=threaded_ticket,
         payload={"ticket_id": threaded_ticket.id, "action": "claimed", "actor": "v"},
@@ -127,7 +127,7 @@ async def test_adding_a_user_finds_the_thread_from_the_ticket(threaded_ticket: T
     bot = MagicMock(spec=discord.Client)
     bot.get_channel.side_effect = lambda cid: thread if cid == 2399 else None
     bot.get_user.return_value = user
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="add_user_to_thread",
         ticket=threaded_ticket,
         payload={"ticket_id": threaded_ticket.id, "discord_id": 5, "thread_id": 1},
@@ -155,7 +155,7 @@ async def test_a_thread_id_that_isnt_a_competition_thread_fails_at_once(threaded
     else:
         bot.get_channel.return_value = None
         bot.fetch_channel = AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "Missing Access"))
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_ticket_update",
         ticket=threaded_ticket,
         payload={"ticket_id": threaded_ticket.id, "action": "claimed", "actor": "v"},
@@ -216,5 +216,5 @@ async def test_a_linked_member_joining_the_server_gets_their_roles_and_threads_q
 
     await cog.on_member_join(member)
 
-    tasks = [t async for t in DiscordTask.objects.filter(task_type="sync_member_roles")]
+    tasks = [t async for t in QueuedTask.objects.filter(task_type="sync_member_roles")]
     assert [t.payload["discord_id"] for t in tasks] == [2324] * queued

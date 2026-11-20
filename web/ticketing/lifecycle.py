@@ -15,8 +15,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.auth_utils import has_permission
-from core.discord_tasks import AddUserToThread, PostTicketUpdate
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import AddUserToThread, PostTicketUpdate
 from team.models import DiscordLink
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 from ticketing.utils import _make_async, get_user_for_ticket
@@ -109,7 +109,7 @@ def _record(
 ) -> None:
     """Write the history entry and queue the thread update (posted as `announce_as` if given)."""
     TicketHistory.objects.create(ticket=ticket, action=action, actor=actor, details=details)
-    DiscordTask.enqueue(
+    QueuedTask.enqueue(
         PostTicketUpdate(
             ticket_id=ticket.id,
             action=announce_as or action,
@@ -130,7 +130,7 @@ def _invite(ticket: Ticket, assignee: User, discord_id: int | None) -> None:
         link = DiscordLink.objects.filter(user=assignee, is_active=True).first()
         discord_id = link.discord_id if link else None
     if discord_id:
-        DiscordTask.enqueue(
+        QueuedTask.enqueue(
             AddUserToThread(ticket_id=ticket.id, discord_id=discord_id, thread_id=ticket.discord_thread_id)
         )
 

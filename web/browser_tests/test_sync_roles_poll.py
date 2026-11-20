@@ -12,7 +12,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
 def test_a_missing_task_stops_the_poll_and_says_so(live_server, pw_browser):
-    from core.models import DiscordTask
+    from core.models import QueuedTask
 
     context = create_session_context(pw_browser, live_server, role_user("admin"))
     page = context.new_page()
@@ -24,7 +24,7 @@ def test_a_missing_task_stops_the_poll_and_says_so(live_server, pw_browser):
         page.get_by_role("button", name="Preview Changes (Dry Run)").click()
         page.wait_for_timeout(1500)  # the task is queued and polled (no bot runs here, so it stays pending)
         assert polls
-        DiscordTask.objects.filter(task_type="sync_roles").delete()
+        QueuedTask.objects.filter(task_type="sync_roles").delete()
         page.get_by_text("Not found").wait_for()
         seen = len(polls)
         page.wait_for_timeout(2500)

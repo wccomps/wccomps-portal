@@ -7,16 +7,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from hypothesis import given
 from hypothesis import strategies as st
 
 from bot.tests.discord_fakes import competition_thread
-from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, TaskProgress, fit, split_message
+from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, fit
+from core.task_queue import TaskProgress
+from core.utils import split_message
 
 
 @given(st.text(alphabet=st.characters(codec="utf-8") | st.just("\n"), max_size=7000))
 def test_split_message_keeps_the_text_in_discord_sized_parts(text: str) -> None:
-    parts = split_message(text)
+    parts = split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)
 
     assert parts
     assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in parts)
@@ -27,7 +30,7 @@ def test_split_message_keeps_the_text_in_discord_sized_parts(text: str) -> None:
 def test_split_message_breaks_at_line_ends() -> None:
     text = "\n".join(f"line {n:04d} " + "x" * 90 for n in range(40))
 
-    parts = split_message(text)
+    parts = split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)
 
     assert len(parts) == 3
     assert all(part.startswith("line ") for part in parts)
@@ -40,11 +43,12 @@ def test_fit_marks_cut_text() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
+async def test_a_long_web_comment_is_sent_in_two_parts_pointing_to_the_rest() -> None:
+    """Two messages at most, beating the heartbeat after each: one comment can't hold up the queue."""
     from django.contrib.auth.models import User
 
     from bot.discord_queue import DiscordQueueProcessor
-    from core.discord_tasks import PostComment
+    from core.models import QueuedTask
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory, TicketComment
 
@@ -56,22 +60,27 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     author = await User.objects.acreate(username="volunteer")
     text = "\n".join("y" * 99 for _ in range(45))
     comment = await TicketComment.objects.acreate(ticket=ticket, author=author, comment_text=text)
+    task = await QueuedTask.objects.acreate(
+        task_type="post_comment", ticket=ticket, payload={"comment_id": comment.id}, status="processing"
+    )
 
     thread = competition_thread()
     thread.send = AsyncMock(side_effect=lambda content, **_kwargs: SimpleNamespace(id=1000 + len(content)))
     bot = MagicMock(spec=discord.Client)
     bot.get_channel.return_value = thread
 
-    with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
-        await DiscordQueueProcessor(bot)._handle_post_comment(
-            PostComment(ticket_id=ticket.id, comment_id=comment.id), TaskProgress()
-        )
+    with (
+        patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)),
+        patch("bot.utils.beat") as beat,
+    ):
+        await DiscordQueueProcessor(bot)._handle_post_comment(task.typed_payload(), TaskProgress.of(task))
 
     sent = [call.args[0] for call in thread.send.call_args_list]
-    assert len(sent) == 3
+    assert len(sent) == 2
+    assert beat.call_count == 2
     assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in sent)
     assert sent[0].startswith("**volunteer**\n")
-    assert "".join(sent).count("y") == text.count("y")
+    assert sent[-1].endswith(f"The rest is on the portal: {settings.BASE_URL.rstrip('/')}/tickets/T003-001/")
 
 
 @pytest.mark.asyncio

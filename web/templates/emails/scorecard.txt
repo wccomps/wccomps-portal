@@ -21,4 +21,4 @@ Rank: {{ rank }} of {{ total_teams }}
 {% endif %}Thank you for participating!
 
 ---
-WCComps Competition{% endautoescape %}
+{{ ORG_SHORT_NAME }} Competition{% endautoescape %}

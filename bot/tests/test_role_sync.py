@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from bot import role_sync
-from bot.cogs import authentik_groups
+from bot.cogs import role_sync as role_sync_cog
 from core.models import UserGroups
 from team.models import DiscordLink, Team
 
@@ -263,34 +264,46 @@ async def test_syncing_one_member_after_unlinking_takes_every_synced_role(teams)
     assert _ids(member.remove_roles) == {OPS, TEAM_A, BLUETEAM}
 
 
-async def test_refresh_loop_syncs_roles_after_refreshing_groups() -> None:
-    calls: list[str] = []
-    cog = authentik_groups.AuthentikGroupsCog.__new__(authentik_groups.AuthentikGroupsCog)
+def _cog() -> role_sync_cog.RoleSyncCog:
+    cog = role_sync_cog.RoleSyncCog.__new__(role_sync_cog.RoleSyncCog)
     cog.bot = MagicMock()
+    cog.synced_groups_hash, cog.synced_at = None, float("-inf")
+    return cog
 
-    async def refresh() -> bool:
-        calls.append("refresh")
-        return True
 
-    async def sync(bot: Any) -> None:
-        calls.append("sync")
+async def test_the_loop_syncs_when_the_stored_groups_change(teams, monkeypatch) -> None:
+    """The worker refreshes the stored groups; the chat process's loop syncs roles soon after they change, and on
+    every pass FULL_SYNC_MINUTES after the last sync."""
+    link = await _link(1, ["WCComps_Ops"], team=teams[0])
+    cog = _cog()
+    sync = AsyncMock()
+    clock = [1000.0]
+    monkeypatch.setattr(role_sync_cog, "competition_guild", lambda bot: bot.guild)
+    monkeypatch.setattr(role_sync_cog, "sync_roles", sync)
+    monkeypatch.setattr(role_sync_cog.time, "monotonic", lambda: clock[0])
 
-    with (
-        patch.object(authentik_groups, "refresh_groups_now", refresh),
-        patch.object(authentik_groups, "sync_roles_now", sync),
-    ):
-        await authentik_groups.AuthentikGroupsCog.refresh_task.coro(cog)
+    async def passes() -> int:
+        await role_sync_cog.RoleSyncCog.sync_task.coro(cog)
+        return sync.await_count
 
-    assert calls == ["refresh", "sync"]
+    assert await passes() == 1  # the first pass
+    assert await passes() == 1
+    await UserGroups.objects.filter(user_id=link.user_id).aupdate(groups_updated_at=timezone.now())
+    assert await passes() == 1  # read again, unchanged
+    await UserGroups.objects.filter(user_id=link.user_id).aupdate(groups=[teams[0].authentik_group])
+    assert await passes() == 2
+    clock[0] += role_sync_cog.FULL_SYNC_MINUTES * 60
+    assert await passes() == 3
+    sync.assert_awaited_with(cog.bot.guild)
 
 
 async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
     with (
-        caplog.at_level(logging.WARNING, logger="bot.cogs.authentik_groups"),
-        patch.object(authentik_groups, "competition_guild", return_value=MagicMock()),
-        patch.object(authentik_groups, "sync_roles", AsyncMock(side_effect=RuntimeError("discord down"))),
+        caplog.at_level(logging.WARNING, logger="bot.cogs.role_sync"),
+        patch.object(role_sync_cog, "competition_guild", return_value=MagicMock()),
+        patch.object(role_sync_cog, "sync_roles", AsyncMock(side_effect=RuntimeError("discord down"))),
     ):
-        await authentik_groups.sync_roles_now(MagicMock())
+        await role_sync_cog.RoleSyncCog.sync_task.coro(_cog())
 
     assert "Role sync failed: discord down" in caplog.text
 
@@ -342,16 +355,16 @@ async def test_a_member_whose_account_has_no_stored_groups_loses_their_roles(tea
 
 async def test_a_long_sync_beats_the_calling_loop_per_member_it_changes(teams, monkeypatch) -> None:
     """A role sync queued as a task can outlast the queue's budget; each member updated is progress."""
-    from bot import heartbeat
+    from core import heartbeat
 
     beats: list[str] = []
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
     members = [_member(member_id, OPS) for member_id in range(10, 15)]
-    heartbeat.beat_for("queue", MagicMock())
+    heartbeat.beat_for("queue-discord")
 
     await _sync(_guild(_member(20), *members))
 
-    assert beats == ["queue"] * 5
+    assert beats == ["queue-discord"] * 5
 
 
 async def test_a_team_whose_old_channels_await_removal_grants_no_team_role(teams) -> None:

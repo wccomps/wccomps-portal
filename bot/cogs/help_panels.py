@@ -15,11 +15,13 @@ from bot.utils import (
     DISCORD_SELECT_OPTION_LIMIT,
     fit,
     fit_lines,
-    run_blocking,
 )
+from core.utils import run_blocking
 from ticketing.models import TicketCategory
 
 logger = logging.getLogger(__name__)
+
+TICKET_FAILED = "Failed to create the ticket. Try again, or ask in your team channel if it keeps failing."
 
 
 async def create_ticket(
@@ -53,9 +55,10 @@ async def create_ticket(
             ip_address=ip_address,
             service_name=service_name,
         )
-    except Exception as e:
-        logger.error(f"Failed to create ticket: {e}", exc_info=True)
-        await interaction.followup.send(f"Failed to create ticket: {e!s}", ephemeral=True)
+    except Exception:
+        # The exception's text can name tables, columns or hosts: it goes to the log, never to the team
+        logger.exception("Failed to create ticket")
+        await interaction.followup.send(TICKET_FAILED, ephemeral=True)
         return
     if isinstance(filed, str):
         await interaction.followup.send(filed, ephemeral=True)
@@ -284,7 +287,7 @@ class HelpPanelsCog(commands.Cog):
         embed = discord.Embed(
             title="Link Your Discord Account",
             description=(
-                "**Welcome to WCComps!**\n\n"
+                f"**Welcome to {settings.ORG_SHORT_NAME}!**\n\n"
                 "Before you can participate, you need to link your Discord account to your Authentik account.\n\n"
                 "**Click the button below to get started:**"
             ),

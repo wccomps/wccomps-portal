@@ -4,13 +4,19 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from io import BytesIO, StringIO
-from typing import Protocol
+from typing import Protocol, TypedDict
 
+from django.conf import settings
+from django.db.models import BinaryField, CharField, F, Func, Value
+from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.text import slugify
+from django_stubs_ext import WithAnnotations
 
 from core.csv_export import csv_writer
-from ticketing.models import Ticket
+from ticketing.chat_comments import comment_origin
+from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
 from .calculator import Standing, compute_standings
 from .models import (
@@ -26,6 +32,8 @@ def _csv_cell(value: object) -> object:
         return ""
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
     return value
 
 
@@ -122,6 +130,44 @@ def _fetch_tickets() -> list[Ticket]:
         Ticket.objects.select_related("team", "category", "assigned_to", "resolved_by", "approved_by").order_by(
             "-created_at"
         )
+    )
+
+
+def _fetch_ticket_comments() -> list[TicketComment]:
+    return list(TicketComment.objects.select_related("ticket__team", "author").order_by("ticket__ticket_number", "pk"))
+
+
+def _comment_source(comment: TicketComment) -> str:
+    """Where the comment was written: the chat backend's name, or "web" for the portal's ticket page."""
+    origin = comment_origin(comment)
+    return origin.value if origin else "web"
+
+
+def _fetch_ticket_history() -> list[TicketHistory]:
+    return list(TicketHistory.objects.select_related("ticket__team", "actor").order_by("ticket__ticket_number", "pk"))
+
+
+class AttachmentDigest(TypedDict):
+    size: int
+    sha256: str
+
+
+type DigestedAttachment = WithAnnotations[TicketAttachment, AttachmentDigest]
+
+
+def _fetch_ticket_attachments() -> list[DigestedAttachment]:
+    """Each attachment's record without the file (teams may store 200MB each; the manager never reads it), with the
+    file's size and SHA-256 worked out in Postgres, so a copy found elsewhere can be matched to it."""
+    sha256 = Func(
+        Func(F("file_data"), function="SHA256", output_field=BinaryField()),
+        Value("hex"),
+        function="ENCODE",
+        output_field=CharField(),
+    )
+    return list(
+        TicketAttachment.objects.select_related("ticket__team")
+        .order_by("ticket__ticket_number", "pk")
+        .annotate(size=Length("file_data"), sha256=sha256)
     )
 
 
@@ -252,6 +298,46 @@ DATASETS: dict[str, ExportableDataset] = {
         ],
         _fetch_tickets,
     ),
+    "ticket_comments": Dataset[TicketComment](
+        "ticket_comments",
+        [
+            Column("Ticket Number", "ticket_number", lambda c: c.ticket.ticket_number),
+            Column("Team Number", "team_number", lambda c: c.ticket.team.team_number),
+            Column("Author", "author", lambda c: c.author_name),
+            Column("Source", "source", _comment_source),
+            Column("Discord Message ID", "discord_message_id", lambda c: c.discord_message_id),
+            Column("Zulip Message ID", "zulip_message_id", lambda c: c.zulip_message_id),
+            Column("Comment", "comment_text", lambda c: c.comment_text),
+            Column("Posted At", "posted_at", lambda c: c.posted_at.isoformat()),
+        ],
+        _fetch_ticket_comments,
+    ),
+    "ticket_history": Dataset[TicketHistory](
+        "ticket_history",
+        [
+            Column("Ticket Number", "ticket_number", lambda h: h.ticket.ticket_number),
+            Column("Team Number", "team_number", lambda h: h.ticket.team.team_number),
+            Column("Action", "action", lambda h: h.action),
+            Column("Actor", "actor", lambda h: h.actor.username if h.actor else None),
+            Column("Details", "details", lambda h: h.details),
+            Column("Timestamp", "timestamp", lambda h: h.timestamp.isoformat()),
+        ],
+        _fetch_ticket_history,
+    ),
+    "ticket_attachments": Dataset[DigestedAttachment](
+        "ticket_attachments",
+        [
+            Column("Ticket Number", "ticket_number", lambda a: a.ticket.ticket_number),
+            Column("Team Number", "team_number", lambda a: a.ticket.team.team_number),
+            Column("Filename", "filename", lambda a: a.filename),
+            Column("Type", "mime_type", lambda a: a.mime_type),
+            Column("Size", "size", lambda a: a.size),
+            Column("SHA-256", "sha256", lambda a: a.sha256),
+            Column("Uploaded By", "uploaded_by", lambda a: a.uploaded_by),
+            Column("Uploaded At", "uploaded_at", lambda a: a.uploaded_at.isoformat()),
+        ],
+        _fetch_ticket_attachments,
+    ),
 }
 
 
@@ -281,6 +367,7 @@ def export_all_zip_bytes() -> bytes:
 
 def export_all_zip() -> HttpResponse:
     timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    prefix = slugify(settings.ORG_SHORT_NAME)
     response = HttpResponse(export_all_zip_bytes(), content_type="application/zip")
-    response["Content-Disposition"] = f'attachment; filename="wccomps_export_{timestamp}.zip"'
+    response["Content-Disposition"] = f'attachment; filename="{prefix}_export_{timestamp}.zip"'
     return response

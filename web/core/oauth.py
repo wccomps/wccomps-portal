@@ -7,6 +7,7 @@ import math
 import secrets
 import time
 from datetime import datetime
+from typing import TypeGuard
 from urllib.parse import urlencode
 
 import httpx
@@ -19,9 +20,12 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from .auth_utils import get_role_based_landing_url, lock_account
+from .authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from .models import CredentialsReset, UserGroups
+from .team_accounts import TeamGroups, team_folder, team_folder_account, team_groups
 from .utils import database_clock
 
 logger = logging.getLogger(__name__)
@@ -32,11 +36,7 @@ STATE_EXPIRY_SECONDS = 300
 def _get_oauth_config() -> dict[str, str]:
     client_id = getattr(settings, "AUTHENTIK_CLIENT_ID", None)
     client_secret = getattr(settings, "AUTHENTIK_SECRET", None)
-    server_url = getattr(
-        settings,
-        "AUTHENTIK_OIDC_URL",
-        "https://auth.wccomps.org/application/o/discord-bot/",
-    )
+    server_url: str = settings.AUTHENTIK_OIDC_URL
 
     # Authentik uses shared endpoints (not per-application)
     # The application slug is only in the issuer and end-session URLs
@@ -55,8 +55,10 @@ def _get_oauth_config() -> dict[str, str]:
 def oauth_login(request: HttpRequest) -> HttpResponse:
     config = _get_oauth_config()
 
-    if not config["client_id"]:
-        logger.error("AUTHENTIK_CLIENT_ID not configured")
+    required = (("AUTHENTIK_CLIENT_ID", config["client_id"]), ("AUTHENTIK_OIDC_URL", settings.AUTHENTIK_OIDC_URL))
+    missing = [name for name, value in required if not value]
+    if missing:
+        logger.error(f"{', '.join(missing)} not configured")
         return render(
             request,
             "core/oauth_error.html",
@@ -161,6 +163,11 @@ def _before_reset(signed_in_at: float, reset_at: datetime) -> bool:
     return signed_in_at < reset_at.timestamp() - RESET_CLOCK_MARGIN
 
 
+def _usable_username(text: object) -> TypeGuard[str]:
+    """Whether text can be a portal username: non-empty text without a NUL that fits the column."""
+    return isinstance(text, str) and bool(text) and "\x00" not in text and _fits(text, User, "username")
+
+
 def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
     """The sub, username (the email when there is none), email and group names the account is made from;
     ValueError when they can't make one: missing, not text, a NUL, or longer than their columns."""
@@ -170,15 +177,32 @@ def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
     groups = userinfo.get("groups", [])
     if not isinstance(sub, str) or not sub or not _fits(sub, UserGroups, "authentik_id"):
         raise ValueError("no usable sub claim")
-    if not isinstance(username, str) or not username or not _fits(username, User, "username"):
+    if not _usable_username(username):
         raise ValueError("no usable username")
     if not isinstance(email, str) or not _fits(email, User, "email"):
         raise ValueError("an unusable email")
     if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups):
         raise ValueError("groups that aren't a list of names")
-    if "\x00" in sub + username + email + "".join(groups):
+    if "\x00" in sub + email + "".join(groups):
         raise ValueError("a NUL character")
     return sub, username, email, groups
+
+
+def _team_folder_account(
+    authentik_id: str, username: str, groups: list[str], teams: TeamGroups
+) -> tuple[str, list[str]]:
+    """In team folder mode, the account's own username (found by uid == sub) and the groups it holds
+    (TeamGroups.held); for anyone not in the folder, the claimed username and the claimed groups other than team
+    groups. AuthentikAPIError when Authentik can't be asked."""
+    with AuthentikManager() as manager:
+        account = team_folder_account(manager, authentik_id)
+    if account is None:
+        return username, teams.held(None, groups)
+    own = account["username"]
+    if not _usable_username(own):
+        logger.warning(f"Team folder account {username} has an unusable Authentik username, so it signs in as claimed")
+        own = username
+    return own, teams.held(account, groups)
 
 
 def oauth_callback(request: HttpRequest) -> HttpResponse:
@@ -304,6 +328,23 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
             {"error_title": "Authentication Failed", "error_message": "Invalid user data."},
         )
 
+    if team_folder():
+        teams = team_groups()
+        try:
+            username, groups = _team_folder_account(authentik_id, username, groups, teams)
+        except AuthentikAPIError as e:
+            # A team account can't be told apart without the folder, whatever its claim; only a claim naming a staff
+            # role's or the admin group signs in, with no team group
+            if set(groups).isdisjoint(settings.PORTAL_ROLE_GROUPS.values()):
+                logger.warning(f"Sign-in of {username} refused: the team folder lookup failed: {reason_for(e)}")
+                return render(
+                    request,
+                    "core/oauth_error.html",
+                    {"error_title": "Sign-in Unavailable", "error_message": "Try again in a moment."},
+                    status=503,
+                )
+            logger.warning(f"Team folder lookup failed ({reason_for(e)}); {username} claims a staff role, signs in")
+            groups = teams.held(None, groups)
     next_url = _next_url(request, state_data)
     # Accounts are keyed by the Authentik sub only: usernames get reused, and matching on
     # them would hand a new identity someone else's account
@@ -356,8 +397,10 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
     return redirect(next_url)
 
 
+@require_POST
 def oauth_logout(request: HttpRequest) -> HttpResponse:
-    """Log out user and redirect to Authentik end session."""
+    """Log out user and redirect to Authentik end session. A POST with the CSRF token, so another site's link or
+    form can't sign anyone out."""
     config = _get_oauth_config()
 
     logout(request)

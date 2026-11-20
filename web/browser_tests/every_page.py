@@ -53,6 +53,7 @@ UNRENDERED: dict[str, str] = {
     "ops_ticket_list_redirect": "The old ops address of the ticket list: a permanent redirect to it",
     "orange_team:assignment_screenshot": FILE,
     "orange_team:export_scores": "A CSV download",
+    "registration_event_archive": ZIP + "the event's data, taken at Close Out",
     "school_info_export": "A CSV download",
     "scoring:export_all": ZIP + "every export",
     "scoring:export_final_scores": CSV,
@@ -93,8 +94,8 @@ def pages(world: World) -> Iterator[tuple[ViewCase, str, str]]:
     for module in VIEW_MODULES:
         for case in module.CASES:
             for name in (case.name, *case.also):
-                # A sign-out GET ends the world's sessions; a JSON endpoint and a POST-only view are no page
-                if "logout" in name or "GET" not in case.methods or is_json_endpoint(CALLBACKS[name]):
+                # A JSON endpoint and a POST-only view (sign-out among them) are no page
+                if "GET" not in case.methods or is_json_endpoint(CALLBACKS[name]):
                     continue
                 if not _shown(name):
                     continue

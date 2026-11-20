@@ -10,7 +10,7 @@ from django.db import connection
 from django.test import Client, override_settings
 from django.urls import reverse
 
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from core.proxmox import (
     ProxmoxAPIError,
     ProxmoxClient,
@@ -296,6 +296,29 @@ class TestTicketBoxResetViews:
         assert resp.status_code == 200
         assert "Proxmox isn't reachable." in resp.content.decode()
 
+    @override_settings(PROXMOX_API_URL="", PROXMOX_API_TOKEN="")
+    def test_box_reset_without_proxmox_says_it_isnt_configured(
+        self,
+        client: Client,
+        box_ticket: Ticket,
+        ticketing_support_user,
+    ) -> None:
+        """A region without Proxmox sees why, not an outage, and no request is attempted."""
+        client.force_login(ticketing_support_user)
+        panel_url = reverse("ticket_box_reset_panel", kwargs={"ticket_number": box_ticket.ticket_number})
+        run_url = reverse("ticket_box_reset", kwargs={"ticket_number": box_ticket.ticket_number})
+        with patch("core.proxmox.httpx.Client") as http_client:
+            html = client.get(panel_url).content.decode()
+            resp = client.post(run_url, {"snapshot": "clean"})
+            lines = [
+                json.loads(line) for line in b"".join(resp.streaming_content).decode().splitlines() if line.strip()
+            ]
+        assert "Proxmox isn't configured." in html
+        assert "isn't reachable" not in html
+        assert lines[-1]["success"] is False
+        assert lines[-1]["message"] == "Proxmox isn't configured."
+        http_client.assert_not_called()
+
     def test_box_reset_endpoints_deny_students(
         self,
         client: Client,
@@ -440,7 +463,7 @@ class TestTicketBoxResetViews:
         assert len(comments) == 2
         assert comments[0].comment_text == "Starting box reset of team01-web to snapshot 'clean'."
         assert comments[1].comment_text == "Box reset of team01-web to snapshot 'clean' complete; VM is started."
-        assert DiscordTask.objects.filter(ticket=box_ticket, task_type="post_comment").count() == 2
+        assert QueuedTask.objects.filter(ticket=box_ticket, task_type="post_comment").count() == 2
 
         history = TicketHistory.objects.filter(ticket=box_ticket, action="box_reset").first()
         assert history is not None

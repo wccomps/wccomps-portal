@@ -131,6 +131,7 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:nav-links": CHROME + "the section links",
     "admin/base_site.html:nav-utils": CHROME + "the dark mode, sound and log out tools",
     "admin/base_site.html:nav-user": CHROME + "the signed-in name",
+    "admin/base_site.html:nav-logout": CHROME + "the log out form, its button drawn as a nav link",
     "admin/base_site.html:current": CHROME + "the current section's link",
     "admin/base_site.html:notif-count": CHROME + "open tickets on the Tickets link",
     "admin/base_site.html:dark-mode-toggle": CHROME + "the dark mode button",

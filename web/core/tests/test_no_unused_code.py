@@ -21,7 +21,7 @@ from django.conf import global_settings
 from django.db import models
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from core import discord_tasks
+from core import queued_tasks
 from core.tests import guards
 
 REPO_DIR = guards.REPO_DIR
@@ -215,10 +215,10 @@ VULTURE_CONFIDENCE = 60
 DJANGO_MODEL_OPTION = "Django reads this model Meta option by name"
 DJANGO_ADMIN_OPTION = "Django admin reads this ModelAdmin or inline option by name"
 DJANGO_FORM_OPTION = "Django reads this form option by name"
-
 # fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
     "web/portal/urls.py:handler*": "Django reads the root URLconf's error handlers by name",
+    "web/quotient/archive_scoring_host.py:mtime": "tarfile writes a member's TarInfo.mtime into the tarball",
     # discord.py registers these through their decorators or calls them by name
     "@*.command": "discord.py registers a slash command through its decorator",
     "@discord.ui.button": "discord.py calls a button callback when the button is pressed",
@@ -232,7 +232,7 @@ CODE_EXCEPTIONS = {
     "*:field_template_name": "Django's form renderer reads it for field.as_field_group",
     "*:option_template_name": "Django's choice widgets read it for each option",
     "*:use_required_attribute": "Django calls a widget's use_required_attribute as it renders the field",
-    "main.py:message_content": "discord.py reads the intent when the bot connects",
+    "bot/client.py:message_content": "discord.py reads the intent when the bot connects",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "@*.register_lookup": "Django registers a field lookup through its decorator",
@@ -240,7 +240,6 @@ CODE_EXCEPTIONS = {
     "*:lookup_name": "Django reads a lookup's lookup_name to match field__name in a filter",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
-    "bot/utils.py:aclose": "contextlib.aclosing calls it",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",
@@ -267,6 +266,7 @@ CODE_EXCEPTIONS = {
     "*:inlines": DJANGO_ADMIN_OPTION,
     "*:extra": DJANGO_ADMIN_OPTION,
     "*:formset": DJANGO_ADMIN_OPTION,
+    "*:formfield_overrides": DJANGO_ADMIN_OPTION,
     "*:help_texts": DJANGO_FORM_OPTION,
     "*:empty_label": DJANGO_FORM_OPTION,
     "*/urls*.py:urlpatterns": "Django reads urlpatterns from each URLconf",
@@ -450,7 +450,7 @@ def test_every_setting_is_read() -> None:
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# 6. Discord task payloads
+# 6. Task payloads
 # ---------------------------------------------------------------------------------------------------------------
 
 # payload class -> why it stays although nothing enqueues it
@@ -465,8 +465,8 @@ def test_every_task_payload_is_enqueued() -> None:
     """
     called = {call_name(n) for tree in python_trees().values() for n in ast.walk(tree) if isinstance(n, ast.Call)}
     unused = [
-        Unused(cls.__name__, "web/core/discord_tasks.py")
-        for cls in discord_tasks.PAYLOAD_TYPES.values()
+        Unused(cls.__name__, "web/core/queued_tasks.py")
+        for cls in queued_tasks.PAYLOAD_TYPES.values()
         if cls.__name__ not in called
     ]
-    fail_with("Discord task payloads nothing enqueues", unused, PAYLOAD_EXCEPTIONS)
+    fail_with("Task payloads nothing enqueues", unused, PAYLOAD_EXCEPTIONS)

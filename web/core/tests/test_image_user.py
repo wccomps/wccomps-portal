@@ -16,9 +16,10 @@ def test_the_image_runs_as_a_numeric_non_root_user() -> None:
     assert int(uid) != 0
 
 
-def test_the_image_user_owns_the_bot_heartbeat_directory() -> None:
-    """The bot writes its heartbeats there; a non-root user can't create it under the root-owned /app."""
-    from bot.heartbeat import DEFAULT_DIR
+def test_the_image_user_owns_the_heartbeat_directory() -> None:
+    """The worker and chat processes write their heartbeats there; a non-root user can't create it under the
+    root-owned /app."""
+    from core.heartbeat import DEFAULT_DIR
 
     owned = re.findall(r"\bchown\s+\S+\s+(\S+)", (REPO_DIR / "Dockerfile").read_text(encoding="utf-8"))
     assert any(PurePosixPath(DEFAULT_DIR).is_relative_to(directory) for directory in owned), owned

@@ -21,7 +21,7 @@ SIGNED_IN = {"sub": "sub-06", "preferred_username": "team06", "groups": ["WCComp
 
 
 def _refresh_reading(answer: list[dict[str, object]], during_the_fetch) -> None:
-    def fetch() -> list[dict[str, object]]:
+    def fetch(*, with_path: bool = False) -> list[dict[str, object]]:
         during_the_fetch()
         return answer
 

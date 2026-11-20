@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
+from django.core.exceptions import ValidationError
 from quotient.client import Inject
 
 from scoring.models import ScoringTemplate, ServiceDetail
@@ -60,8 +61,8 @@ def service_max_from_details() -> Decimal | None:
 def set_template_max(field: TemplateMaxField, value: Decimal | None) -> None:
     """Set one raw-max field on the ScoringTemplate when a value was derived.
 
-    No-op when the value is missing (never clobbers a good max with a stale one) or when
-    no template exists yet (the config page owns creating it).
+    No-op when the value is missing (never clobbers a good max with a stale one), when it doesn't fit the column
+    (a Quotient title or score far out of range), or when no template exists yet (the config page owns creating it).
     """
     if value is None:
         return
@@ -69,5 +70,10 @@ def set_template_max(field: TemplateMaxField, value: Decimal | None) -> None:
     if template is None:
         return
     setattr(template, field, value)
+    try:
+        template.clean_fields(exclude=[f.name for f in ScoringTemplate._meta.fields if f.name != field])
+    except ValidationError as e:
+        logger.warning("%s of %s not stored: %s", field, value, "; ".join(e.messages))
+        return
     template.updated_by = None  # a derived write, not a human edit — keep the audit trail honest
     template.save(update_fields=[field, "updated_by", "updated_at"])

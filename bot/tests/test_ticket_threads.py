@@ -9,18 +9,18 @@ import discord
 import pytest
 
 from bot.tests.discord_fakes import bot_with, recording_thread, ticket_message
-from core.models import DiscordTask
+from core.models import QueuedTask
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
 
-async def run_twice(processor: Any, task: DiscordTask) -> None:
+async def run_twice(processor: Any, task: QueuedTask) -> None:
     await processor._process_task(task)
     await task.arefresh_from_db()
     assert task.status == "pending"
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
+    await QueuedTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
     await processor._process_task(task)
     await task.arefresh_from_db()
     assert task.status == "completed"
@@ -63,7 +63,7 @@ async def test_a_web_ticket_whose_thread_failed_is_retried(ticket: Ticket) -> No
     chat.create_thread = AsyncMock(
         side_effect=[discord.HTTPException(MagicMock(status=500), "Internal Server Error"), thread]
     )
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="ticket_created_web", ticket=ticket, payload={"ticket_id": ticket.id}
     )
 
@@ -82,7 +82,7 @@ async def test_a_web_ticket_whose_message_failed_gets_it_in_the_same_thread(tick
     guild, chat = chat_guild(ticket)
     thread = recording_thread(2497, failing_sends={1})
     chat.create_thread = AsyncMock(return_value=thread)
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="ticket_created_web", ticket=ticket, payload={"ticket_id": ticket.id}
     )
 
@@ -103,11 +103,11 @@ async def test_a_comment_during_the_web_tickets_backoff_leaves_one_ticket_messag
     chat.create_thread = AsyncMock(
         side_effect=[discord.HTTPException(MagicMock(status=500), "Internal Server Error"), thread]
     )
-    created = await DiscordTask.objects.acreate(
+    created = await QueuedTask.objects.acreate(
         task_type="ticket_created_web", ticket=ticket, payload={"ticket_id": ticket.id}
     )
     comment = await ticket.comments.acreate(comment_text="any news?")
-    commented = await DiscordTask.objects.acreate(
+    commented = await QueuedTask.objects.acreate(
         task_type="post_comment", ticket=ticket, payload={"ticket_id": ticket.id, "comment_id": comment.id}
     )
     processor = DiscordQueueProcessor(bot_with(thread))
@@ -115,7 +115,7 @@ async def test_a_comment_during_the_web_tickets_backoff_leaves_one_ticket_messag
     with patch("bot.discord_queue.competition_guild", return_value=guild):
         await processor._process_task(created)
         await processor._process_task(commented)
-        await DiscordTask.objects.filter(pk=created.pk).aupdate(next_retry_at=None)
+        await QueuedTask.objects.filter(pk=created.pk).aupdate(next_retry_at=None)
         await processor._process_task(created)
 
     await created.arefresh_from_db()
@@ -133,7 +133,7 @@ async def test_a_recovered_thread_whose_ticket_message_failed_gets_it_on_retry(t
     thread = recording_thread(2493, failing_sends={1})
     chat.create_thread = AsyncMock(return_value=thread)
     comment = await ticket.comments.acreate(comment_text="any news?")
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_comment", ticket=ticket, payload={"ticket_id": ticket.id, "comment_id": comment.id}
     )
 
@@ -152,7 +152,7 @@ async def test_a_ticket_resolved_before_its_thread_task_runs_gets_no_thread(tick
     await Ticket.objects.filter(pk=ticket.pk).aupdate(status="resolved")
     guild, chat = chat_guild(ticket)
     chat.create_thread = AsyncMock()
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="ticket_created_web", ticket=ticket, payload={"ticket_id": ticket.id}
     )
 
@@ -248,7 +248,7 @@ async def test_a_web_ticket_whose_stored_thread_is_gone_gets_a_new_one(ticket: T
     member = await _team_member(ticket, guild)
     thread = recording_thread(2496)
     chat.create_thread = AsyncMock(return_value=thread)
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="ticket_created_web", ticket=ticket, payload={"ticket_id": ticket.id}
     )
 

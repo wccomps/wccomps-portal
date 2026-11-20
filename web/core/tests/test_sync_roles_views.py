@@ -4,7 +4,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from core.models import DiscordTask
+from core.models import QueuedTask
 
 pytestmark = pytest.mark.django_db
 
@@ -23,12 +23,12 @@ def test_action_honors_dry_run_and_defaults_to_preview(admin_client, posted, exp
     response = admin_client.post(reverse("admin_sync_roles_action"), posted)
 
     assert response.status_code == 200
-    task = DiscordTask.objects.get(pk=response.json()["task_id"])
+    task = QueuedTask.objects.get(pk=response.json()["task_id"])
     assert task.payload["dry_run"] is expected_dry_run
 
 
 def test_status_returns_summary_and_changes(admin_client):
-    task = DiscordTask.objects.create(
+    task = QueuedTask.objects.create(
         task_type="sync_roles",
         status="completed",
         payload={"requested_by": "admin", "dry_run": True},
@@ -54,4 +54,4 @@ def test_blue_team_cannot_trigger_sync(blue_team_user):
     response = client.post(reverse("admin_sync_roles_action"), {"dry_run": "false"})
 
     assert response.status_code == 403
-    assert not DiscordTask.objects.filter(task_type="sync_roles").exists()
+    assert not QueuedTask.objects.filter(task_type="sync_roles").exists()

@@ -248,9 +248,9 @@ class TicketHistoryAdmin(PortalModelAdmin[TicketHistory]):
 
 @admin.register(CommentRateLimit)
 class CommentRateLimitAdmin(PortalModelAdmin[CommentRateLimit]):
-    list_display = ["ticket", "discord_id", "posted_at"]
+    list_display = ["ticket", "actor_key", "posted_at"]
     list_filter = ["posted_at"]
-    search_fields = ["ticket__ticket_number", "discord_id"]
+    search_fields = ["ticket__ticket_number", "actor_key"]
     ordering = ["-posted_at"]
     readonly_fields = ["posted_at"]
 

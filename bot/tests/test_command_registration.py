@@ -66,7 +66,7 @@ def extract_commands_from_cog(cog_name: str) -> dict[str, Any]:
 
 @asynccontextmanager
 async def bot_with_all_cogs() -> AsyncIterator[commands.Bot]:
-    """A bot with every cog loaded as an extension, as main.py loads them.
+    """A bot with every cog loaded as an extension, as bot.client.PortalBot loads them.
 
     Entered like production's login, so the cogs' loops wait for a ready that never comes instead of
     running; closing unloads the cogs, which cancels them. Unloading also deletes each cog's module from

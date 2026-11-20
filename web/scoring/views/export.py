@@ -64,6 +64,7 @@ def _send_scorecard_email(
     recipients: list[str], context: dict[str, object], team_number: int, pdf_bytes: bytes
 ) -> bool:
     """Send a scorecard email using Django's email backend."""
+    context = {**context, "ORG_SHORT_NAME": settings.ORG_SHORT_NAME}
     try:
         subject = render_to_string("emails/scorecard_subject.txt", context).strip()
         text_content = render_to_string("emails/scorecard.txt", context)
@@ -115,6 +116,7 @@ def _deny_external_urls(url: str, *_args: object, **_kwargs: object) -> dict[str
 
 def render_scorecard_pdf(context: dict[str, object], request: HttpRequest | None = None) -> bytes:
     """Render a scorecard context to PDF bytes with external URL fetching disabled."""
+    context = {**context, "ORG_SHORT_NAME": settings.ORG_SHORT_NAME}
     html_string = render_to_string("scoring/scorecard_print.html", context, request=request)
     pdf_bytes: bytes = weasyprint.HTML(string=html_string, url_fetcher=_deny_external_urls).write_pdf()
     return pdf_bytes

@@ -1,10 +1,9 @@
-"""Shared competition actions for commands and timer."""
+"""The Discord side of competition actions: the status message, team channel teardown and broadcasts."""
 
 import logging
 from collections.abc import Awaitable, Callable
-from contextlib import aclosing
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TypedDict
 
 import discord
 from asgiref.sync import sync_to_async
@@ -14,36 +13,25 @@ from registration.services import teardown_problem
 from registration.stage import event_stage
 
 from bot.discord_manager import delete_team_infrastructure, setup_team_infrastructure
-from bot.heartbeat import beat
 from bot.utils import (
-    BlockingSteps,
-    ProgressState,
-    TaskProgress,
-    announcement,
+    add_fields,
     log_to_ops_channel,
-    run_blocking,
+    room_judge_role_name,
     send_announcement,
     send_parts,
     team_chat_channel,
 )
-from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
-from core.discord_tasks import PermanentTaskError
+from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams, target_teams
+from core.chat_notices import CompetitionStatus, status_card
+from core.heartbeat import beat
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.nextcloud import NextcloudManager, nextcloud_configured
-from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult
-from core.services.competition import run_competition as competition_steps
-from core.utils import shorten
-from team.models import MAX_TEAMS, Team
+from core.queued_tasks import PermanentTaskError
+from core.services.competition import START_MESSAGE_SENDER
+from core.task_queue import StepsState, TaskProgress
+from core.utils import announcement, shorten
+from team.models import Team
 
 logger = logging.getLogger(__name__)
-
-
-async def run_competition(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
-    """Start (enable=True) or stop the competition, a step at a time on a pool thread of its own, beating after each."""
-    async with aclosing(BlockingSteps(competition_steps(enable, actor, timer))) as steps:
-        async for _step in steps:
-            beat()
-        return steps.result
 
 
 async def update_status_channel(bot: discord.Client) -> bool:
@@ -84,94 +72,46 @@ async def update_status_channel(bot: discord.Client) -> bool:
         return False
 
 
+STATUS_COLORS = {
+    CompetitionStatus.RUNNING: discord.Color.green(),
+    CompetitionStatus.SCHEDULED: discord.Color.blue(),
+    CompetitionStatus.STOPPED: discord.Color.red(),
+}
+
+
 def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
-    if config.applications_enabled:
-        status = "RUNNING"
-        color = discord.Color.green()
-    elif config.schedule_will_start():
-        status = "SCHEDULED"
-        color = discord.Color.blue()
-    else:
-        status = "STOPPED"
-        color = discord.Color.red()
-
+    card = status_card(config)
     embed = discord.Embed(
-        title="Competition Status",
-        description=f"**{status}**",
-        color=color,
+        title=card.title, description=f"**{card.headline}**", color=STATUS_COLORS[CompetitionStatus(card.headline)]
     )
-
-    if config.competition_start_time:
-        embed.add_field(
-            name="Scheduled Start",
-            value=f"<t:{int(config.competition_start_time.timestamp())}:F>",
-            inline=True,
-        )
-
-    if config.competition_end_time:
-        embed.add_field(
-            name="Scheduled End",
-            value=f"<t:{int(config.competition_end_time.timestamp())}:F>",
-            inline=True,
-        )
-
-    if config.controlled_applications:
-        apps_str = ", ".join(config.controlled_applications)
-        embed.add_field(
-            name="Controlled Applications",
-            value=apps_str,
-            inline=False,
-        )
-
-    account_status = "Enabled" if config.applications_enabled else "Disabled"
-    embed.add_field(
-        name="Team Accounts",
-        value=f"{account_status} ({MAX_TEAMS} teams)",
-        inline=True,
-    )
-
+    add_fields(embed, card.fields, time_style="F")
     embed.set_footer(text="Last updated")
     embed.timestamp = discord.utils.utcnow()
-
     return embed
 
 
 @dataclass
 class Teardown:
-    """What tearing the team channels, roles and Nextcloud accounts down did, kept up to date as it goes; stopped says
-    why it stopped early, or ''."""
+    """What tearing the team channels and roles down did, kept up to date as it goes; stopped says why it stopped
+    early, or ''."""
 
     member_roles_removed: int = 0
     categories: int = 0
     team_roles: int = 0
     judges: int = 0
-    nextcloud_users: int = 0
     left: list[int] = field(default_factory=list)
     stopped: str = ""
 
     @property
     def changed(self) -> bool:
-        return bool(
-            self.member_roles_removed or self.categories or self.team_roles or self.judges or self.nextcloud_users
-        )
-
-
-def _delete_nextcloud_team_user(team_number: int) -> bool:
-    with NextcloudManager() as manager:
-        return manager.delete_team_user(team_number)
-
-
-def _provision_nextcloud_teams(team_numbers: list[int]) -> None:
-    with NextcloudManager() as manager:
-        for number in team_numbers:
-            manager.provision_team_user(number)
+        return bool(self.member_roles_removed or self.categories or self.team_roles or self.judges)
 
 
 async def _tear_down_teams(
     guild: discord.Guild, problem: Callable[[], str], beat: Callable[[], None], done: Teardown
 ) -> None:
-    """Delete every team's category, channels, role and Nextcloud account, then take the Room Judge role away;
-    problem, asked before each team, stops it early. Counts go into done as they happen."""
+    """Delete every team's category, channels and role, then take the Room Judge role away; problem, asked before
+    each team, stops it early. Counts go into done as they happen."""
     from bot.role_sync import sync_roles
 
     # While the role IDs are recorded, so the sync still counts team roles as its own
@@ -185,14 +125,12 @@ async def _tear_down_teams(
         done.team_roles += removed.count("role")
         if team.channels_need_clearing:
             done.left.append(team.team_number)
-        if nextcloud_configured() and await run_blocking(_delete_nextcloud_team_user, team.team_number):
-            done.nextcloud_users += 1
         beat()
     done.judges = await _remove_room_judges(guild)
 
 
 async def _remove_room_judges(guild: discord.Guild) -> int:
-    room_judge_role = discord.utils.get(guild.roles, name="WCComps Room Judge")
+    room_judge_role = discord.utils.get(guild.roles, name=room_judge_role_name())
     if room_judge_role is None:
         return 0
     judges = 0
@@ -208,9 +146,9 @@ async def _remove_room_judges(guild: discord.Guild) -> int:
 async def reconcile_teams(
     bot: discord.Client, guild: discord.Guild, actor: str, open_event_id: int | None, beat: Callable[[], None] = beat
 ) -> None:
-    """Tear the team channels, roles and Nextcloud accounts down unless teardown_problem refuses, then set the linked
-    teams up again and pre-provision the open event's active Nextcloud accounts, even after a teardown that failed; a
-    failure raises once both have run."""
+    """Tear the team channels and roles down unless teardown_problem refuses, then set the linked teams up again, even
+    after a teardown that failed; a failure raises once both have run. ReconcileNextcloud, queued beside it, does the
+    Nextcloud accounts."""
 
     def problem() -> str:
         return teardown_problem(event_stage(), open_event_id)
@@ -234,16 +172,6 @@ async def reconcile_teams(
             await setup_team_infrastructure(guild, team, bot=bot)
             beat()
         await sync_roles(guild)
-        if open_event_id is not None and not skipped and not done.stopped and nextcloud_configured():
-            active_numbers = [
-                n
-                async for n in Team.objects.filter(is_active=True)
-                .order_by("team_number")
-                .values_list("team_number", flat=True)
-            ]
-            if active_numbers:
-                await run_blocking(_provision_nextcloud_teams, active_numbers)
-                beat()
     except Exception as e:
         failure = failure or e
     quiet = event is not None and failure is None and not (done.changed or done.stopped or done.left)
@@ -257,7 +185,6 @@ async def reconcile_teams(
                 "event": open_event_id,
                 "deleted_categories": done.categories,
                 "deleted_team_roles": done.team_roles,
-                "deleted_nextcloud_users": done.nextcloud_users,
                 "member_roles_removed": done.member_roles_removed,
                 "room_judges_removed": done.judges,
                 "stopped": done.stopped,
@@ -279,8 +206,6 @@ async def _report_teardown(bot: discord.Client, event: Event | None, done: Teard
         f"• Deleted {done.categories} team categories and {done.team_roles} team roles",
         f"• Removed {done.member_roles_removed} roles from members who are no longer linked",
     ]
-    if done.nextcloud_users:
-        lines.append(f"• Deleted {done.nextcloud_users} Nextcloud team accounts")
     if done.judges:
         lines.append(f"• Removed the Room Judge role from {done.judges} members")
     if done.left:
@@ -292,7 +217,6 @@ async def _report_teardown(bot: discord.Client, event: Event | None, done: Teard
     if done.stopped:
         lines.append(f"Stopped before the end: {done.stopped}")
     await log_to_ops_channel(bot, "\n".join(lines))
-    await update_status_channel(bot)
 
 
 @dataclass
@@ -321,25 +245,28 @@ class _BroadcastStoppedError(Exception):
     pass
 
 
+class BroadcastState(TypedDict, total=False):
+    """A broadcast's progress: recipients reached, refused for good (with why), the counts, and the parts sent to each
+    recipient it failed on partway."""
+
+    reached: list[int]
+    refused: dict[str, str]
+    sent: int
+    queued: int
+    parts: dict[str, int]
+
+
 type Delivery = Literal["sent", "queued"]
 # (the recipient's key: 0, or a team's number; its label; its delivery, given its sent parts' progress)
-type Recipient = tuple[int, str, Callable[[TaskProgress], Awaitable[Delivery]]]
+type Recipient = tuple[int, str, Callable[[TaskProgress[StepsState]], Awaitable[Delivery]]]
 
 
 async def deliver_broadcast(
-    guild: discord.Guild,
-    target: BroadcastTarget,
-    message: str,
-    sender: str,
-    progress: TaskProgress | None = None,
-    *,
-    wanted: Callable[[], Awaitable[bool]] | None = None,
-    queue_copy: Callable[[Team, str, str], Awaitable[bool]] | None = None,
+    guild: discord.Guild, target: BroadcastTarget, message: str, sender: str, progress: TaskProgress[BroadcastState]
 ) -> BroadcastResult:
-    """Send a broadcast to each recipient, listing those it fails for; progress lets a retry try only the rest.
-    wanted, asked before each team, stops it: the teams not reached are listed as failed. queue_copy, when given,
-    queues a team's copy and returns False instead when the broadcast was stopped."""
-    progress = progress or TaskProgress()
+    """Send a broadcast to each recipient, listing those it fails for; progress lets a retry try only the rest. Once
+    its task no longer runs (asked before each team, and when queueing a team's copy) it stops: the teams not reached
+    are listed as failed."""
     state = progress.state
     reached, refused, parts = (
         state.setdefault("reached", []),
@@ -347,26 +274,21 @@ async def deliver_broadcast(
         state.setdefault("parts", {}),
     )
 
-    def parts_sent(key: str) -> TaskProgress:
-        async def save(part: ProgressState) -> None:
+    def parts_sent(key: str) -> TaskProgress[StepsState]:
+        async def save(part: StepsState) -> None:
             parts[key] = part.get("done", 0)
             await progress.saved()
 
-        return TaskProgress(ProgressState(done=parts.get(key, 0)), save)
+        return TaskProgress(progress.task_id, save, StepsState(done=parts.get(key, 0)))
 
     result = BroadcastResult()
-    recipients = await _recipients(guild, target, message, sender, result, queue_copy)
+    recipients = await _recipients(guild, target, message, sender, result, progress)
     for index, (key, label, deliver) in enumerate(recipients):
         if key in reached or str(key) in refused:
             continue
-        if key != 0 and wanted is not None and not await wanted():
-            result.failed += [
-                f"{rest_label} (not sent: the broadcast was stopped)"
-                for rest_key, rest_label, _ in recipients[index:]
-                if rest_key not in reached and str(rest_key) not in refused
-            ]
-            break
         try:
+            if key != 0 and not await progress.still_running():
+                raise _BroadcastStoppedError
             delivery = await deliver(parts_sent(str(key)))
         except _BroadcastStoppedError:
             result.failed += [
@@ -402,9 +324,9 @@ async def _recipients(
     message: str,
     sender: str,
     result: BroadcastResult,
-    queue_copy: Callable[[Team, str, str], Awaitable[bool]] | None = None,
+    progress: TaskProgress[BroadcastState],
 ) -> list[Recipient]:
-    async def to_announcements(parts: TaskProgress) -> Delivery:
+    async def to_announcements(parts: TaskProgress[StepsState]) -> Delivery:
         channel = guild.get_channel(settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             raise PermanentTaskError(
@@ -413,17 +335,17 @@ async def _recipients(
         await send_announcement(guild, channel, message, progress=parts)
         return "sent"
 
-    def to_team(team: Team) -> Callable[[TaskProgress], Awaitable[Delivery]]:
-        async def deliver(parts: TaskProgress) -> Delivery:
+    def to_team(team: Team) -> Callable[[TaskProgress[StepsState]], Awaitable[Delivery]]:
+        async def deliver(parts: TaskProgress[StepsState]) -> Delivery:
             chat_channel = team_chat_channel(guild, team)
             if chat_channel:
                 await send_parts(chat_channel, announcement(sender, message), progress=parts)
                 return "sent"
-            if queue_copy is not None:
-                if not await queue_copy(team, message, sender):
-                    raise _BroadcastStoppedError
-            else:
-                await QueuedAnnouncement.objects.acreate(team=team, message=message, sender_name=sender)
+            # Under the task's row lock, so a reset failing the task waits, and its on_commit delete catches the copy
+            if not await progress.while_running(
+                lambda: QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
+            ):
+                raise _BroadcastStoppedError
             return "queued"
 
         return deliver
@@ -431,11 +353,7 @@ async def _recipients(
     match target:
         case Announcements():
             return [(0, "Announcements", to_announcements)]
-        case AllTeams():
-            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-        case Teams(numbers):
-            by_number = {t.team_number: t async for t in Team.objects.filter(team_number__in=numbers)}
-            result.missing = [f"Team {n:02d}" for n in numbers if n not in by_number]
-            teams = [by_number[n] for n in numbers if n in by_number]
-    teams.sort(key=lambda team: team.team_number)
-    return [(team.team_number, f"Team {team.team_number:02d}", to_team(team)) for team in teams]
+        case AllTeams() | Teams():
+            teams, missing = await target_teams(target)
+            result.missing = [f"Team {n:02d}" for n in missing]
+            return [(team.team_number, f"Team {team.team_number:02d}", to_team(team)) for team in teams]

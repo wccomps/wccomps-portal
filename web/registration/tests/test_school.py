@@ -98,9 +98,9 @@ def test_event_detail_shows_an_imported_assignment_for_an_enrolled_school(gold_t
 
     response = client.get(reverse("registration_event_detail", args=[event.pk]))
 
-    [item] = response.context["enrollment_data"]
-    assert item["assignment"] == imported
-    assert item["can_assign"] is False
+    [item] = response.context["rows"]
+    assert item.assignment == imported
+    assert item.can_assign is False
     assert b"Team 04" in response.content
 
 
@@ -119,20 +119,31 @@ def test_assign_teams_skips_a_school_that_already_has_a_team(gold_team_user, eve
     assert EventTeamAssignment.objects.filter(event=event).count() == 1
 
 
-def test_assign_teams_gives_one_team_to_registrations_of_the_same_school(gold_team_user, event):
+def test_assign_teams_assigns_none_of_two_approved_registrations_of_the_same_school(gold_team_user, event):
+    """Not first-wins: the earlier one could be a student's registration of a rival school, with the student's email."""
     Team.objects.create(team_number=4, team_name="Team 04")
     Team.objects.create(team_number=5, team_name="Team 05")
-    _enrolled(event, "Example University")
-    _enrolled(event, "example  university")
+    Team.objects.create(team_number=6, team_name="Team 06")
+    impostor = _enrolled(event, "Example University", ("captain", "student@example.com"))
+    real = _enrolled(event, "example  university", ("captain", "captain@example.edu"))
+    _enrolled(event, "Other College", ("captain", "other@example.edu"))
     client = Client()
     client.force_login(gold_team_user)
 
     response = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
 
-    assert EventTeamAssignment.objects.filter(event=event).count() == 1
+    assert list(EventTeamAssignment.objects.values_list("school__name", flat=True)) == ["Other College"]
+    assert list(SchoolInfo.objects.values_list("contact_email", flat=True)) == ["other@example.edu"]
     content = response.content.decode()
     assert "Assigned 1 team" in content
-    assert "already has a team" in content
+    assert "Not assigned: Example University: more than one approved registration names that school." in content
+
+    # Staff reject the impostor (approved, so rejectable only as one of two), then assign again
+    client.post(reverse("registration_reject", args=[impostor.pk]), {"reason": "Not the school"})
+    client.post(reverse("registration_assign_teams", args=[event.pk]))
+
+    assert EventTeamAssignment.objects.get(school__name_key="example university").registration == real
+    assert SchoolInfo.objects.get(school__name_key="example university").contact_email == "captain@example.edu"
 
 
 def test_assign_teams_adds_each_school_to_the_school_list_with_its_captain(gold_team_user, event):
@@ -408,6 +419,26 @@ def test_event_detail_offers_no_unassign_for_an_earlier_event(gold_team_user, ev
     content = _client(gold_team_user).get(reverse("registration_event_detail", args=[past.pk])).content.decode()
 
     assert "Team 04" in content
+    assert not UNASSIGN.search(content)
+
+
+def test_event_detail_lists_the_schools_an_imported_event_had(gold_team_user, event):
+    """A past event with imported assignments and no enrollments lists its teams from the assignments."""
+    past = Event.objects.create(season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3))
+    for number, name in [(7, "Other College"), (4, "Example University")]:
+        team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}")
+        EventTeamAssignment.objects.create(event=past, team=team, school=School.for_name(name))
+
+    response = _client(gold_team_user).get(reverse("registration_event_detail", args=[past.pk]))
+
+    assert [(row.assignment.school.name, row.registration) for row in response.context["rows"]] == [
+        ("Example University", None),
+        ("Other College", None),
+    ]
+    content = response.content.decode()
+    assert "No registration" in content
+    assert "Team 04" in content
+    assert "Team 07" in content
     assert not UNASSIGN.search(content)
 
 

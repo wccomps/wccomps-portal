@@ -1,34 +1,55 @@
-"""Stored Authentik groups are refreshed by the bot, not only at web login (security review, Medium)."""
+"""The worker refreshes the stored Authentik groups between logins."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from bot.cogs import authentik_groups
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.services.user_groups import GroupRefreshAbortedError
-
-
-async def _run_with(result=None, error=None):
-    with patch.object(authentik_groups, "refresh_user_groups_unless_running", side_effect=error, return_value=result):
-        await authentik_groups.refresh_groups_now()
+from worker import jobs
+from worker.tests.loops import one_pass
 
 
 @pytest.mark.asyncio
 async def test_the_refresh_runs_off_the_shared_orm_thread():
-    """Waiting on the refresh lock must not hold the thread every other ORM call in the bot waits on."""
+    """Waiting on the refresh lock must not hold the thread every other ORM call in the process waits on."""
     off_thread = AsyncMock(return_value=MagicMock(changed=0))
-    with patch.dict(authentik_groups.refresh_groups_now.__globals__, {"run_blocking": off_thread}):
-        await authentik_groups.refresh_groups_now()
+    with patch.dict(jobs.group_refresh_pass.__globals__, {"run_blocking": off_thread}):
+        await jobs.group_refresh_pass()
 
-    off_thread.assert_awaited_once_with(authentik_groups._refresh)
+    off_thread.assert_awaited_once_with(jobs.refresh_groups)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [GroupRefreshAbortedError("no users"), AuthentikAPIError("down"), RuntimeError("x")])
-async def test_failures_are_logged_not_raised(error):
-    await _run_with(error=error)
+async def test_failures_are_logged_not_raised_and_still_beat(error, tmp_path, monkeypatch):
+    """Authentik being down is no reason to restart the worker: the loop is alive and tries again."""
+    monkeypatch.setenv("BOT_HEARTBEAT_DIR", str(tmp_path))
+    with (
+        patch.object(jobs, "AuthentikManager"),
+        patch.object(jobs, "refresh_user_groups_unless_running", side_effect=error),
+    ):
+        await one_pass(jobs.group_refresh_loop, monkeypatch)
+    assert (tmp_path / "groups").exists()
+
+
+@pytest.mark.asyncio
+async def test_the_loop_refreshes_at_once_then_every_five_minutes(monkeypatch):
+    sleeps: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        raise TimeoutError
+
+    monkeypatch.setattr(jobs, "group_refresh_pass", AsyncMock())
+    monkeypatch.setattr(jobs.asyncio, "sleep", sleep)
+
+    with pytest.raises(TimeoutError):
+        await jobs.group_refresh_loop()
+
+    jobs.group_refresh_pass.assert_awaited_once()
+    assert 299 < sleeps[0] <= jobs.REFRESH_MINUTES * 60
 
 
 def _manager(handler):

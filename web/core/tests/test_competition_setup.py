@@ -230,7 +230,7 @@ def test_a_readiness_check_says_when_authentik_cant_be_asked():
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
     _authentik_down()
     try:
-        with patch.object(readiness, "ALL_CHECKS", [("Team accounts exist", readiness._check_team_accounts_exist)]):
+        with patch.object(readiness, "checks", lambda: [("Team accounts exist", readiness._check_team_accounts_exist)]):
             line = json.loads(next(readiness.stream_readiness_checks()))
     finally:
         patch.stopall()

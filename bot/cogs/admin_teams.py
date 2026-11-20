@@ -23,14 +23,14 @@ from bot.utils import (
     find_team,
     fit_lines,
     log_to_ops_channel,
-    run_blocking,
     send_lines,
 )
 from core.authentik_utils import Changed, Refused, parse_team_range, reset_team
 from core.models import AuditLog, CompetitionConfig
 from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
-from core.utils import shorten
-from team.models import DiscordLink, Team
+from core.team_accounts import SEVERAL_ACCOUNTS
+from core.utils import run_blocking, shorten
+from team.models import MAX_TEAMS, DiscordLink, Team
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class AdminTeamsCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @teams_group.command(name="info", description="[ADMIN] Get detailed info about a specific team")
-    @app_commands.describe(team_number="Team number (1-50)")
+    @app_commands.describe(team_number=f"Team number (1-{MAX_TEAMS})")
     @app_commands.check(permission_check("admin"))
     async def admin_team_info(self, interaction: discord.Interaction, team_number: int) -> None:
         """Get detailed information about a team."""
@@ -146,7 +146,7 @@ class AdminTeamsCog(commands.Cog):
 
             except Exception as e:
                 logger.exception(f"Error unlinking user {user_id}: {e}")
-                results.append(f"User ID {user_id}: failed ({shorten(str(e), 50)})")
+                results.append(f"User ID {user_id}: failed (see the bot's log)")
                 error_count += 1
 
         if len(user_ids) == 1:
@@ -174,7 +174,7 @@ class AdminTeamsCog(commands.Cog):
         name="remove",
         description="[ADMIN] Remove team infrastructure and unlink all members",
     )
-    @app_commands.describe(team_number="Team number (1-50)")
+    @app_commands.describe(team_number=f"Team number (1-{MAX_TEAMS})")
     @app_commands.check(permission_check("admin"))
     async def admin_remove_team(self, interaction: discord.Interaction, team_number: int) -> None:
         """Remove a team's Discord infrastructure and unlink all members."""
@@ -231,7 +231,7 @@ class AdminTeamsCog(commands.Cog):
         ),
     )
     @app_commands.describe(
-        team_number="Team number (1-50)",
+        team_number=f"Team number (1-{MAX_TEAMS})",
         recreate_channels="Whether to recreate Discord channels and role (default: True)",
     )
     @app_commands.check(permission_check("admin"))
@@ -255,6 +255,9 @@ class AdminTeamsCog(commands.Cog):
         credentials, recreation_queued = await run_blocking(
             reset_team, team_number, actor=str(interaction.user), recreate_channels=recreate_channels
         )
+        if credentials == Refused(SEVERAL_ACCOUNTS):
+            await interaction.followup.send(f"Error: {SEVERAL_ACCOUNTS}", ephemeral=True)
+            return
         if not recreate_channels:
             channels = "the channels were kept"
         elif recreation_queued:

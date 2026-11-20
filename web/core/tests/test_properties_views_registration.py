@@ -67,6 +67,7 @@ CASES = [
     ),
     ViewCase("registration_event_create", GOLD, post=lambda w: form_fields(EventForm())),
     ViewCase("registration_event_detail", GOLD),
+    ViewCase("registration_event_archive", GOLD, methods=("GET",), params={"event_id": "archived_event_id"}),
     ViewCase("registration_event_edit", GOLD, post=lambda w: form_fields(EventForm()), idempotent=(Event,)),
     ViewCase("registration_event_delete", GOLD),
     ViewCase("registration_assign_teams", GOLD),

@@ -1,6 +1,7 @@
-# One image for both processes: they share the Django models and must run the same version.
+# One image for every process: they share the Django models and must run the same version.
 #   web (default): entrypoint.sh applies migrations under a lock, then gunicorn (web/gunicorn.conf.py)
-#   bot: entrypoint cleared, run from /app: `python main.py`
+#   worker: entrypoint cleared, run from /app: `python -m worker`
+#   chat: entrypoint cleared, run from /app: `python -m chat` (the Discord and Zulip runners, whichever are configured)
 # The Python .python-version pins (local uv and CI read it too): a test that passes on one patch can fail on another.
 # uv sync below reads the file and, with downloads off, refuses an image whose Python differs; test_python_pin checks
 # this tag against it.
@@ -8,7 +9,7 @@
 # (test_python_pin). Python's tag changes only with .python-version; Dependabot refreshes just its digest.
 
 # uv only installs, so it's mounted for that step instead of shipped
-FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 FROM python:3.14.8-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a
 
@@ -32,8 +33,9 @@ RUN --mount=from=uv,source=/uv,target=/bin/uv \
 COPY web/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-COPY main.py ./main.py
 COPY bot/ ./bot/
+COPY chat/ ./chat/
+COPY worker/ ./worker/
 COPY web/ ./web/
 
 ENV PATH="/app/.venv/bin:$PATH"
@@ -51,7 +53,7 @@ WORKDIR /app/web
 RUN python manage.py collectstatic --noinput
 
 # Production's pod spec sets this uid too (runAsUser 1001). The app writes only to /tmp (uploads, gunicorn
-# heartbeats, fontconfig) and the bot's heartbeat directory under /app/run.
+# heartbeats, fontconfig) and the worker's and chat process's heartbeat directory under /app/run.
 RUN groupadd --system --gid 1001 app \
     && useradd --system --uid 1001 --gid 1001 --home-dir /tmp --no-create-home --shell /usr/sbin/nologin app \
     && mkdir -p /app/run \
@@ -59,5 +61,5 @@ RUN groupadd --system --gid 1001 app \
 USER 1001:1001
 
 ENTRYPOINT ["/entrypoint.sh"]
-# Bind address, workers (GUNICORN_WORKERS), threads (GUNICORN_THREADS), timeout and logging live in web/gunicorn.conf.py
+# Bind address, workers (GUNICORN_WORKERS), timeout and logging live in web/gunicorn.conf.py
 CMD ["gunicorn", "portal.wsgi:application"]

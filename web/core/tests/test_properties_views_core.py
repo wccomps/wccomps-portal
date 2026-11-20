@@ -90,7 +90,7 @@ CASES = [
         EVERYONE,
         query=lambda w: {name: hostile_text() for name in ("error", "error_description", "state", "code")},
     ),
-    ViewCase("oauth_logout", EVERYONE),
+    ViewCase("oauth_logout", EVERYONE, methods=("POST",)),
     ViewCase(
         "link_initiate",
         EVERYONE,

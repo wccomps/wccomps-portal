@@ -1,7 +1,7 @@
 from typing import Protocol
 
 from django.contrib import admin
-from django.db.models import Count, QuerySet
+from django.db.models import Count, JSONField, QuerySet
 from django.http import HttpRequest
 from django.utils.html import format_html
 
@@ -309,6 +309,8 @@ class ScoringTemplateAdmin(PortalModelAdmin[ScoringTemplate]):
 class QuotientMetadataCacheAdmin(PortalModelAdmin[QuotientMetadataCache]):
     list_display = ["last_synced", "synced_by"]
     readonly_fields = ["last_synced"]
+    # blank=True lets the sync store empty lists; the admin still refuses a cleared field, which would be NULL
+    formfield_overrides = {JSONField: {"required": True}}
 
 
 @admin.register(RedTeamIPPool)

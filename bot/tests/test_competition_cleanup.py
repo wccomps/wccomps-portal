@@ -13,8 +13,8 @@ from scoring.models import QuotientMetadataCache
 
 from bot.competition_actions import reconcile_teams
 from bot.discord_queue import DiscordQueueProcessor
-from bot.utils import run_blocking
-from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
+from core.utils import run_blocking
 from team.models import DiscordLink, Team
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
@@ -114,11 +114,10 @@ async def test_the_full_cleanup_resets_then_queues_the_discord_teardown(competit
         return {"roles_added": 0, "roles_removed": 4, "errors": 0, "changes": []}
 
     reset = await _reset()
-    task = await DiscordTask.objects.aget(task_type="reconcile_teams")
+    task = await QueuedTask.objects.aget(task_type="reconcile_teams")
     assert task.payload == {"requested_by": "web:admin", "open_event_id": None}
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", side_effect=record_sync) as sync,
     ):
         await reconcile_teams(MagicMock(), guild, "web:admin", None, _no_beat)
@@ -157,7 +156,6 @@ async def test_tears_down_discord_by_name_when_db_ids_are_null(competition: Team
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), guild, "web:admin", None, _no_beat)
@@ -173,7 +171,6 @@ async def test_each_teardown_beats_once_per_team(competition: Team) -> None:
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), _guild("Team 03"), "web:admin", None, beat)
@@ -196,7 +193,7 @@ async def test_the_full_reset_refuses_writing_nothing(competition: Team, event_o
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.start_message, config.competition_start_time is not None) == ("Default VM login", True)
     assert await QuotientMetadataCache.objects.aexists()
-    assert not await DiscordTask.objects.aexists()
+    assert not await QueuedTask.objects.aexists()
 
 
 async def test_the_full_teardown_skips_while_the_competition_runs(competition: Team) -> None:
@@ -333,7 +330,7 @@ async def test_the_command_resets_and_says_what_it_did(competition: Team, mock_i
     assert reply.startswith("Deactivated 1 team member links")
     assert "teardown is queued" in reply
     assert "Deactivated 1 team member links" in ops.await_args.args[1]
-    assert await DiscordTask.objects.filter(task_type="reconcile_teams").aexists()
+    assert await QueuedTask.objects.filter(task_type="reconcile_teams").aexists()
 
 
 @pytest.mark.parametrize(
@@ -345,15 +342,14 @@ async def test_the_command_resets_and_says_what_it_did(competition: Team, mock_i
     ids=["no-event-open", "event-opened"],
 )
 async def test_each_queued_cleanup_runs_its_job(payload: dict[str, object], open_event_id: int | None) -> None:
-    from bot.heartbeat import beat
-    from bot.utils import TaskProgress
+    from core.heartbeat import beat
 
-    task = await DiscordTask.objects.acreate(task_type="reconcile_teams", payload=payload)
+    task = await QueuedTask.objects.acreate(task_type="reconcile_teams", payload=payload)
     processor = DiscordQueueProcessor(MagicMock())
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
     with patch("bot.competition_actions.reconcile_teams", new_callable=AsyncMock) as run:
-        await processor._dispatch(task.typed_payload(), TaskProgress())
+        await processor.dispatch(task.typed_payload(), task)
 
     run.assert_awaited_once_with(processor.bot, guild, "gold", open_event_id, beat)
 
@@ -375,14 +371,19 @@ async def test_the_migration_moves_rows_queued_before_it(
     """An old bot would read a new row as its full cleanup with a database reset, so the reconcile has a type of its
     own. A close-out's old row becomes one; an older full-cleanup row also asked for a reset, so it fails."""
     import importlib
+    from types import SimpleNamespace
 
     from asgiref.sync import sync_to_async
     from django.apps import apps
 
-    task = await DiscordTask.objects.acreate(task_type="cleanup_competition", payload=payload)
+    task = await QueuedTask.objects.acreate(task_type="cleanup_competition", payload=payload)
     migration = importlib.import_module("core.migrations.0023_discordtask_cleanup_jobs")
 
-    await sync_to_async(migration.move_queued_cleanups)(apps, None)
+    # The migration names the model as it was then; DiscordTask is QueuedTask since 0025
+    renamed = SimpleNamespace(
+        get_model=lambda app, name: apps.get_model(app, {"DiscordTask": "QueuedTask"}.get(name, name))
+    )
+    await sync_to_async(migration.move_queued_cleanups)(renamed, None)
 
     await task.arefresh_from_db()
     assert (task.task_type, task.status, task.payload) == expected
@@ -399,7 +400,6 @@ async def test_after_a_close_out_it_does_only_the_discord_side(competition: Team
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(4)),
     ):
         await reconcile_teams(MagicMock(), guild, "web:admin", None, _no_beat)
@@ -447,10 +447,11 @@ async def test_opening_an_event_tears_down_what_the_last_event_left(competition:
     judge_role.name = "WCComps Room Judge"
     judge_role.members = [judge]
     guild.roles.append(judge_role)
+    status_refreshes = QueuedTask.objects.filter(task_type="competition_status_changed")
+    refreshes_before = await status_refreshes.acount()
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock) as status,
         patch("bot.role_sync.sync_roles", _sync_removing(0)) as sync,
     ):
         await reconcile_teams(MagicMock(), guild, "gold", opened, _no_beat)
@@ -461,7 +462,8 @@ async def test_opening_an_event_tears_down_what_the_last_event_left(competition:
     assert [call.args[1].team_number for call in _setup_offline_mock().await_args_list] == [3]
     assert sync.await_args_list[-1].args == (guild,)
     judge.remove_roles.assert_awaited_once_with(judge_role, reason="Competition cleanup")
-    status.assert_awaited_once()
+    # The teardown changes nothing the status shows, so it queues no status refresh
+    assert await status_refreshes.acount() == refreshes_before
     assert await DiscordLink.objects.filter(discord_id=1, is_active=True).aexists()
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.start_message, config.competition_start_time is not None) == ("Default VM login", True)
@@ -535,7 +537,6 @@ async def test_the_opening_teardown_stops_when_the_competition_starts_midway(com
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
         patch("bot.competition_actions.delete_team_infrastructure", side_effect=delete_then_start),
     ):
@@ -588,7 +589,6 @@ async def test_a_failing_teardown_reports_the_teams_left_before_it_raises(compet
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
         patch("bot.competition_actions.delete_team_infrastructure", side_effect=left),
         pytest.raises(discord.HTTPException),
@@ -600,59 +600,45 @@ async def test_a_failing_teardown_reports_the_teams_left_before_it_raises(compet
     assert "Could not delete the role or category of teams 03" in summary
 
 
-async def test_opening_an_event_deletes_and_provisions_nextcloud_accounts(competition: Team, settings: Any) -> None:
+async def test_the_discord_teardown_leaves_nextcloud_to_the_worker(competition: Team, settings: Any) -> None:
+    """ReconcileNextcloud, queued beside it, deletes and provisions the Nextcloud accounts."""
     settings.NEXTCLOUD_URL = "https://files.test"
     settings.NEXTCLOUD_USERNAME = "admin"
     settings.NEXTCLOUD_PASSWORD = "secret"
     opened = await _open_event()
-    await Team.objects.acreate(team_number=4, team_name="Team 04", is_active=False)
-    nc = MagicMock()
-    nc.__enter__.return_value = nc
-    nc.delete_team_user.side_effect = [True, False]
 
     with (
-        patch("bot.competition_actions.NextcloudManager", return_value=nc),
+        patch("core.nextcloud.NextcloudManager") as nextcloud,
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), _guild("Team 03"), "gold", opened, _no_beat)
 
-    assert [c.args[0] for c in nc.delete_team_user.call_args_list] == [3, 4]
-    assert [c.args[0] for c in nc.provision_team_user.call_args_list] == [3]
+    nextcloud.assert_not_called()
     audit = await AuditLog.objects.aget(action="competition_cleanup")
-    assert audit.details["deleted_nextcloud_users"] == 1
-    summary = ops.await_args.args[1]
-    assert "Deleted 1 Nextcloud team accounts" in summary
+    assert "deleted_nextcloud_users" not in audit.details
+    assert "Nextcloud" not in ops.await_args.args[1]
 
 
-async def test_clear_team_channels_resets_nextcloud_for_handed_over_team(competition: Team, settings: Any) -> None:
-    from bot.utils import TaskProgress
-    from core.nextcloud import NextcloudAPIError
-
+async def test_clear_team_channels_clears_a_handed_over_team_without_nextcloud(
+    competition: Team, settings: Any
+) -> None:
+    """ResetNextcloudTeam, queued beside it, resets the team's Nextcloud account."""
     settings.NEXTCLOUD_URL = "https://files.test"
     settings.NEXTCLOUD_USERNAME = "admin"
     settings.NEXTCLOUD_PASSWORD = "secret"
     await Team.objects.filter(pk=competition.pk).aupdate(
         channels_need_clearing=True, discord_role_id=None, discord_category_id=None
     )
-    task = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 3})
+    task = await QueuedTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 3})
     processor = DiscordQueueProcessor(MagicMock())
     guild = _guild("Staff")
     guild.roles = []
     guild.get_role.side_effect = lambda role_id: None
     processor._guild = MagicMock(return_value=guild)
-    nc = MagicMock()
-    nc.__enter__.return_value = nc
-    nc.delete_team_user.side_effect = [NextcloudAPIError("HTTP 502"), True]
 
-    with patch("core.nextcloud.NextcloudManager", return_value=nc):
-        with pytest.raises(NextcloudAPIError):
-            await processor._dispatch(task.typed_payload(), TaskProgress())
-        # channels_need_clearing stays True so a retry runs the Nextcloud reset again
-        assert await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()
-        await processor._dispatch(task.typed_payload(), TaskProgress())
+    with patch("core.nextcloud.NextcloudManager") as nextcloud:
+        await processor.dispatch(task.typed_payload(), task)
 
-    assert nc.delete_team_user.call_count == 2
-    nc.provision_team_user.assert_called_once_with(3)
+    nextcloud.assert_not_called()
     assert not await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()

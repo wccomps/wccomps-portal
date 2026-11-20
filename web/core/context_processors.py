@@ -2,11 +2,13 @@
 
 from typing import cast
 
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest
 
 from .auth_utils import get_permissions_context
 from .permission_constants import PERMISSION_MAP
+from .task_backends import discord_enabled
 
 # Maps Django URL names to (nav_section, subnav_section) for navigation highlighting.
 # IMPORTANT: When adding new URL patterns, add an entry here or the nav item
@@ -165,6 +167,8 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
         ctx: dict[str, bool | str] = {f"is_{perm}": False for perm in PERMISSION_MAP}
         ctx.update(
             {
+                "SITE_NAME": settings.SITE_NAME,
+                "discord_enabled": discord_enabled(),
                 "authentik_username": "",
                 "nav_active": "",
                 "subnav_active": "",
@@ -177,6 +181,8 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
     nav_context = _get_nav_active(request)
     return {
         **perms,
+        "SITE_NAME": settings.SITE_NAME,
+        "discord_enabled": discord_enabled(),
         "authentik_username": user.username,
         "nav_active": nav_context["nav"],
         "subnav_active": nav_context["subnav"],

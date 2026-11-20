@@ -41,3 +41,11 @@ settings.register_profile("deep", max_examples=2000, deadline=None, suppress_hea
 settings.register_profile("ci-views", parent=settings.get_profile("ci"), max_examples=10)
 settings.register_profile("deep-views", parent=settings.get_profile("deep"), max_examples=500)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
+
+
+@pytest.fixture
+def zulip_configured(settings: Any) -> None:
+    """Zulip credentials set beside Discord's (test_settings sets the Discord token), so chat notices go to both."""
+    settings.ZULIP_SITE = "https://zulip.example.org"
+    settings.ZULIP_BOT_EMAIL = "portal-bot@zulip.example.org"
+    settings.ZULIP_API_KEY = "test-key"

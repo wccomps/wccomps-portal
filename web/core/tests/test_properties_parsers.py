@@ -37,7 +37,7 @@ from core.stored_files import (
     MAX_SCREENSHOTS,
     UploadError,
     clean_name,
-    detect_inline_type,
+    detect_type,
     read_screenshots,
     stored_type,
 )
@@ -55,7 +55,7 @@ from team.forms import SCHOOL_COLUMNS as SCHOOL_HEADERS
 from team.forms import parse_csv_file, validate_csv_data
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
-from ticketing.views.attachments import _save_attachment
+from ticketing.views.attachments import _read_attachment
 
 pytestmark = pytest.mark.django_db
 
@@ -326,7 +326,7 @@ def test_an_upload_is_stored_or_refused_and_typed_from_its_bytes(upload: SimpleU
         assert_storable(column(model, "filename"), row.filename)
         assert_storable(column(model, "mime_type"), row.mime_type)
         response = row.serve(inline=True)
-        if detect_inline_type(data) is None:
+        if not (detect_type(data) or "").startswith("image/"):
             assert response["Content-Disposition"].startswith("attachment")
             assert "sandbox" in response["Content-Security-Policy"]
 
@@ -363,7 +363,7 @@ def test_ticket_attachment_is_saved_or_refused_and_served_safely(
 ) -> None:
     with rolled_back():
         try:
-            _save_attachment(ticket, upload, "blueteam01")
+            assert _read_attachment(ticket, upload, "blueteam01").store() == ""
         except BadRequest as refused:
             assert str(refused)
             assert not TicketAttachment.objects.filter(ticket=ticket).exists()
@@ -504,7 +504,6 @@ def test_ticket_attachment_view_answers_any_file(
                 "image/jpeg",
                 "image/gif",
                 "image/webp",
-                "application/pdf",
             }:
                 assert download["Content-Disposition"].startswith("attachment")
 
@@ -533,7 +532,7 @@ PARSERS: dict[str, list[Callable[..., None]]] = {
     "web/orange_team/views.py:assignment_submit": [test_orange_assignment_submit_view_answers_any_screenshots],
     "web/scoring/views/incidents.py:submit_incident_report": [test_incident_report_view_answers_any_screenshots],
     "web/scoring/views/red_team.py:submit_red_score": [test_red_finding_view_answers_any_screenshots],
-    "web/ticketing/views/attachments.py:_save_attachment": [
+    "web/ticketing/views/attachments.py:_read_attachment": [
         test_ticket_attachment_is_saved_or_refused_and_served_safely
     ],
     "web/ticketing/views/attachments.py:ticket_attachment_upload": [test_ticket_attachment_view_answers_any_file],

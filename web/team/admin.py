@@ -14,11 +14,13 @@ from .models import (
     LinkToken,
     SchoolInfo,
     Team,
+    single_account,
 )
 
 
 def _password_reset_button(team: Team) -> str:
-    if team._state.adding:  # the add page has no team yet
+    # The add page has no team yet; with several accounts per team, their passwords are managed in Authentik
+    if team._state.adding or not single_account():
         return ""
     return render_to_string("admin/includes/team_password_reset.html", {"team_number": team.team_number})
 

@@ -3,6 +3,7 @@ from functools import wraps
 from typing import TYPE_CHECKING, cast
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
@@ -24,7 +25,7 @@ from .models import (
     AuditLog,
     BotState,
     CompetitionConfig,
-    DiscordTask,
+    QueuedTask,
     UserGroups,
 )
 
@@ -32,8 +33,8 @@ from .models import (
 class AuthentikAdminSite(admin.AdminSite):
     """Admin site that checks Authentik groups for access."""
 
-    site_header = "WCComps Portal Administration"
-    site_title = "WCComps Portal Admin"
+    site_header = f"{settings.SITE_NAME} Administration"
+    site_title = f"{settings.SITE_NAME} Admin"
     index_title = "Competition Management"
     site_url = "/ops/tickets/"
 
@@ -133,8 +134,8 @@ class AuditLogAdmin(PortalModelAdmin[AuditLog]):
         return False
 
 
-@admin.register(DiscordTask)
-class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
+@admin.register(QueuedTask)
+class QueuedTaskAdmin(PortalModelAdmin[QueuedTask]):
     list_display = ["task_type", "status", "retry_count", "created_at", "completed_at"]
     list_filter = ["status", "task_type"]
     search_fields = ["task_type", "error_message"]
@@ -144,7 +145,7 @@ class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
     actions = ["retry_failed_tasks"]
 
     @admin.action(description="Retry failed tasks")
-    def retry_failed_tasks(self, request: HttpRequest, queryset: QuerySet[DiscordTask]) -> None:
+    def retry_failed_tasks(self, request: HttpRequest, queryset: QuerySet[QueuedTask]) -> None:
         from django.utils import timezone
         from registration.services import START_MESSAGE_SCRUBBED
 

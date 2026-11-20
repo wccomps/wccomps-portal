@@ -6,14 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 
+from bot.client import PortalBot
 from core.models import BotState
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
 
 async def _run_setup_hook(sync: AsyncMock, settings: Any) -> None:
-    from main import PortalBot
-
     settings.COMPETITION_GUILD_ID = 1
     settings.VOLUNTEER_GUILD_ID = 0
 
@@ -42,8 +41,6 @@ async def test_successful_sync_is_recorded_and_skipped_next_time(db: Any, settin
 
 
 def _tree_with(description: str, *names: str) -> discord.app_commands.CommandTree:
-    from main import PortalBot
-
     async def callback(interaction: discord.Interaction) -> None:
         pass
 
@@ -85,8 +82,6 @@ async def _setup_with(bot: Any, commands: list[Any], sync: AsyncMock) -> None:
 
 async def test_the_recorded_hash_is_the_tree_the_cogs_registered(db: Any, settings: Any) -> None:
     """Recorded after the sync, which clears the global commands: the hash must be taken before it does."""
-    from main import PortalBot
-
     settings.COMPETITION_GUILD_ID = 1
     settings.VOLUNTEER_GUILD_ID = 0
     await _setup_with(PortalBot(), _tree_with("Ping").get_commands(), AsyncMock())
@@ -96,8 +91,6 @@ async def test_the_recorded_hash_is_the_tree_the_cogs_registered(db: Any, settin
 
 
 async def test_each_guild_gets_its_commands(db: Any, settings: Any) -> None:
-    from main import PortalBot
-
     settings.COMPETITION_GUILD_ID = 1
     settings.VOLUNTEER_GUILD_ID = 2
     bot = PortalBot()

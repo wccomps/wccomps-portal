@@ -1,7 +1,9 @@
 """Close Out Event freezes the results, deletes the live data, closes the event and queues the Discord cleanup in one
 transaction: all of it or nothing."""
 
+import hashlib
 import io
+import json
 import threading
 import zipfile
 from datetime import date
@@ -11,12 +13,13 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
 from django.db import OperationalError, connection
+from django.urls import reverse
 from django.utils import timezone
 from packets.models import Packet
 from scoring.export import DATASETS
 from scoring.models import InjectScore, QuotientMetadataCache, RedTeamScore, ServiceScore
 
-from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
 from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     CloseOutError,
@@ -31,6 +34,7 @@ from registration.services import (
 from registration.stage import Stage, event_stage
 from registration.tests.shown import new_event
 from team.models import DiscordLink, SchoolInfo, Team
+from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
 # close_out_event must be the outermost transaction, as in production
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -54,7 +58,7 @@ def event():
 
 
 def _cleanups():
-    return list(DiscordTask.objects.filter(task_type="reconcile_teams"))
+    return list(QueuedTask.objects.filter(task_type="reconcile_teams"))
 
 
 def _assert_nothing_written(event=None, scores=2):
@@ -103,6 +107,8 @@ def test_close_out_freezes_wipes_closes_and_queues_the_cleanup(event):
     assert log.details["results"] == 2
     assert log.details["deleted_counts"] == {"ServiceScore": 2, "BlueTeamDiscordLink": 1, "QueuedAnnouncement": 1}
     assert not AuditLog.objects.filter(action__in=["event_finalized", "event_cleared"]).exists()
+    # The cleared schedule shows at once: the teardown report queues its own refresh later
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
 def test_the_archive_is_taken_before_the_wipe(event):
@@ -114,6 +120,51 @@ def test_the_archive_is_taken_before_the_wipe(event):
     assert names == {f"{d.filename}.{ext}" for d in DATASETS.values() for ext in ("csv", "json")}
     # Ranked from the live scores: after the wipe no team has a rank
     assert final_scores.splitlines()[1].startswith("1,")
+
+
+def test_the_archive_keeps_each_tickets_thread_history_and_attachment_records(event, client, gold_team_user):
+    """A ticket's comments are its chat thread as the portal recorded it: the archive keeps them, the history and
+    what each attachment was, and its download serves them once the wipe has deleted them."""
+    blue = User.objects.create_user("blue1")
+    ticket = Ticket.objects.create(ticket_number="T001-001", team=Team.objects.get(team_number=1), title="Help")
+    TicketComment.objects.create(ticket=ticket, author=blue, comment_text="Yes, start the call", discord_message_id=7)
+    TicketComment.objects.create(ticket=ticket, author=None, comment_text="Done from the page")
+    TicketHistory.objects.create(ticket=ticket, action="claimed", actor=gold_team_user, details={"points": 100})
+    TicketAttachment.with_file(b"screenshot", "proof.png", ticket=ticket, uploaded_by="blue1").save()
+
+    close_out_event(event, "gold")
+
+    assert not TicketComment.objects.exists() and not TicketAttachment.objects.exists()
+    client.force_login(gold_team_user)
+    response = client.get(reverse("registration_event_archive", kwargs={"event_id": event.pk}))
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zipped:
+        comments = json.loads(zipped.read("ticket_comments.json"))["ticket_comments"]
+        history = json.loads(zipped.read("ticket_history.json"))["ticket_history"]
+        [attachment] = json.loads(zipped.read("ticket_attachments.json"))["ticket_attachments"]
+        history_csv = zipped.read("ticket_history.csv").decode()
+    assert [(c["ticket_number"], c["author"], c["source"], c["comment_text"]) for c in comments] == [
+        ("T001-001", "blue1", "discord", "Yes, start the call"),
+        ("T001-001", "Unknown", "web", "Done from the page"),
+    ]
+    actions = [(h["action"], h["actor"], h["details"]) for h in history]
+    assert actions == [("claimed", gold_team_user.username, {"points": 100})]
+    assert '"{""points"": 100}"' in history_csv
+    assert (attachment["filename"], attachment["size"], attachment["sha256"]) == (
+        "proof.png",
+        len(b"screenshot"),
+        hashlib.sha256(b"screenshot").hexdigest(),
+    )
+
+
+def test_the_event_page_offers_only_an_archive_that_exists(event, client, gold_team_user):
+    client.force_login(gold_team_user)
+    url = reverse("registration_event_archive", kwargs={"event_id": event.pk})
+
+    assert client.get(url).status_code == 404
+    assert url not in client.get(reverse("registration_event_detail", kwargs={"event_id": event.pk})).content.decode()
+    close_out_event(event, "gold")
+    assert url in client.get(reverse("registration_event_detail", kwargs={"event_id": event.pk})).content.decode()
 
 
 def test_results_follow_the_school_list(event):
@@ -237,7 +288,7 @@ def test_a_new_event_is_refused_once_an_event_is_open(event):
     _assert_nothing_written(event)
 
 
-@pytest.mark.parametrize("failing", ["registration.services.wipe_competition_data", "core.models.DiscordTask.enqueue"])
+@pytest.mark.parametrize("failing", ["registration.services.wipe_competition_data", "core.models.QueuedTask.enqueue"])
 def test_a_failure_after_the_freeze_writes_nothing(event, failing):
     with patch(failing, side_effect=RuntimeError("boom")), pytest.raises(RuntimeError):
         close_out_event(event, "gold")
