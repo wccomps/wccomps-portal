@@ -9,7 +9,7 @@ import pytest
 from django.core.cache import cache
 from django.test import Client, override_settings
 from django.urls import reverse
-from quotient.client import QuotientClient, ServiceCheck, quotient_service_name
+from quotient.client import MAX_CHECK_OUTPUT_CHARS, QuotientClient, ServiceCheck, quotient_service_name
 
 from core.tests.external_json import Answer, serving
 from ticketing.models import Ticket, TicketCategory
@@ -52,6 +52,7 @@ def service_ticket(blue_team):
         ("", "TREX", ""),
         (".", "", ""),
         ("..", "", ""),
+        ("web..http", "", ""),
         ("../2/TREX-DNS", "", ""),
         ("2/TREX-DNS", "TREX", ""),
         ("TREX:../2/TREX-DNS", "", ""),
@@ -141,6 +142,40 @@ def test_get_service_checks_never_logs_check_output_on_parse_error(caplog):
 
     assert result is None
     assert secret_debug not in caplog.text
+
+
+def _checks_from(entries: list[dict]) -> list[ServiceCheck] | None:
+    cache.clear()
+    answers = [Answer(200, b"{}"), Answer(200, json.dumps(entries).encode())]
+    with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers):
+        return QuotientClient(base_url="https://quotient.test").get_service_checks(1, "TREX:DNS", force_refresh=True)
+
+
+@pytest.mark.parametrize(
+    ("start_time", "expected"),
+    [
+        ("2026-10-18T19:30:00", datetime(2026, 10, 18, 19, 30, tzinfo=UTC)),
+        ("2026-10-18T21:30:00+02:00", datetime(2026, 10, 18, 19, 30, tzinfo=UTC)),
+        ("0002-01-01T00:00:00Z", datetime(2, 1, 1, tzinfo=UTC)),
+        ("9998-12-31T00:00:00Z", datetime(9998, 12, 31, tzinfo=UTC)),
+        ("9999-12-31T23:59:59Z", None),
+        ("not a time", None),
+    ],
+)
+def test_a_rounds_start_time_reads_as_an_aware_time_or_none(start_time, expected):
+    checks = _checks_from([{"Round": {"ID": 1, "StartTime": start_time}, "Result": True, "Debug": "", "Error": ""}])
+
+    assert checks is not None
+    assert checks[0].timestamp == expected
+
+
+def test_check_output_of_exactly_the_cap_is_kept_whole():
+    output = "A" * MAX_CHECK_OUTPUT_CHARS
+    checks = _checks_from([{"Round": {"ID": 1, "StartTime": ""}, "Result": False, "Debug": output, "Error": output}])
+
+    assert checks is not None
+    assert checks[0].debug == output
+    assert checks[0].error == output
 
 
 def test_ticket_detail_shows_service_check_section_only_to_staff(

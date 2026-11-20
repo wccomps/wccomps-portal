@@ -141,6 +141,20 @@ def test_an_uptime_that_is_no_fraction_is_refused(uptime: object) -> None:
     assert uptimes is None or all(0 <= u <= 1 for t in uptimes for u in t.uptimes.values())
 
 
+@pytest.mark.parametrize(("uptime", "read"), [(0, 0.0), (1, 1.0), (0.5, 0.5), (1.5, None), (-0.5, None)])
+def test_an_uptime_reads_from_0_to_1_inclusive(uptime: float, read: float | None) -> None:
+    """Both ends count: a service down all game reads 0.0, one up all game 1.0; past either end refuses them all."""
+    body = {"series": [{"Name": "team01", "Data": [{"Service": "web", "Uptime": uptime}]}]}
+    with override_settings(**QUOTIENT), serving([LOGIN, Answer(200, json.dumps(body).encode())]):
+        uptimes = quotient().get_uptimes()
+    if read is None:
+        assert uptimes is None
+    else:
+        assert uptimes is not None
+        assert uptimes[0].uptimes == {"web": read}
+        assert type(uptimes[0].uptimes["web"]) is float
+
+
 @example(answers=[LOGIN, Answer(200, deep(100_000))])
 @given(answers=st.just([LOGIN, Answer(200, deep(100_000))]))
 def test_json_too_deep_to_read_is_no_answer(answers: list[Answer]) -> None:
