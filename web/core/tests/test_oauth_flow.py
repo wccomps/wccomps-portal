@@ -103,8 +103,8 @@ class TestOAuthLogin:
         """Login should include a signed state parameter in the redirect URL."""
         state = _start_sign_in(Client())
         state_data = signing.loads(state, max_age=300)
-        assert "n" in state_data  # Contains nonce
-        assert len(state_data["n"]) > 10  # Secure random nonce
+        assert "n" in state_data
+        assert len(state_data["n"]) > 10
 
     def test_login_encodes_next_url_in_state(self):
         """Login should encode next URL in the signed state parameter."""
@@ -188,7 +188,6 @@ class TestOAuthCallback:
     @pytest.mark.parametrize("before", [True, False])
     def test_a_sign_in_from_before_a_credentials_reset_is_refused(self, oauth_state_session, before):
         """An authorization code issued before the reset must not undo its portal sign-out."""
-        import time
         from datetime import UTC, datetime
 
         client, state = oauth_state_session
@@ -225,7 +224,6 @@ class TestOAuthCallback:
 
     @pytest.mark.parametrize("auth_time", ["1" + "0" * 400, "NaN", "Infinity", "-Infinity"])
     def test_an_auth_time_that_is_no_moment_counts_from_when_the_sign_in_began(self, oauth_state_session, auth_time):
-        import base64
         from datetime import timedelta
 
         from django.utils import timezone
@@ -394,7 +392,7 @@ class TestOAuthCallback:
         session["oauth_nonce"] = "test-nonce"
         session.save()
 
-        # Forge a signed state with an external next URL
+        # oauth_login drops an external next before signing it, so only a forged state carries one
         state = signing.dumps({"n": "test-nonce", "next": "https://evil.com/steal"})
 
         response = _login(client, state, {"sub": "redirect-test-id-2", "preferred_username": "safeuser", "groups": []})
