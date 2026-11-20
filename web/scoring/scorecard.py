@@ -247,7 +247,7 @@ def build_scorecard_context(
     standings: list[Standing],
     peer_context: ScorecardPeerContext | None = None,
 ) -> dict[str, object]:
-    """Context shared by the scorecard page, its PDF, and the emailed and bulk-exported PDFs."""
+    """A team's scorecard template context."""
     team = score.team
 
     red_scores = (
@@ -275,5 +275,5 @@ def build_scorecard_context(
         "orange_total": sum(o.points_awarded for o in orange_scores),
         "service_total": sum(s["points"] for s in stats["service_stats"]),
         "service_sla_total": sum(s["sla_violations"] for s in stats["service_stats"]),
-        "scaling": dict(score.scaling),
+        "scaling": score.scaling,
     }

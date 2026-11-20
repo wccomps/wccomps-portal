@@ -25,7 +25,6 @@ from registration.models import School
 
 from core.models import UserGroups
 from scoring.calculator import (
-    SCALING_FIELDS,
     Standing,
     calculate_suggested_recovery_points,
     compute_standings,
@@ -115,9 +114,7 @@ class ScoringFormulaTests(TestCase):
         self.assertEqual(scores.orange_points, Decimal("50.0"))
         # Red deduction: -100 (raw)
         self.assertEqual(scores.red_deductions, Decimal("-100"))
-        # SLA penalty
         self.assertEqual(scores.sla_penalties, Decimal("-10.00"))
-        # Recovery points
         self.assertEqual(scores.incident_recovery_points, Decimal("0"))
         # Total = 500 + 250 + 50 - 10 - 100 = 690
         self.assertEqual(scores.total_score, Decimal("690.0"))
@@ -857,7 +854,7 @@ class ScalingContextTests(TestCase):
     def test_standing_carries_raw_scores_and_modifiers(self) -> None:
         scaling = _standing(self.team).scaling
 
-        assert set(scaling) == set(SCALING_FIELDS)
+        assert scaling["service_modifier"] == Decimal("1")
         assert scaling["service_raw"] == Decimal("8000")
         assert scaling["inject_raw"] == Decimal("2000")
 
