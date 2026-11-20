@@ -6,9 +6,9 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from registration.models import Event, EventTeamAssignment, School
-from registration.services import NewEvent, SchoolListRow, import_school_list
+from registration.services import ADD_NEEDS_OPEN_EVENT, NewEvent, SchoolListRow, import_school_list
 
-from team.forms import parse_csv_file, validate_csv_data
+from team.forms import parse_csv_file, validate_csv_additions, validate_csv_data
 from team.models import SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -214,7 +214,11 @@ class TestCSVValidation:
     def test_validate_not_enough_teams(self, setup_teams: list[Team]) -> None:
         result = validate_csv_data([_row(f"University {i}") for i in range(6)])
 
-        assert result["errors"] == ["The CSV has 6 schools but only 5 teams exist."]
+        assert result == {
+            "teams_to_create": [],
+            "errors": ["The CSV has 6 schools but only 5 teams exist."],
+            "warnings": [],
+        }
 
     def test_validate_rejects_a_repeated_school(self, setup_teams: list[Team]) -> None:
         result = validate_csv_data([_row("University One"), _row("University One")])
@@ -246,6 +250,37 @@ def _open_event():
     return Event.objects.create(
         season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
     )
+
+
+def test_adding_needs_the_open_event_not_a_new_one(setup_teams):
+    new = NewEvent("Qualifier", date(2026, 11, 7), "qualifier", None)
+
+    assert validate_csv_additions([_row("University One")], new) == {
+        "teams_to_create": [],
+        "errors": [ADD_NEEDS_OPEN_EVENT],
+        "warnings": [],
+    }
+
+
+def test_adding_skips_the_schools_already_on_the_list_and_names_them(setup_teams):
+    event = _open_event()
+    _assign(event, 1, "University One")
+    _assign(event, 2, "University Two")
+
+    result = validate_csv_additions([_row("University One"), _row("University Two"), _row("University Six")], event)
+
+    assert [(r["school_name"], r["team_number"]) for r in result["teams_to_create"]] == [("University Six", 3)]
+    assert "Already on the list, skipped: University One, University Two" in result["warnings"]
+
+
+def test_adding_only_schools_already_on_the_list_is_refused(setup_teams):
+    event = _open_event()
+    _assign(event, 1, "University One")
+
+    result = validate_csv_additions([_row("University One")], event)
+
+    assert result["teams_to_create"] == []
+    assert result["errors"] == ["Every school in the file is already on the list."]
 
 
 class TestCSVImport:
