@@ -37,14 +37,12 @@ def _packet(title: str, status: str, sends: list[tuple[str, bool]]) -> Packet:
 
 @pytest.fixture
 def packets() -> tuple[Packet, Packet]:
-    # Active: 9 teams, 4 sent (1 downloaded), 3 failed, 2 pending
     active = _packet(
         "Active",
         "distributing",
         [("sent", True)] + [("sent", False)] * 3 + [("failed", False)] * 3 + [("pending", False)] * 2,
     )
-    # History: 3 sent (1 downloaded), 2 failed
-    sent = _packet("Sent", "completed", [("sent", True)] + [("sent", False)] * 2 + [("failed", False)] * 2)
+    sent = _packet("Sent", "completed", [("sent", True)] * 2 + [("sent", False)] + [("failed", False)] * 2)
     return active, sent
 
 
@@ -65,7 +63,7 @@ def test_the_packet_list_shows_the_active_and_past_packets_counts(client, packet
 
     for shown in ("9 teams", "4 sent", "2 pending", "3 failed", "1 downloaded"):
         assert f" {shown} " in text
-    assert " 3 sent, 1 downloaded , 2 failed " in text
+    assert " 3 sent, 2 downloaded , 2 failed " in text
 
 
 def test_the_packet_page_shows_its_counts(client, packets):
@@ -81,4 +79,4 @@ def test_the_packet_admin_shows_the_counts(client, packets):
 
     assert " Total: 9 Sent: 4 Failed: 3 Downloaded: 1 " in change
     assert " Total: 9 Sent: 4 Failed: 3 Downloaded: 1 " in changelist
-    assert " Total: 5 Sent: 3 Failed: 2 Downloaded: 1 " in changelist
+    assert " Total: 5 Sent: 3 Failed: 2 Downloaded: 2 " in changelist
