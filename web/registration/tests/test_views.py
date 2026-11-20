@@ -281,13 +281,18 @@ class AdminRejectViewTestCase(TestCase):
         response = self.client.get(reverse("registration_reject", args=[self.registration.id]))
         self.assertContains(response, "Test School")
         self.assertContains(response, "test@example.com")
+        # Rendered with the request, so the form carries its CSRF token and can be submitted
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
 
     def test_reject_requires_reason(self):
         """Test reject action requires a reason."""
         self.client.force_login(self.gold_user)
         response = self.client.post(reverse("registration_reject", args=[self.registration.id]), {"reason": ""})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Please provide a reason for rejection.")
+        self.assertEqual([str(m) for m in response.context["messages"]], ["Please provide a reason for rejection."])
+        # The page asks again, still showing what is being rejected
+        self.assertContains(response, "Test School")
+        self.assertContains(response, "test@example.com")
         self.registration.refresh_from_db()
         self.assertEqual(self.registration.status, "pending")
 
@@ -299,6 +304,20 @@ class AdminRejectViewTestCase(TestCase):
         self.assertContains(response, "Registration for Test School has been rejected.")
         response = self.client.post(url, {"reason": "Incomplete information"}, follow=True)
         self.assertContains(response, "Registration for Test School is no longer pending.")
+
+    def test_rejecting_a_rejected_registration_says_it_is_no_longer_pending_while_another_is_approved(self):
+        TeamRegistration.objects.create(school_name="Other School", status="approved")
+        self.registration.status = "rejected"
+        self.registration.save()
+        self.client.force_login(self.gold_user)
+
+        response = self.client.post(
+            reverse("registration_reject", args=[self.registration.id]), {"reason": "Duplicate"}, follow=True
+        )
+
+        self.assertEqual(
+            [str(m) for m in response.context["messages"]], ["Registration for Test School is no longer pending."]
+        )
 
 
 class SeasonViewTestCase(TestCase):
