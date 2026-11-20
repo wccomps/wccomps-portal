@@ -235,16 +235,23 @@ def test_rejected_incident_upload_shows_the_error(team, blue_team_user, mock_quo
     assert not IncidentReport.objects.exists()
 
 
-@pytest.mark.parametrize("problem", ["too_many", "too_big"])
-def test_rejected_red_team_upload_shows_the_error(team, red_team_user, mock_quotient_client, problem, monkeypatch):
-    uploads = [_upload(PNG, f"s{n}.png") for n in range(21)] if problem == "too_many" else [_upload(PNG)]
+@pytest.mark.parametrize(
+    ("problem", "error"),
+    [("too_many", b"Maximum 20 screenshots allowed per submission"), ("too_big", b"shot.png: File too large")],
+)
+def test_rejected_red_team_upload_shows_the_error(
+    team, red_team_user, mock_quotient_client, problem, error, monkeypatch
+):
+    uploads = (
+        [_upload(PNG, f"s{n}.png") for n in range(MAX_SCREENSHOTS + 1)] if problem == "too_many" else [_upload(PNG)]
+    )
     if problem == "too_big":
         monkeypatch.setattr(RedTeamScreenshot, "MAX_SIZE", 10)
 
     response = _submit_red(red_team_user, uploads)
 
     assert response.status_code == 200
-    assert b"File upload failed" in response.content
+    assert b"File upload failed: " + error in response.content
     assert not RedTeamScore.objects.exists()
 
 
@@ -262,13 +269,6 @@ def test_a_finding_with_the_most_screenshots_allowed_is_saved(team, red_team_use
     assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == MAX_SCREENSHOTS
 
 
-def test_too_many_screenshots_are_refused_saying_how_many_are_allowed(team, red_team_user, mock_quotient_client):
-    response = _submit_red(red_team_user, [_upload(PNG, f"s{n}.png") for n in range(MAX_SCREENSHOTS + 1)])
-
-    assert b"File upload failed: Maximum 20 screenshots allowed per submission" in response.content
-    assert not RedTeamScore.objects.exists()
-
-
 def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, mock_quotient_client, monkeypatch):
     monkeypatch.setattr(RedTeamScreenshot, "MAX_SIZE", len(PNG))
     response = _submit_red(red_team_user, [_upload(PNG, "fits.png"), _upload(PNG + b"more", "too-big.png")])
@@ -278,14 +278,17 @@ def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, moc
     assert not RedTeamScore.objects.exists()
 
 
-def test_total_submission_size_is_bounded(team, red_team_user, mock_quotient_client, monkeypatch):
+def test_a_submission_one_byte_past_the_total_size_allowed_is_refused_naming_the_limit(
+    team, red_team_user, mock_quotient_client, monkeypatch
+):
     import core.stored_files
 
-    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", len(PNG) + 1)
-    response = _submit_red(red_team_user, [_upload(PNG, "first.png"), _upload(PNG, "second.png")])
+    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", 2 * 1024 * 1024)
+    half = PNG + b"\x00" * (1024 * 1024 - len(PNG))
+    response = _submit_red(red_team_user, [_upload(half, "first.png"), _upload(half + b"\x00", "second.png")])
 
     assert response.status_code == 200
-    assert b"Total upload size cannot exceed" in response.content
+    assert b"File upload failed: Total upload size cannot exceed 2MB" in response.content
     assert not RedTeamScore.objects.exists()
 
 
@@ -299,19 +302,6 @@ def test_a_submission_of_exactly_the_total_size_allowed_is_saved(
 
     assert response.status_code == 302
     assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2
-
-
-def test_a_submission_too_big_in_total_is_refused_naming_the_limit(
-    team, red_team_user, mock_quotient_client, monkeypatch
-):
-    import core.stored_files
-
-    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", 2 * 1024 * 1024)
-    half_and_more = PNG + b"\x00" * (1024 * 1024)
-    response = _submit_red(red_team_user, [_upload(half_and_more, "first.png"), _upload(half_and_more, "second.png")])
-
-    assert b"File upload failed: Total upload size cannot exceed 2MB" in response.content
-    assert not RedTeamScore.objects.exists()
 
 
 def test_review_incidents_counts_evidence_without_fetching_file_bytes(incident, gold_team_user):

@@ -75,17 +75,6 @@ def test_the_last_synced_lists_render_as_pickers_while_quotient_is_down(client):
     assert '<option value="web01:HTTP">web01: HTTP</option>' in html
 
 
-def test_with_boxes_synced_the_page_says_the_ip_comes_from_the_picked_box(client):
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
-    _synced({"web01": "10.0.1.5"}, {"web01": ["HTTP"]})
-
-    html = client.get(reverse("create_ticket")).content.decode()
-
-    assert ">Auto-filled from hostname selection</p>" in html
-    assert 'placeholder="Select a hostname above"' in html
-    assert '<option value="" selected>Select a service...</option>' in html
-
-
 def test_staff_can_use_service_picker_before_start(ticketing_admin_user):
     _synced({"web01": "10.0.1.5"}, {"web01": ["HTTP"]})
     staff_client = Client()

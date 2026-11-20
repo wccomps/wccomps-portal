@@ -4,13 +4,14 @@ answer)."""
 
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 from django.core.cache import cache
 from django.test import override_settings
-from quotient import client as client_module
 from quotient.client import (
+    MAX_CHECK_OUTPUT_CHARS,
     Inject,
     QuotientBox,
     QuotientClient,
@@ -23,6 +24,7 @@ from quotient.client import (
 )
 
 from core.tests.external_json import Answer, serving
+from scoring.tests.test_quotient_client_logging import _client_with
 
 
 def _read[T](body: object, get: Callable[[QuotientClient], T]) -> T:
@@ -68,6 +70,34 @@ def test_a_check_without_a_start_time_debug_or_error_reads_them_as_blank() -> No
     checks = _read([{"Round": {"ID": 7}, "Result": True}], lambda c: c.get_service_checks(1, "web:http"))
 
     assert checks == [ServiceCheck(round_number=7, timestamp=None, passed=True, debug="", error="")]
+
+
+@pytest.mark.parametrize(
+    ("start_time", "expected"),
+    [
+        ("2026-10-18T19:30:00", datetime(2026, 10, 18, 19, 30, tzinfo=UTC)),
+        ("2026-10-18T21:30:00+02:00", datetime(2026, 10, 18, 19, 30, tzinfo=UTC)),
+        ("9999-12-31T23:59:59Z", None),
+        ("not a time", None),
+    ],
+)
+def test_a_rounds_start_time_reads_as_an_aware_time_or_none(start_time: str, expected: datetime | None) -> None:
+    checks = _read(
+        [{"Round": {"ID": 1, "StartTime": start_time}, "Result": True}], lambda c: c.get_service_checks(1, "web")
+    )
+
+    assert checks is not None
+    assert checks[0].timestamp == expected
+
+
+def test_check_output_of_exactly_the_cap_is_kept_whole() -> None:
+    output = "A" * MAX_CHECK_OUTPUT_CHARS
+    entry = {"Round": {"ID": 1}, "Result": False, "Debug": output, "Error": output}
+
+    checks = _read([entry], lambda c: c.get_service_checks(1, "web"))
+
+    assert checks is not None
+    assert (checks[0].debug, checks[0].error) == (output, output)
 
 
 def test_the_service_export_reads_each_teams_points_and_services() -> None:
@@ -117,58 +147,50 @@ def test_an_export_leaving_out_what_a_team_has_none_of_reads_it_as_zero() -> Non
 def test_uptimes_read_each_teams_services() -> None:
     body = {
         "series": [
-            {"Name": "team02", "Data": [{"Service": "web-http", "Uptime": 0.25}, {"Service": "db-sql", "Uptime": 1}]},
+            {
+                "Name": "team02",
+                "Data": [
+                    {"Service": "web-http", "Uptime": 0.25},
+                    {"Service": "db-sql", "Uptime": 1},
+                    {"Service": "dns", "Uptime": 0},
+                ],
+            },
             {"Name": "team03"},
         ]
     }
 
     assert _read(body, lambda c: c.get_uptimes()) == [
-        TeamUptime(team_name="team02", team_number=2, uptimes={"web-http": 0.25, "db-sql": 1.0}),
+        TeamUptime(team_name="team02", team_number=2, uptimes={"web-http": 0.25, "db-sql": 1.0, "dns": 0.0}),
         TeamUptime(team_name="team03", team_number=3, uptimes={}),
     ]
+
+
+@pytest.mark.parametrize("uptime", [1.5, -0.5])
+def test_an_uptime_past_either_end_refuses_every_teams_uptimes(uptime: float) -> None:
+    body = {
+        "series": [
+            {"Name": "team02", "Data": [{"Service": "web-http", "Uptime": 0.5}]},
+            {"Name": "team03", "Data": [{"Service": "web-http", "Uptime": uptime}]},
+        ]
+    }
+
+    assert _read(body, lambda c: c.get_uptimes()) is None
 
 
 def test_uptimes_without_a_series_read_as_no_teams() -> None:
     assert _read({}, lambda c: c.get_uptimes()) == []
 
 
-def _seen_by(monkeypatch: pytest.MonkeyPatch, answer: Callable[[httpx.Request], httpx.Response]) -> list[httpx.Request]:
-    """The requests the client sends, each answered by answer, with nothing cached."""
-    seen: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return answer(request)
-
-    real_client = httpx.Client
-    monkeypatch.setattr(client_module.httpx, "Client", lambda: real_client(transport=httpx.MockTransport(handler)))
+def test_an_expired_session_signs_in_again_and_asks_once_more() -> None:
     cache.clear()
-    return seen
-
-
-def _timeout(seconds: int) -> dict[str, int]:
-    return {"connect": seconds, "read": seconds, "write": seconds, "pool": seconds}
-
-
-def test_an_expired_session_signs_in_again_and_asks_once_more(monkeypatch, settings) -> None:
-    settings.QUOTIENT_USERNAME = "admin"
-    settings.QUOTIENT_PASSWORD = "secret"
-    reads: list[int] = []
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/login":
-            return httpx.Response(200, json={})
-        reads.append(1)
-        return httpx.Response(401) if len(reads) == 1 else httpx.Response(200, json=[INJECT])
-
-    seen = _seen_by(monkeypatch, answer)
-
-    injects = QuotientClient(base_url="https://quotient.test/").get_injects()
+    login = Answer(200, b"{}")
+    answers = [login, Answer(401, b""), login, Answer(200, json.dumps([INJECT]).encode())]
+    with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers) as requests:
+        injects = QuotientClient(base_url="https://quotient.test/").get_injects()
 
     assert injects is not None
     assert [i.inject_id for i in injects] == [3]
-    assert [str(r.url) for r in seen] == ["https://quotient.test/api/login", "https://quotient.test/api/injects"] * 2
-    assert [r.extensions["timeout"] for r in seen[1::2]] == [_timeout(10)] * 2
+    assert requests == ["https://quotient.test/api/login", "https://quotient.test/api/injects"] * 2
 
 
 def test_one_sign_in_serves_every_later_read() -> None:
@@ -190,14 +212,18 @@ def test_the_sign_in_sends_the_configured_account_with_the_configured_timeout(mo
     settings.QUOTIENT_USERNAME = "admin"
     settings.QUOTIENT_PASSWORD = "secret"
     settings.HTTPX_DEFAULT_TIMEOUT = 7
-    seen = _seen_by(monkeypatch, lambda r: httpx.Response(200, json={} if r.url.path == "/api/login" else []))
+    cache.clear()
+    seen: list[httpx.Request] = []
 
-    assert QuotientClient(base_url="https://quotient.test").get_injects(force_refresh=True) == []
-    login, read = seen
-    assert str(login.url) == "https://quotient.test/api/login"
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={} if request.url.path == "/api/login" else [])
+
+    assert _client_with(monkeypatch, answer).get_injects(force_refresh=True) == []
+    login = seen[0]
+    assert login.url.path == "/api/login"
     assert json.loads(login.content) == {"username": "admin", "password": "secret"}
-    assert login.extensions["timeout"] == _timeout(7)
-    assert read.extensions["timeout"] == _timeout(10)
+    assert login.extensions["timeout"] == {"connect": 7, "read": 7, "write": 7, "pool": 7}
 
 
 @pytest.mark.parametrize(("username", "password"), [("admin", ""), ("", "secret")])

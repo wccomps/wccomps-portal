@@ -154,37 +154,26 @@ def service_category(db):
     )
 
 
-def test_a_service_picked_without_a_box_files_the_ticket_on_its_box(blue_team_user, team_1, service_category):
+@pytest.mark.parametrize(
+    ("picked", "box", "ip"),
+    [
+        ({}, "web01", "10.0.1.5"),
+        ({"hostname": "db01"}, "db01", "10.0.1.6"),
+        ({"ip_address": "10.0.1.99"}, "web01", "10.0.1.99"),
+    ],
+    ids=["box-and-ip-from-the-service", "picked-box-kept", "typed-ip-kept"],
+)
+def test_a_picked_service_fills_only_the_box_and_ip_the_team_left_blank(
+    blue_team_user, team_1, service_category, picked, box, ip
+):
     response = _client(blue_team_user).post(
         reverse("create_ticket"),
-        {"title": "Site down", "category": service_category.pk, "service_name": "web01:HTTP"},
+        {"title": "Site down", "category": service_category.pk, "service_name": "web01:HTTP", **picked},
     )
 
     assert response.status_code == 302
     ticket = Ticket.objects.get()
-    assert (ticket.hostname, ticket.ip_address, ticket.service_name) == ("web01", "10.0.1.5", "web01:HTTP")
-
-
-def test_a_box_picked_with_a_service_is_kept(blue_team_user, team_1, service_category):
-    response = _client(blue_team_user).post(
-        reverse("create_ticket"),
-        {"title": "Site down", "category": service_category.pk, "service_name": "web01:HTTP", "hostname": "db01"},
-    )
-
-    assert response.status_code == 302
-    ticket = Ticket.objects.get()
-    assert (ticket.hostname, ticket.ip_address) == ("db01", "10.0.1.6")
-
-
-def test_a_service_picked_without_a_box_keeps_the_ip_the_team_typed(blue_team_user, team_1, service_category):
-    response = _client(blue_team_user).post(
-        reverse("create_ticket"),
-        {"title": "Down", "category": service_category.pk, "service_name": "web01:HTTP", "ip_address": "10.0.1.99"},
-    )
-
-    assert response.status_code == 302
-    ticket = Ticket.objects.get()
-    assert (ticket.hostname, ticket.ip_address) == ("web01", "10.0.1.99")
+    assert (ticket.hostname, ticket.ip_address, ticket.service_name) == (box, ip, "web01:HTTP")
 
 
 def test_a_service_quotient_does_not_know_names_no_box(blue_team_user, team_1, service_category):
@@ -218,7 +207,7 @@ def test_a_known_box_excuses_only_the_ip_not_the_fields_after_it(blue_team_user,
     assert not Ticket.objects.exists()
 
 
-def test_the_form_offers_only_team_categories_unless_told_it_is_for_staff(staff_only):
+def test_a_form_built_without_staff_refuses_a_staff_only_category(staff_only):
     from ticketing.forms import CreateTicketForm
 
     form = CreateTicketForm({"title": "x", "category": staff_only.pk, "description": "x"})

@@ -100,7 +100,8 @@ def test_a_cached_answer_lasts_its_lifetime(
     asked = _recording(monkeypatch, body)
     client = QuotientClient(base_url="https://quotient.test")
     start = time.time()
-    get(client, False)
+    with patch("time.time", return_value=start):
+        get(client, False)
     with patch("time.time", return_value=start + seconds - 0.5):
         get(client, False)
     assert asked == [endpoint]

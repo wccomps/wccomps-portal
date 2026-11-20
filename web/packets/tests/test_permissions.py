@@ -116,14 +116,16 @@ class TestPacketDownload:
     def test_gold_team_downloads_without_distribution(self, gold_team_user, packet):
         assert self._get(gold_team_user, packet).status_code == 200
 
-    @pytest.mark.parametrize("status", ["draft", "cancelled"])
-    def test_a_packet_that_was_not_sent_cannot_be_downloaded(
-        self, blue_team_user, gold_team_user, team_1, packet, status
+    @pytest.mark.parametrize(
+        ("field", "value"), [("status", "draft"), ("status", "cancelled"), ("web_access_enabled", False)]
+    )
+    def test_a_packet_not_sent_or_with_web_access_off_cannot_be_downloaded(
+        self, blue_team_user, gold_team_user, team_1, packet, field, value
     ):
         from packets.models import PacketDistribution
 
         PacketDistribution.objects.create(packet=packet, team=team_1)
-        packet.status = status
+        setattr(packet, field, value)
         packet.save()
 
         assert self._get(blue_team_user, packet).status_code == 404
@@ -137,16 +139,6 @@ class TestPacketDownload:
         packet.save()
 
         assert self._get(blue_team_user, packet).status_code == 200
-
-    def test_a_packet_with_web_access_off_cannot_be_downloaded(self, blue_team_user, gold_team_user, team_1, packet):
-        from packets.models import PacketDistribution
-
-        PacketDistribution.objects.create(packet=packet, team=team_1)
-        packet.web_access_enabled = False
-        packet.save()
-
-        assert self._get(blue_team_user, packet).status_code == 404
-        assert self._get(gold_team_user, packet).status_code == 404
 
     def test_another_teams_distribution_does_not_let_a_team_download(self, blue_team_user, team_1, packet):
         from packets.models import PacketDistribution

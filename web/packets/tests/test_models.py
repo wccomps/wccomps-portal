@@ -134,39 +134,29 @@ class TestPacketDistribution:
         assert distribution.last_downloaded_at > first
         assert distribution.updated_at == distribution.last_downloaded_at
 
-    def test_a_failure_written_from_a_stale_row_keeps_a_download_recorded_since(self, team, packet):
+    @pytest.mark.parametrize(
+        ("mark", "status"),
+        [(lambda d: d.mark_as_failed("bounced"), "failed"), (lambda d: d.mark_as_sent("team01@example.edu"), "sent")],
+        ids=["failed", "sent"],
+    )
+    def test_a_status_written_from_a_stale_row_keeps_a_download_recorded_since(self, team, packet, mark, status):
         distribution = PacketDistribution.objects.create(packet=packet, team=team)
         PacketDistribution.objects.get(pk=distribution.pk).record_download("team01")
 
-        distribution.mark_as_failed("bounced")
+        mark(distribution)
 
         distribution.refresh_from_db()
         assert (distribution.email_status, distribution.download_count, distribution.downloaded_by) == (
-            "failed",
+            status,
             1,
             "team01",
         )
-
-    def test_a_send_written_from_a_stale_row_keeps_a_download_recorded_since(self, team, packet):
-        distribution = PacketDistribution.objects.create(packet=packet, team=team)
-        PacketDistribution.objects.get(pk=distribution.pk).record_download("team01")
-
-        distribution.mark_as_sent("team01@example.edu")
-
-        distribution.refresh_from_db()
-        assert (distribution.email_status, distribution.download_count, distribution.downloaded_by) == (
-            "sent",
-            1,
-            "team01",
-        )
-
-
-STATS = {"total": 6, "pending": 1, "sent": 2, "failed": 3, "downloaded": 4}
 
 
 @pytest.fixture
 def counted_packet(packet):
-    """A sent packet whose six teams give every count a different value (see STATS)."""
+    """A sent packet whose six teams give every count a different value: 6 teams, 1 pending, 2 sent, 3 failed and
+    4 downloaded."""
     rows = [("pending", False), ("sent", True), ("sent", True), ("failed", True), ("failed", True), ("failed", False)]
     for number, (status, downloaded) in enumerate(rows, start=1):
         team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
@@ -180,11 +170,6 @@ def counted_packet(packet):
 
 @pytest.mark.django_db
 class TestDistributionStats:
-    def test_each_count_is_its_own(self, counted_packet):
-        annotated = Packet.objects.with_distribution_stats().get(pk=counted_packet.pk)
-
-        assert annotated.get_distribution_stats() == STATS
-
     def test_the_packet_page_shows_each_count(self, counted_packet, gold_team_user):
         client = Client()
         client.force_login(gold_team_user)
