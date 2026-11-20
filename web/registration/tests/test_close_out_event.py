@@ -126,6 +126,19 @@ def test_results_follow_the_school_list(event):
     assert EventResult.objects.get(event=event, team_number=2).school.name == "Example University"
 
 
+def test_results_are_the_schools_assigned_at_the_event(event):
+    """The event's assignments decide, as the close-out checks read them: a school assigned at the event with no school
+    list row still gets its result."""
+    SchoolInfo.objects.filter(team__team_number=2).delete()
+
+    close_out_event(event, "gold")
+
+    assert sorted(EventResult.objects.filter(event=event).values_list("school__name", flat=True)) == [
+        "School 1",
+        "School 2",
+    ]
+
+
 def test_an_event_finalized_before_is_frozen_again_from_the_live_scores(event):
     """Finalize used to be its own step; an event finalized then and still open is closed out as it stands now."""
     Event.objects.filter(pk=event.pk).update(is_finalized=True)
@@ -330,8 +343,9 @@ def test_close_out_does_not_start_a_new_season():
     set_team_school(team, "Example University", contact_email="c@example.edu")
     ServiceScore.objects.create(team=team, service_points=1)
 
-    with pytest.raises(CloseOutError, match="doesn't start a new season"):
+    with pytest.raises(CloseOutError) as refused:
         close_out_event(new_event("Inv", date(2027, 10, 2), "invitational", NewSeason("2027", 2027)), "gold")
+    assert str(refused.value) == ("Close Out records the scores in the active season; it doesn't start a new season.")
     assert list(Season.objects.all()) == [old] and old.is_active
     _assert_nothing_written(scores=1)
 

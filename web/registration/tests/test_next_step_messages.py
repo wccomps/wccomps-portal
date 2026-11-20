@@ -139,6 +139,27 @@ def test_several_scored_teams_with_no_school_are_each_told_to_enter_theirs(curre
     assert _fixes(stage) == [(2, False, True, False), (3, False, True, False), (4, False, True, False)]
 
 
+def test_three_teams_are_all_named_with_no_count(current_event):
+    from registration.services import set_team_school
+
+    set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
+    for number in range(2, 5):
+        _scored(number)
+
+    assert close_out_problem(event_stage()).startswith("Team 2, Team 3, Team 4 have scores but no school.")
+
+
+def test_with_nothing_played_there_is_no_team_to_fix(current_event):
+    """An inactive listed team holds back no Close Out while nothing was played: the page offers it no fix."""
+    from registration.services import set_team_school
+
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    set_team_school(team, "School 1", contact_email="c@example.edu")
+    Team.objects.update(is_active=False)
+
+    assert _fixes(event_stage()) == []
+
+
 def test_scored_teams_with_no_school_some_inactive_are_told_to_activate_those_first(current_event):
     from registration.services import set_team_school
 
