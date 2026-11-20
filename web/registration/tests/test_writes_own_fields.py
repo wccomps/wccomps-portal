@@ -64,6 +64,31 @@ def test_a_new_spelling_of_a_school_writes_only_its_name():
     assert School.objects.get().name == school.name == "example UNIVERSITY"
 
 
+def test_renaming_a_teams_school_writes_only_the_names(event):
+    """The rename writes the school record's name and key, and its registrations' school name, never a status an
+    approve or reject may have set meanwhile."""
+    from registration.models import RegistrationEventEnrollment
+
+    event.open()
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+    set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+
+    with CaptureQueriesContext(connection) as queries:
+        set_team_school(team, "Renamed College", contact_email="c@example.edu", rename=True)
+
+    school_updates = _updates(queries, "registration_school")
+    registration_updates = _updates(queries, "registration_teamregistration")
+    assert school_updates
+    assert registration_updates
+    assert all('"created_at"' not in sql for sql in school_updates)
+    assert all('"status"' not in sql for sql in registration_updates)
+    registration.refresh_from_db()
+    assert registration.school_name == "Renamed College"
+    assert registration.status == "approved"
+
+
 @pytest.fixture
 def event():
     season = Season.objects.create(name="2026", year=2026, is_active=True)

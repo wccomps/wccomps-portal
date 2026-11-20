@@ -4,7 +4,14 @@ from datetime import date
 
 import pytest
 
-from registration.models import Event, EventTeamAssignment, School, Season, TeamRegistration
+from registration.models import (
+    Event,
+    EventTeamAssignment,
+    RegistrationEventEnrollment,
+    School,
+    Season,
+    TeamRegistration,
+)
 from registration.services import SchoolTakenError, remove_team_school, set_team_school
 from team.models import SchoolInfo, Team
 
@@ -73,6 +80,22 @@ def test_respelling_the_school_keeps_its_registration(event):
     set_team_school(team, "example  UNIVERSITY", contact_email="c@example.edu")
 
     assert EventTeamAssignment.objects.get(event=event).registration == registration
+
+
+def test_renaming_to_a_new_spelling_renames_the_record_and_leaves_registrations_as_typed(event):
+    """The record's own key matches the new spelling, so it takes the name; the registrations of the school still name
+    it (by key), so they keep the spelling their school typed."""
+    team = _team(4)
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+    set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+
+    info = set_team_school(team, "EXAMPLE   university", contact_email="c@example.edu", rename=True)
+
+    assert School.objects.get() == info.school
+    assert info.school.name == "EXAMPLE university"
+    registration.refresh_from_db()
+    assert registration.school_name == "Example University"
 
 
 def test_changing_the_school_links_the_registration_given(event):
@@ -158,3 +181,25 @@ def test_removing_with_the_school_expected_refuses_after_a_change(event):
 
     assert SchoolInfo.objects.get(team=team).school_name == "Other College"
     assert EventTeamAssignment.objects.get(event=event).school.name == "Other College"
+
+
+def test_removing_with_the_school_expected_finds_a_school_held_only_at_the_open_event(event):
+    """An assignment made at the event with no school list row (as the event page shows it) is the team's school."""
+    team = _team(4)
+    school = School.for_name("Example University")
+    EventTeamAssignment.objects.create(event=event, team=team, school=school)
+
+    remove_team_school(team, expected_school_id=school.pk)
+
+    assert not EventTeamAssignment.objects.exists()
+
+
+def test_removing_with_the_school_expected_goes_by_the_school_list_when_the_event_has_no_assignment(season):
+    """The school was listed before the event opened, so the event holds no assignment for it yet."""
+    team = _team(4)
+    school = set_team_school(team, "Example University", contact_email="c@example.edu").school
+    Event.objects.create(season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3)).open()
+
+    remove_team_school(team, expected_school_id=school.pk)
+
+    assert not SchoolInfo.objects.exists()
