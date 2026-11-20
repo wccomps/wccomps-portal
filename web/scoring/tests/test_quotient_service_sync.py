@@ -146,17 +146,17 @@ def test_sync_skips_unscored_teams_with_no_services(monkeypatch) -> None:
 @pytest.mark.django_db
 def test_a_resync_replaces_each_teams_rows_and_counts_each_team_once(monkeypatch) -> None:
     team5 = Team.objects.create(team_number=5, team_name="Five")
-    Team.objects.create(team_number=3, team_name="Three")
-    monkeypatch.setattr(
-        "scoring.tests.test_quotient_service_sync.EXPORT",
-        [_team_export(3, {"web": 40, "dns": 10}), _team_export(5, {"web": 30})],
-    )
-
+    team3 = Team.objects.create(team_number=3, team_name="Three")
+    export = "scoring.tests.test_quotient_service_sync.EXPORT"
+    monkeypatch.setattr(export, [_team_export(3, {"web": 40, "dns": 10}), _team_export(5, {"web": 30})])
     first = sync_service_scores()
+    monkeypatch.setattr(export, [_team_export(3, {"web": 50, "dns": 10}), _team_export(5, {"web": 30})])
+
     second = sync_service_scores()
 
     assert (first["total"], second["total"]) == (2, 2)
     assert (ServiceScore.objects.count(), ServiceDetail.objects.count()) == (2, 3)
+    assert ServiceScore.objects.get(team=team3).service_points == Decimal("60")
     # Quotient sent no uptime series for team 5
     assert ServiceDetail.objects.get(team=team5).uptime == 0
 

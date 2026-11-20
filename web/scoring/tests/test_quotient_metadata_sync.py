@@ -372,7 +372,7 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
 
 
 def test_the_dns_proxy_config_comes_from_the_first_dns_box_that_answers_it_all():
-    """A box without DNS is passed over, a DNS box's DNS check is the one read, and a later DNS box changes nothing."""
+    """A box without DNS is passed over, and a DNS box's DNS check is the one read."""
     boxes = [
         _box("WEB", "10.100.1XX.5", "HTTP"),
         _box("BUGS", "10.100.1XX.10", "HTTP", "DNS"),
