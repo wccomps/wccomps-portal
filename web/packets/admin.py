@@ -5,11 +5,12 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.html import format_html
+from django_stubs_ext import WithAnnotations
 
 from core.admin import PortalModelAdmin, PortalTabularInline
 from core.utils import start_detached
 
-from .models import Packet, PacketDistribution, PacketQuerySet
+from .models import DistributionStats, Packet, PacketDistribution, PacketQuerySet
 
 
 class PacketDistributionInline(PortalTabularInline[PacketDistribution, Packet]):
@@ -124,9 +125,7 @@ class PacketAdmin(PortalModelAdmin[Packet]):
         )
 
     @admin.display(description="Distribution Stats")
-    def distribution_stats_display(self, obj: Packet) -> str:
-        stats = obj.get_distribution_stats()
-
+    def distribution_stats_display(self, obj: WithAnnotations[Packet, DistributionStats]) -> str:
         return format_html(
             '<table style="width: 100%;"><tr>'
             "<td><strong>Total:</strong> {}</td>"
@@ -135,10 +134,10 @@ class PacketAdmin(PortalModelAdmin[Packet]):
             "<td><strong>Failed:</strong> {}</td>"
             "<td><strong>Downloaded:</strong> {}</td>"
             "</tr></table>",
-            stats["total"],
-            stats.get("sent", 0),
-            stats.get("failed", 0),
-            stats.get("downloaded", 0),
+            obj.total_distributions,
+            obj.sent_count,
+            obj.failed_count,
+            obj.downloaded_count,
         )
 
     @admin.action(description="Distribute selected packets now")

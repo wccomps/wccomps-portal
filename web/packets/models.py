@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self, TypedDict
 
 from django.db import models
 from django.db.models import Count, F, Q, Value
@@ -14,6 +14,16 @@ if TYPE_CHECKING:
 
 # A packet whose distribution has started went out to teams
 SENT_STATUSES = ("distributing", "completed")
+
+
+class DistributionStats(TypedDict):
+    """The counts PacketQuerySet.with_distribution_stats() annotates on each packet."""
+
+    total_distributions: int
+    pending_count: int
+    sent_count: int
+    failed_count: int
+    downloaded_count: int
 
 
 class PacketQuerySet(models.QuerySet["Packet"]):
@@ -110,16 +120,6 @@ class Packet(StoredFile):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.status})"
-
-    def get_distribution_stats(self) -> dict[str, int]:
-        """The counts a packet read through with_distribution_stats() carries."""
-        return {
-            "total": int(self.__dict__["total_distributions"]),
-            "pending": int(self.__dict__["pending_count"]),
-            "sent": int(self.__dict__["sent_count"]),
-            "failed": int(self.__dict__["failed_count"]),
-            "downloaded": int(self.__dict__["downloaded_count"]),
-        }
 
     def is_ready_for_distribution(self) -> bool:
         return self.status == "draft"
