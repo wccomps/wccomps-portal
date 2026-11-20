@@ -71,3 +71,13 @@ def test_ticket_services_carry_their_box_and_sort_by_label() -> None:
         ("WEB:http", "WEB: HTTP", "10.0.0.5", "WEB", "http"),
         ("WEB:Other", "WEB: Something else", "10.0.0.5", "WEB", "Other"),
     ]
+
+
+def test_ticket_services_wait_for_applications_unless_the_caller_says_staff() -> None:
+    from core.models import CompetitionConfig
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    QuotientMetadataCache.objects.create(boxes=BOXES)
+
+    assert ticket_infrastructure()[2] == []
+    assert len(ticket_infrastructure(staff=True)[2]) == 3
