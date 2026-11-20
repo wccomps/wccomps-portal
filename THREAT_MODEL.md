@@ -59,6 +59,11 @@ during an event.
    it does the same datasets live (`web/scoring/views/export.py`). Off the portal, the scoring host's archive script
    writes a tarball of the teams' inject uploads and the divisor log of runner source addresses
    (`web/quotient/archive_scoring_host.py`).
+12. **Quotient admin login** (`web/portal/settings.py` `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD`): reads every team's
+   check output, including the credentials each check used, and can pause the engine and reset or change Quotient's
+   scores (asset 6). Web holds it for inject grading, ticket check history, the setup page's sync and the score sync,
+   the worker for the metadata sync and the preflight report, and the chat process for the stop's score sync (boundary
+   7).
 
 ## Trust boundaries and data flows
 
@@ -72,7 +77,7 @@ flowchart LR
     subgraph Portal
         W[Web: Django under gunicorn]
         Q[(Postgres: rows, QueuedTask queue, uploaded files)]
-        K[Worker: competition timer, group refresh, Quotient sync, worker queue]
+        K[Worker: competition timer and preflight report, group refresh, Quotient sync, worker queue]
         C[Chat: discord.py, Discord queue, role sync; Zulip event loop and queue]
     end
     A[Authentik: OIDC and admin API]
@@ -103,10 +108,12 @@ flowchart LR
     O[Operator] -- "14 runs the archive script" --> H
 ```
 
-The worker (`worker/__main__.py`) runs the competition timer, the group refresh, the Quotient sync (which reads team
-VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud, and the Quotient sync
-a competition start queues: `web/core/worker_tasks.py` `WorkerQueueProcessor._sync_quotient_metadata`), so it holds the
-Authentik token, the Quotient login, the Proxmox token, the Nextcloud credentials and the aweful-proxy token. The chat
+The worker (`worker/__main__.py`) runs the competition timer (which also reads Quotient's admin-only engine status
+before a scheduled start, for the preflight report it queues as an ops notice), the group refresh, the Quotient sync
+(which reads team VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud, and
+the Quotient sync a competition start queues: `web/core/worker_tasks.py` `WorkerQueueProcessor._sync_quotient_metadata`),
+so it holds the Authentik token, the Quotient login, the Proxmox token, the Nextcloud credentials and the aweful-proxy
+token. The chat
 process (`chat/__main__.py`) holds the Discord token and the Zulip API key (each when its backend is configured), and
 the same Authentik, Nextcloud and Quotient credentials for its `/competition` and reset commands: `/competition start`
 runs the competition service, which provisions Nextcloud and queues the Quotient metadata sync to the worker rather
@@ -164,6 +171,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 | 7 | Portal to Quotient | T: a bad answer corrupts scores | Typed field validators reject the wrong shape or range (`web/quotient/client.py` `_text`, `_whole`, `_boolean`, `_fraction`); every reader parses through one helper, and the cache keeps only a parsed answer (`web/quotient/client.py` `QuotientClient._fetch`, `QuotientClient._cached`) |
 | 7 | Portal to Quotient | D: text the database can't store fails a sync mid-transaction, and the competition start carries on in the broken transaction | Every row built from Quotient's answer is checked with `clean_fields` before it is saved, so a value that doesn't fit fails as the sync's `ValueError` (`web/scoring/quotient_sync.py` `_check_storable`), and a maximum worked out from it that doesn't fit is logged and not stored (`web/scoring/maxes.py` `set_template_max`); the metadata's JSON fields refuse a NUL or a lone surrogate, which `jsonb` can't hold (`web/core/validators.py` `validate_jsonb_storable`; `web/scoring/models.py` `QuotientMetadataCache`) |
 | 7 | Portal to Quotient | D: an unreachable Quotient stalls ticket filing | The web ticket form and the bot's ticket autocompletes read the synced snapshot, never Quotient itself, and omit service choices for non-staff while applications are disabled (`web/scoring/quotient_sync.py` `ticket_infrastructure`) |
+| 7 | Portal to Quotient | I: a team's credentials or box output, read with the admin login, reach the ops channel | The preflight report keeps only each check's team ID, service name and result from the admin-only engine status; a check's error and debug output, which carry the credentials it used and text from the team's box, are never read into the report, its `ops_notice` audit row or its queued `LogToChannel` (`web/quotient/client.py` `_engine_status`; `web/scoring/preflight.py` `preflight_report`). The competition timer reads it 30 and 10 minutes before a scheduled start, with no user trigger (`worker/jobs.py` `_queue_preflight_report`; `web/core/services/competition.py` `due_preflight_report`, `queue_preflight_report`) |
 | 8 | Portal to SMTP | I: a password mailed to the wrong address | Packets go to the school's contact addresses on its `SchoolInfo` (`web/team/models.py` `SchoolInfo.emails`), or to an address gold team enters for a test send; only gold team sends them, and Django admin's send actions only Discord admins reach (`web/packets/views.py` `packet_action`, `packet_resend_team`; `web/packets/admin.py` `PacketAdmin.distribute_now`, `PacketDistributionAdmin.retry_failed_emails`; `web/core/admin.py` `AuthentikAdminSite.has_permission`). A resend of failed emails claims each one before sending, so overlapping resends of failures send it once (`web/packets/services.py` `PacketDistributionService._stream_resend`) |
 | 9 | Bot to Discord | I: new team passwords seen by others | A bulk reset's CSVs go only to whoever ran it: as ephemeral followups in Discord (`bot/cogs/admin_competition.py` `AdminCompetitionCog._send_reset_result`), or in the answer to their own request on the web; its ops note names teams, never passwords (`web/core/authentik_utils.py` `_bulk_reset_note`) |
 | 10 | Portal to Nextcloud | E: a provision or teardown reaches a non-team account | Only `team{NN}` with 1 to `MAX_TEAMS` is provisioned or deleted, and answers must be 2xx OCS JSON naming that exact `user_id` (`web/core/nextcloud.py` `_team_account`, `NextcloudManager.provision_team_user`, `NextcloudManager.delete_team_user`, `NextcloudManager._check`, `NextcloudManager._json`, `NextcloudManager._user_id`); operators see `reason_for`, the message alone (`web/core/nextcloud.py` `reason_for`); property tests cover every reader (`web/core/tests/test_properties_readers.py`) |

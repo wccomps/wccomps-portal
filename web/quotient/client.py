@@ -209,6 +209,27 @@ class ServiceCheck:
     error: str
 
 
+@dataclass
+class RoundCheck:
+    team_id: int
+    service_name: str
+    passed: bool
+
+
+@dataclass
+class EngineStatus:
+    """Quotient's engine status: whether it is running, and its last round, the latest preflight round while preflight
+    is true (before the competition starts, when no round has been scored). round_id is 0 when no such round has run.
+    preflight is None when the answer has no such field: a Quotient build older than its preflight status.
+    """
+
+    running: bool
+    preflight: bool | None
+    round_id: int
+    round_start: datetime | None
+    checks: list[RoundCheck]
+
+
 class QuotientAPIError(Exception):
     """Raised when Quotient API returns an error."""
 
@@ -344,6 +365,10 @@ class QuotientClient:
             "service checks",
         )
 
+    def get_engine_status(self) -> EngineStatus | None:
+        """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
+        return self._fetch("/api/engine", _engine_status, "the engine status")
+
 
 def _infrastructure(data: object) -> QuotientInfrastructure:
     # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
@@ -442,6 +467,29 @@ def _service_checks(data: object) -> list[ServiceCheck]:
         old_check.debug = ""
         old_check.error = ""
     return checks
+
+
+def _engine_status(data: object) -> EngineStatus:
+    # /api/engine returns {"running": bool, "preflight": bool, "last_round": {"ID": int, "StartTime": str,
+    # "Checks": [{"TeamID": int, "ServiceName": str, "Result": bool, ...}] or null, ...}, ...}
+    status = _object(data, "the engine status")
+    last_round = _object(_field(status, "last_round", "the engine status"), "the last round")
+    preflight = status.get("preflight")
+    checks = last_round.get("Checks")
+    return EngineStatus(
+        running=_boolean(_field(status, "running", "the engine status"), "whether the engine is running"),
+        preflight=None if preflight is None else _boolean(preflight, "whether the engine is in preflight"),
+        round_id=_whole(_field(last_round, "ID", "the last round"), "a round number"),
+        round_start=_timestamp(last_round.get("StartTime", ""), "a round's start time"),
+        checks=[
+            RoundCheck(
+                team_id=_whole(_field(entry, "TeamID", "a check"), "a check's team"),
+                service_name=_text(_field(entry, "ServiceName", "a check"), "a check's service"),
+                passed=_boolean(_field(entry, "Result", "a check"), "a check's result"),
+            )
+            for entry in ([] if checks is None else _objects(checks, "the last round's checks"))
+        ],
+    )
 
 
 @lru_cache(maxsize=1)

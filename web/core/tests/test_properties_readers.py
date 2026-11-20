@@ -25,11 +25,13 @@ from django.test import Client, override_settings
 from hypothesis import example, given
 from hypothesis import strategies as st
 from quotient.client import (
+    EngineStatus,
     Inject,
     QuotientBox,
     QuotientClient,
     QuotientInfrastructure,
     QuotientService,
+    RoundCheck,
     ServiceCheck,
     TeamServiceExport,
     TeamUptime,
@@ -111,6 +113,35 @@ SERVICE_CHECKS = [
         "Error": "unexpected status code",
     }
 ]
+# GET /api/engine as Quotient answers an admin: snake_case keys around records with Go's field names
+ENGINE = {
+    "last_round": {
+        "ID": 4,
+        "StartTime": "2026-11-21T16:30:00Z",
+        "Checks": [
+            {
+                "TeamID": 1,
+                "RoundID": 4,
+                "Round": {"ID": 0, "StartTime": "0001-01-01T00:00:00Z", "Checks": None, "SLAs": None},
+                "ServiceName": "web-http",
+                "Points": 5,
+                "Result": False,
+                "Error": "unexpected status code",
+                "Debug": "HTTP 503",
+            }
+        ],
+        "SLAs": None,
+    },
+    "current_round_time": "2026-11-21T16:30:00Z",
+    "next_round_time": "2026-11-21T16:31:00Z",
+    "running": True,
+    "competition_started": False,
+    "scheduled_start_time": "2026-11-21T17:00:00Z",
+    "scheduled_end_time": "2026-11-22T01:00:00Z",
+    "schedule_source": "config",
+    "preflight": True,
+    "competition_timezone": "America/Los_Angeles",
+}
 PROXMOX_POOL = {
     "data": {
         "members": [
@@ -329,6 +360,30 @@ def check_service_checks(result: object) -> None:
             )
         ),
         "None or service checks with a round, timestamp, pass/fail, debug and error",
+    )
+
+
+def check_engine_status(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, EngineStatus)
+                and type(r.running) is bool
+                and (r.preflight is None or type(r.preflight) is bool)
+                and is_int(r.round_id)
+                and (r.round_start is None or isinstance(r.round_start, datetime))
+                and all(
+                    isinstance(c, RoundCheck)
+                    and is_int(c.team_id)
+                    and is_str(c.service_name)
+                    and type(c.passed) is bool
+                    for c in r.checks
+                )
+            )
+        ),
+        "None or the engine status with its last round's team checks",
     )
 
 
@@ -670,6 +725,13 @@ READERS = [
         (DONE, SERVICE_CHECKS),
         check_service_checks,
         (f"{QC}.get_service_checks", f"{QC}._cached", QJ),
+    ),
+    Reader(
+        "get_engine_status",
+        lambda: quotient().get_engine_status(),
+        (DONE, ENGINE),
+        check_engine_status,
+        (f"{QC}.get_engine_status", f"{QC}._fetch", QJ),
     ),
     Reader(
         "proxmox_list_team_vms",

@@ -12,7 +12,7 @@ version, since they share the models.
 | Process | Command | What it does | Liveness |
 |---|---|---|---|
 | web | `gunicorn portal.wsgi:application` (the image's default) | The portal's pages: tickets, scoring, inject grading, packets, registration, the ops pages. Its entrypoint (`web/entrypoint.sh`) first runs `manage.py prepare_database`: migrations under a lock, then teams 1 to `MAX_TEAMS` if there are none. | `GET /livez/` (no database); `GET /health/` also queries the database |
-| worker | `python -m worker` | The competition timer (scheduled starts and stops), the Authentik group refresh every 5 minutes, the Quotient metadata sync every 5 minutes (15 while Quotient is unreachable), which also reads Proxmox and pushes to aweful-proxy, the expired session cleanup (Django's clearsessions) every hour, and the worker queue: Nextcloud accounts and the Quotient sync a competition start queues. It talks to no chat system. | `python -m core.health worker` |
+| worker | `python -m worker` | The competition timer (scheduled starts and stops, the end countdown, and the preflight report: Quotient's latest preflight round, queued for the ops channel 30 and 10 minutes before a scheduled start), the Authentik group refresh every 5 minutes, the Quotient metadata sync every 5 minutes (15 while Quotient is unreachable), which also reads Proxmox and pushes to aweful-proxy, the expired session cleanup (Django's clearsessions) every hour, and the worker queue: Nextcloud accounts and the Quotient sync a competition start queues. It talks to no chat system. | `python -m core.health worker` |
 | chat | `python -m chat` | A runner for each configured chat backend, in one event loop: the Discord bot when `DISCORD_BOT_TOKEN` is set, the Zulip runner when `ZULIP_SITE`, `ZULIP_BOT_EMAIL` and `ZULIP_API_KEY` are all set. It exits at once when neither is configured. | `python -m core.health chat` |
 
 The web server, the worker and the chat process refuse to start (`web/portal/required.py` `refuse_to_start`), naming
@@ -302,16 +302,19 @@ Each of these is off until its settings are set; the rest of the portal works wi
 ### Quotient
 
 The Quotient scoring engine supplies the box and service lists (ticket forms, red team and incident forms, bot
-autocomplete), inject titles for grading, ticket service check history, and the service scores the competition stop
-pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from Quotient's `event.conf` as `QUOTIENT_USERNAME` and
-`QUOTIENT_PASSWORD`.
+autocomplete), inject titles for grading, ticket service check history, the preflight report (its latest preflight
+round, queued for the ops channel 30 and 10 minutes before a scheduled start; it needs upstream Quotient PR #208 or
+later), and the service scores the competition stop pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from
+Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 
-- A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped.
+- A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped. Ticket
+  check history and the preflight report take a team's Quotient ID as its number, so create Quotient's teams in order.
 - An inject's point value comes from its title: `(10 pts)`, `(1,000 points)`.
 - A ticket's service is matched to Quotient's check `box-service`.
 
-Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, the stop's score sync step fails
-(the stop still completes), and the worker logs the failed sync once and retries it every 15 minutes.
+Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
+stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
+15 minutes.
 
 Close Out keeps the portal's side of an event in its archive (Download Close Out Archive on the event's page): every
 export, plus each ticket's comments (its Discord thread or Zulip topic as the portal recorded it), its history, and

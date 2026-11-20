@@ -31,7 +31,7 @@ from core.queued_tasks import (
 )
 from core.task_backends import TaskBackend
 from core.task_queue import QueueProcessor, StepsState, TaskProgress, _target
-from core.utils import announcement
+from core.utils import announcement, split_message
 from ticketing.models import Ticket, TicketComment
 from ticketing.utils import relay_parts, ticket_url
 
@@ -64,7 +64,7 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
 
     async def report(self, message: str) -> None:
         try:
-            await self._send_ops(message)
+            await self._send_ops(message, TaskProgress.in_memory(StepsState()))
         except Exception:
             logger.exception(f"Could not post to the Zulip ops stream: {message}")
 
@@ -81,7 +81,7 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
             case LogToChannel():
                 if not payload.message:
                     raise PermanentTaskError("Missing message in payload")
-                await self._send_ops(payload.message)
+                await self._send_ops(payload.message, TaskProgress.of(task))
             case CompetitionStatusChanged():
                 config = await sync_to_async(CompetitionConfig.get_config)()
                 await self._send(settings.ZULIP_OPS_STREAM, STATUS_TOPIC, _card(status_card(config)))
@@ -89,8 +89,11 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
                 assert_never(payload)
         return None
 
-    async def _send_ops(self, message: str) -> None:
-        await self._send(settings.ZULIP_OPS_STREAM, settings.ZULIP_OPS_TOPIC, message)
+    async def _send_ops(self, message: str, progress: TaskProgress[StepsState]) -> None:
+        """Post to the ops topic in as many messages under Zulip's limit as it takes, skipping the parts progress says
+        an earlier attempt sent."""
+        parts = split_message(to_zulip(message), ZULIP_MESSAGE_CHAR_LIMIT)
+        await self._send_each(settings.ZULIP_OPS_TOPIC, [(settings.ZULIP_OPS_STREAM, part) for part in parts], progress)
 
     async def _send(self, stream: str, topic: str, content: str) -> None:
         """Post content to the topic, its times converted and cut to Zulip's limit; a stream that doesn't exist fails
@@ -193,7 +196,8 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
             streams = ", ".join(f"{number:02d} ({team_broadcast_stream(number)})" for number in missing)
             problems.append(MISSING_STREAMS.format(teams=streams))
         if problems:
-            await self._send_ops("\n".join([f"Broadcast from {payload.sender} to {payload.target}:", *problems]))
+            notice = "\n".join([f"Broadcast from {payload.sender} to {payload.target}:", *problems])
+            await self._send_ops(notice, TaskProgress.in_memory(StepsState()))
         return {"delivered": list(reached), "missing": missing, "not_found": not_found}
 
 

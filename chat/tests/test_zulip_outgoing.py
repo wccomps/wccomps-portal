@@ -358,6 +358,41 @@ async def test_log_to_channel_posts_to_ops_topic(processor, fake_zulip):
     assert fake_zulip.sent == [("ops", "ops", "hello")]
 
 
+async def test_a_long_ops_notice_is_posted_whole_and_a_retry_skips_the_parts_sent(processor, fake_zulip):
+    message = "\n".join(f"- **Team {n}**: " + ", ".join(f"service-{s:02}" for s in range(20)) for n in range(1, 51))
+    payload = LogToChannel(message=message)
+    task = await claimed(payload)
+    send = fake_zulip.send_stream_message
+    calls: list[int] = []
+
+    async def fail_second(stream: str, topic: str, content: str) -> int:
+        calls.append(1)
+        if len(calls) == 2:
+            raise ZulipError("HTTP_502")
+        return await send(stream, topic, content)
+
+    fake_zulip.send_stream_message = fail_second
+    with pytest.raises(ZulipError):
+        await run(processor, payload, task)
+    await run(processor, payload, task)
+
+    parts = [content for _, _, content in fake_zulip.sent]
+    assert len(parts) == 2 and all(len(part) <= 10000 for part in parts)
+    assert "\n".join(parts) == message
+    assert len(calls) == 3  # the retry skipped the part already sent
+
+
+async def test_an_ops_notices_times_are_converted_before_it_is_split(processor, fake_zulip):
+    """A Discord time grows as Zulip's, so the notice is measured against Zulip's limit after converting it."""
+    message = "\n".join(f"- **Team {n % 50 + 1}** at <t:1795278600:t>" for n in range(400))
+
+    await run(processor, LogToChannel(message=message))
+
+    parts = [content for _, _, content in fake_zulip.sent]
+    assert all(len(part) <= 10000 and not part.endswith("…") for part in parts)
+    assert "\n".join(parts) == to_zulip(message)
+
+
 async def test_empty_log_fails_for_good(processor):
     with pytest.raises(PermanentTaskError):
         await run(processor, LogToChannel(message=""))
