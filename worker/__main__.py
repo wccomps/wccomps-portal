@@ -1,6 +1,5 @@
 """The worker process, `python -m worker`: the competition timer, the Authentik group refresh, the Quotient sync, the
-preflight report, the expired session cleanup and the worker queue (core.worker_tasks), none of which talks to a chat
-system.
+expired session cleanup and the worker queue (core.worker_tasks), none of which talks to a chat system.
 `python -m core.health worker` is its liveness check.
 
 The loops run under one TaskGroup, so a loop that crashes ends the process, and its container restarts with every
@@ -20,13 +19,7 @@ from portal.required import refuse_to_start
 
 from core.heartbeat import beat, beat_for
 from core.worker_tasks import WorkerQueueProcessor
-from worker.jobs import (
-    competition_timer_loop,
-    group_refresh_loop,
-    preflight_report_loop,
-    quotient_sync_loop,
-    session_cleanup_loop,
-)
+from worker.jobs import competition_timer_loop, group_refresh_loop, quotient_sync_loop, session_cleanup_loop
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +30,6 @@ async def run() -> None:
         group.create_task(competition_timer_loop())
         group.create_task(group_refresh_loop())
         group.create_task(quotient_sync_loop())
-        group.create_task(preflight_report_loop())
         group.create_task(session_cleanup_loop())
         group.create_task(queue.run())
 

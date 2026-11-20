@@ -15,6 +15,7 @@ from core.authentik_utils import set_team_account_active
 from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
+from core.services.ops import notify_ops
 from core.team_accounts import accounts_by_team, blueteam_kinds, team_folder
 from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
@@ -34,6 +35,7 @@ NO_TEAM_ACCOUNT = "no team account in its group"
 NO_FOLDER_ACCOUNT = "no team account in the team folder"
 TIMER_GAVE_UP = "competition_timer_gave_up"
 COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
+PREFLIGHT_REPORT_QUEUED = "preflight_report_queued"
 
 TIMER_ACTOR = "timer"
 # Attempts the timer makes at one scheduled start or stop, one a tick, while it is left incomplete or errored
@@ -45,6 +47,8 @@ COUNTDOWN_MILESTONES: tuple[tuple[int, str], ...] = (
     (60, "1 hour"),
     (30, "30 minutes"),
 )
+# Minutes before the scheduled start at which the preflight report is queued for ops
+PREFLIGHT_REPORT_MINUTES = (30, 10)
 
 # Arbitrary, but fixed; CLAUDE.md says how to free it from a stuck holder
 COMPETITION_RUN_LOCK_ID = 7_261_640_003
@@ -570,6 +574,54 @@ def queue_due_countdown(now: datetime) -> str | None:
             },
         )
         return label
+
+
+@dataclass(frozen=True)
+class PreflightMark:
+    """A preflight report due: the scheduled start it is for, and how many minutes before it."""
+
+    start: datetime
+    minutes: int
+
+
+def _passed_preflight_mark(config: CompetitionConfig, now: datetime) -> PreflightMark | None:
+    """The nearest PREFLIGHT_REPORT_MINUTES mark now has passed, before a scheduled start the competition hasn't
+    reached."""
+    start = config.competition_start_time
+    if start is None or config.applications_enabled or now >= start:
+        return None
+    passed = [m for m in PREFLIGHT_REPORT_MINUTES if now >= start - timedelta(minutes=m)]
+    return PreflightMark(start, min(passed)) if passed else None
+
+
+def _preflight_queued(mark: PreflightMark) -> bool:
+    return AuditLog.objects.filter(
+        action=PREFLIGHT_REPORT_QUEUED, details__start_time=mark.start.isoformat(), details__minutes=mark.minutes
+    ).exists()
+
+
+def due_preflight_report(now: datetime) -> PreflightMark | None:
+    """The preflight report due now and not yet queued, if any. A later mark covers an earlier one missed."""
+    mark = _passed_preflight_mark(CompetitionConfig.get_config(), now)
+    return None if mark is None or _preflight_queued(mark) else mark
+
+
+def queue_preflight_report(mark: PreflightMark, report: str, now: datetime) -> bool:
+    """Queue report for ops as mark's report and record it, so no pass or restart queues it again; False, queueing
+    nothing, when the schedule moved or the report was queued while Quotient was read."""
+    with transaction.atomic():
+        config = CompetitionConfig.locked()
+        if _passed_preflight_mark(config, now) != mark or _preflight_queued(mark):
+            return False
+        notify_ops(report, actor=TIMER_ACTOR)
+        AuditLog.objects.create(
+            action=PREFLIGHT_REPORT_QUEUED,
+            admin_user=TIMER_ACTOR,
+            target_entity="competition_config",
+            target_id=config.pk,
+            details={"start_time": mark.start.isoformat(), "minutes": mark.minutes},
+        )
+    return True
 
 
 class ConfigEditError(ValueError):

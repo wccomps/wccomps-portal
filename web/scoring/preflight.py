@@ -3,26 +3,21 @@ it runs before the competition starts and keeps apart from scoring."""
 
 from datetime import datetime, timedelta
 
-from quotient.client import EngineStatus
+from quotient.client import EngineStatus, get_quotient_client
 
 # A preflight round older than this is treated as none having run
 STALE = timedelta(minutes=10)
 
 
-def _team_order(name: str) -> tuple[int, str]:
-    """team2 before team10."""
-    return len(name), name
-
-
-def preflight_report(status: EngineStatus | None, team_names: dict[int, str] | None, now: datetime) -> str:
-    """The report: each team with a failing check and the services that failed, one team per line, or why there is no
-    preflight round to report. A team Quotient's team list doesn't name (or a list it couldn't give) shows its ID."""
+def preflight_report(status: EngineStatus | None, now: datetime) -> str:
+    """The report: each team with a failing check and the services that failed, one team per line in team order, or
+    why there is no preflight round to report. A team is named by its Quotient ID, which is its portal team number."""
     if status is None:
         return "**Preflight:** couldn't read the engine status from Quotient."
     if status.preflight is None:
         return (
             "**Preflight:** can't read a preflight round: Quotient's engine status has no preflight field, so its "
-            "build predates preflight rounds."
+            "build predates the preflight status in GET /api/engine (dbaseqp/Quotient #208)."
         )
     if not status.preflight:
         return (
@@ -38,15 +33,19 @@ def preflight_report(status: EngineStatus | None, team_names: dict[int, str] | N
     if not status.checks:
         return f"{header}: it ran no checks. Does Quotient have its teams and services set up?"
 
-    names = team_names or {}
-    failed: dict[str, list[str]] = {}
+    failed: dict[int, list[str]] = {}
     for check in status.checks:
         if not check.passed:
-            failed.setdefault(names.get(check.team_id, f"team ID {check.team_id}"), []).append(check.service_name)
+            failed.setdefault(check.team_id, []).append(check.service_name)
     teams = len({check.team_id for check in status.checks})
     if not failed:
         return f"{header}: all {teams} teams green."
 
     lines = [f"{header}: {teams - len(failed)}/{teams} teams green. Failing:"]
-    lines += [f"- **{team}**: {', '.join(sorted(failed[team]))}" for team in sorted(failed, key=_team_order)]
+    lines += [f"- **Team {team}**: {', '.join(sorted(failed[team]))}" for team in sorted(failed)]
     return "\n".join(lines)
+
+
+def read_preflight_report(now: datetime) -> str:
+    """The report from Quotient's engine status now; blocking (HTTP)."""
+    return preflight_report(get_quotient_client().get_engine_status(), now)

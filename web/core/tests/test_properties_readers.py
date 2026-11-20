@@ -113,7 +113,7 @@ SERVICE_CHECKS = [
         "Error": "unexpected status code",
     }
 ]
-# GET /api/engine and GET /api/teams as Quotient answers an admin: Go field names, no json tags
+# GET /api/engine as Quotient answers an admin: snake_case keys around records with Go's field names
 ENGINE = {
     "last_round": {
         "ID": 4,
@@ -142,19 +142,6 @@ ENGINE = {
     "preflight": True,
     "competition_timezone": "America/Los_Angeles",
 }
-TEAMS = [
-    {
-        "ID": 1,
-        "Name": "team01",
-        "Identifier": "01",
-        "Token": "",
-        "Active": True,
-        "Checks": None,
-        "ManualAdjustments": None,
-        "SLAs": None,
-        "SubmissionData": None,
-    }
-]
 PROXMOX_POOL = {
     "data": {
         "members": [
@@ -397,14 +384,6 @@ def check_engine_status(result: object) -> None:
             )
         ),
         "None or the engine status with its last round's team checks",
-    )
-
-
-def check_team_names(result: object) -> None:
-    outcome(
-        result,
-        lambda r: r is None or (isinstance(r, dict) and all(is_int(k) and is_str(v) for k, v in r.items())),
-        "None or team names by whole-number ID",
     )
 
 
@@ -753,13 +732,6 @@ READERS = [
         (DONE, ENGINE),
         check_engine_status,
         (f"{QC}.get_engine_status", f"{QC}._fetch", QJ),
-    ),
-    Reader(
-        "get_team_names",
-        lambda: quotient().get_team_names(),
-        (DONE, TEAMS),
-        check_team_names,
-        (f"{QC}.get_team_names", f"{QC}._fetch", QJ),
     ),
     Reader(
         "proxmox_list_team_vms",

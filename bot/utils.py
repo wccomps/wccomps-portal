@@ -134,7 +134,9 @@ async def send_announcement(
 
 
 async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
-    """Post to the ops channel; whether it was posted. Never raises: a failure is logged."""
+    """Post to the ops channel, in as many messages as it takes (split_message), so none is past Discord's 2000
+    characters and nothing is cut; whether it was all posted. Never raises: a failure is logged, and parts already
+    posted stay."""
     try:
         channel_id = settings.DISCORD_LOG_CHANNEL_ID
         if not channel_id:
@@ -146,11 +148,11 @@ async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
             logger.error(f"Operations channel {channel_id} not found")
             return False
 
-        message = fit(message, DISCORD_MESSAGE_CHAR_LIMIT)
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             logger.error(f"Channel {channel_id} is not a text channel or thread")
             return False
-        await channel.send(message)
+        for part in split_message(message, DISCORD_MESSAGE_CHAR_LIMIT):
+            await channel.send(part)
         logger.info(f"Logged to ops channel: {message}")
         return True
     except Exception as e:

@@ -369,10 +369,6 @@ class QuotientClient:
         """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
         return self._fetch("/api/engine", _engine_status, "the engine status")
 
-    def get_team_names(self) -> dict[int, str] | None:
-        """Fetch each team's name by its Quotient ID, or None if unavailable."""
-        return self._fetch("/api/teams", _team_names, "the teams")
-
 
 def _infrastructure(data: object) -> QuotientInfrastructure:
     # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
@@ -494,14 +490,6 @@ def _engine_status(data: object) -> EngineStatus:
             for entry in ([] if checks is None else _objects(checks, "the last round's checks"))
         ],
     )
-
-
-def _team_names(data: object) -> dict[int, str]:
-    # /api/teams returns every team to an admin: [{"ID": int, "Name": str, ...}]
-    return {
-        _whole(_field(team, "ID", "a team"), "a team's ID"): _text(_field(team, "Name", "a team"), "a team's name")
-        for team in _objects(data, "the teams")
-    }
 
 
 @lru_cache(maxsize=1)
