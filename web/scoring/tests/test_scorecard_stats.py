@@ -5,12 +5,14 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
+from orange_team.models import OrangeCheck
 
 from scoring.calculator import compute_standings, get_standing
 from scoring.models import (
     AttackType,
     IncidentReport,
     InjectScore,
+    OrangeTeamScore,
     RedTeamScore,
     ScoringExclusion,
     ScoringTemplate,
@@ -213,3 +215,72 @@ def test_an_excluded_teams_scorecard_rates_its_injects_against_the_ranked_teams(
     assert (solo["rank"], solo["avg"], solo["max"], solo["delta"]) == (1, Decimal("0"), Decimal("0"), 5)
     shared = by_name["Inject A"]
     assert (shared["rank"], shared["avg"], shared["max"]) == (3, Decimal("40"), Decimal("50"))
+
+
+def test_the_strongest_category_is_the_best_ranked_main_one_then_the_widest_margin(three_teams) -> None:
+    # Team 1 ranks first in services (300 against an average of 233) and injects (150 against 60): the wider
+    # margin over the average, injects, decides.
+    InjectScore.objects.filter(team=three_teams[0], inject_id="inj-a").update(points_awarded=Decimal("150"))
+    # Team 3 ranks last in services and injects, and first in incident recovery, which isn't a main category.
+    IncidentReport.objects.create(
+        team=three_teams[2],
+        submitted_by=User.objects.create_user("blue"),
+        attack_description="x",
+        source_ip="10.0.0.1",
+        attack_detected_at=timezone.now(),
+        points_returned=Decimal("30"),
+        is_approved=True,
+    )
+
+    assert _context(three_teams[0])["stats"]["insights"][0] == "Strongest category: Injects (rank #1 of 3)"
+    assert _context(three_teams[2])["stats"]["insights"][0] == "Strongest category: Injects (rank #3 of 3)"
+
+
+def test_orange_checks_can_be_the_strongest_category_even_at_one_point(three_teams) -> None:
+    # Weights 40/40/20 with maxes 100/100/10 scale orange points by 5, so 0.20 raw is 1.00 point.
+    ScoringTemplate.objects.update(service_weight=Decimal("40"), inject_weight=Decimal("40"), orange_weight=20)
+    OrangeCheck.objects.create(title="Phone check", max_points=10)
+    OrangeTeamScore.objects.create(
+        team=three_teams[2], description="Phone check", points_awarded=Decimal("0.20"), is_approved=True
+    )
+
+    stats = _context(three_teams[2])["stats"]
+
+    assert stats["category_ranks"]["orange"]["max"] == Decimal("1")
+    assert stats["insights"][0] == "Strongest category: Orange (rank #1 of 3)"
+
+
+def test_best_and_weakest_service_break_rank_ties_by_margin(three_teams) -> None:
+    # Team 1: web is rank 1 by 100 over the average and dns rank 2 by 33 under it (fixture); ftp is rank 1 by only
+    # 10, ssh rank 2 exactly at the average, smtp rank 1 by a third of a point.
+    for service, points in (("ftp", ("60", "50", "40")), ("ssh", ("50", "60", "40")), ("smtp", ("50.5", "50", "50"))):
+        for team, value in zip(three_teams, points, strict=True):
+            ServiceDetail.objects.create(team=team, service_name=service, points=Decimal(value))
+
+    stats = _context(three_teams[0])["stats"]
+
+    assert stats["insights"][1:] == ["Best service: web (rank #1)", "Weakest service: dns (rank #2)"]
+    by_name = {service["name"]: service for service in stats["service_stats"]}
+    assert (by_name["ssh"]["rank"], by_name["ssh"]["delta"], by_name["ssh"]["below_avg"]) == (2, 0, False)
+    assert (by_name["smtp"]["rank"], by_name["smtp"]["delta"], by_name["smtp"]["below_avg"]) == (1, 0, False)
+
+
+def test_sla_penalties_at_the_average_are_no_insight(three_teams) -> None:
+    ServiceScore.objects.update(sla_violations=Decimal("-10"))
+
+    insights = _context(three_teams[0])["stats"]["insights"]
+
+    assert not any(insight.startswith("SLA") for insight in insights)
+
+
+def test_a_scorecard_with_no_ranked_teams_compares_against_zero(three_teams) -> None:
+    for team in three_teams:
+        ScoringExclusion.objects.create(team=team)
+    ServiceScore.objects.filter(team=three_teams[0]).update(sla_violations=Decimal("-10"))
+
+    stats = _context(three_teams[0])["stats"]
+
+    assert stats["team_count"] == 0
+    assert stats["neighbors"] == []
+    assert "SLA penalties (-10.00) are worse than average (0)" in stats["insights"]
+    assert stats["total_delta"] == 340
