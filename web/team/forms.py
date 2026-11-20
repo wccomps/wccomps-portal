@@ -61,12 +61,14 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str] | None:
 
     Maps other email columns (contain 'email'), in order, to whichever of contact_email and
     secondary_email is still free; any beyond those are ignored. Assigns the remaining
-    unmapped column as school_name. Returns None if headers already canonical.
+    unmapped column as school_name. Returns None if the headers are already exactly canonical.
     """
     canonical = set(SCHOOL_COLUMNS)
     normalized = {f: f.strip().lower().replace(" ", "_") for f in fieldnames}
 
-    if set(normalized.values()) <= canonical:
+    # "School Name" or " contact_email" normalizes to a canonical name but is not one: the parser reads the raw headers
+    # when there is no mapping, so it still needs one
+    if set(fieldnames) <= canonical:
         return None
 
     mapping: dict[str, str] = {}

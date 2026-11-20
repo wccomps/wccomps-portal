@@ -167,6 +167,33 @@ Example U,captain@example.edu,coach@example.edu
         assert result["rows"][0]["contact_email"] == "captain@example.edu"
         assert result["rows"][0]["secondary_email"] == "coach@example.edu"
 
+    @pytest.mark.parametrize(
+        ("header", "detected"),
+        [
+            ("School Name,Contact Email", "School Name as school_name, Contact Email as contact_email"),
+            ("school_name, contact_email", "school_name as school_name,  contact_email as contact_email"),
+            ("SCHOOL_NAME,Contact_Email", "SCHOOL_NAME as school_name, Contact_Email as contact_email"),
+        ],
+    )
+    def test_headers_naming_the_columns_in_other_case_or_spacing_are_read(self, header: str, detected: str) -> None:
+        """These were taken as canonical, so the parser read the raw names and refused them as missing columns."""
+        csv_file = SimpleUploadedFile("test.csv", f"{header}\nExample U,captain@example.edu\n".encode())
+
+        result = parse_csv_file(csv_file)
+
+        assert result == {
+            "rows": [
+                {
+                    "school_name": "Example U",
+                    "contact_email": "captain@example.edu",
+                    "secondary_email": "",
+                    "notes": "",
+                }
+            ],
+            "errors": [],
+            "warnings": [f"Columns auto-detected: {detected}"],
+        }
+
 
 class TestCSVValidation:
     """Test CSV data validation against database."""
