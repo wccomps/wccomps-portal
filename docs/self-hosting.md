@@ -148,7 +148,7 @@ Nor change on all users, except as the team folder section below allows, an acce
 | Object | Permission | Scope | Used for (`web/core/authentik_manager.py`) |
 |---|---|---|---|
 | Users | view | global | Reading every user and their groups (and, in team folder mode, their folders and attributes) for the group refresh, team accounts, team folder sign-ins and the readiness check "Usernames fixed" (`list_all_users`, `team_folder_pages`, `find_user`) |
-| Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
+| Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop, and enabling a team's account when a packet carries its credentials (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
 | Users | reset password | object: each team account | Setting team passwords (`set_password`) |
 | Groups | view | global | Reading group names (and, in team folder mode, their attributes for the readiness check "Usernames fixed") (`list_all_groups`) |
 | Groups | add user | object: each team group | The readiness fix that puts a team account in its team group (`add_user_to_group`) |
@@ -222,9 +222,11 @@ Django's admin). An active team's group grants blue team access to its members.
   team's accounts the members of its group whose username fully matches it. The portal's password resets and the
   packet's credentials are off; manage passwords in Authentik.
 
-A competition start enables each active team's accounts and opens the controlled applications; a stop disables every
-team's accounts and closes them. Create the accounts in Authentik before the event; the readiness checks list the
-missing ones.
+A packet carrying a team's credentials turns its account on when it is sent, before the start; a competition start
+enables each active team's accounts and opens the controlled applications, and a stop disables every team's accounts
+and closes them. So each controlled application needs an enabled binding besides its blue team one (the readiness
+checks fail one without), and any other application team accounts mustn't reach before the start needs a binding
+that keeps them out. Create the accounts in Authentik before the event; the readiness checks list the missing ones.
 
 ### Teams without Authentik groups (team folder)
 
@@ -292,8 +294,8 @@ controlled applications, chosen on the Competition setup page (`/ops/admin/compe
 one needs a policy binding to a group whose name contains `blueteam` (any case), such as a group holding the team
 groups, or in team folder mode to a policy whose name contains it (see the team folder above); a start enables that
 binding and a stop disables it. A start is refused while the list is empty, and the readiness check "App bindings
-configured" fails for an application without such a binding, and in team folder mode for one without a second enabled
-binding.
+configured" fails for an application without such a binding or without a second enabled binding (team accounts are
+on before the start), and in team folder mode for one with more than one blue team binding.
 
 ## Optional integrations
 
