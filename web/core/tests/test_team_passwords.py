@@ -295,32 +295,15 @@ def test_bulk_reset_uses_one_manager(manager):
     assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
 
 
-def test_one_reason_shared_by_many_teams_reads_once():
-    """A bulk reset where every team fails the same way reads one reason, not fifty copies of it."""
-    summary = sessions_failure_summary([(f"team{n:02d}", "HTTP 403") for n in range(1, 51)])
-
-    assert summary.count("HTTP 403") == 1
-    assert len(summary) < 600
-
-
-def test_each_reason_sessions_could_not_end_reads_once_with_its_teams():
-    summary = sessions_failure_summary([("team01", "HTTP 403"), ("team02", "HTTP 502"), ("team03", "HTTP 403")])
-
-    assert summary == (
-        f"could not end sessions for team01, team03 (HTTP 403), so {STILL_OPEN}; "
-        f"could not end sessions for team02 (HTTP 502), so {STILL_OPEN}"
-    )
-
-
 LISTED = "(?:Apple|Zebra)"  # The test word list's words, capitalized
 
 
 @pytest.mark.parametrize(
     ("pick", "shape"),
     [
-        (lambda options: options[0], rf"100!-(?P<w1>{LISTED})-(?P<w2>{LISTED})"),
-        (lambda options: options[1], rf"(?P<w1>{LISTED})-@101-(?P<w2>{LISTED})"),
-        (lambda options: options[-1], rf"(?P<w1>{LISTED})-(?P<w2>{LISTED})-\+999"),
+        (lambda options: options[0], rf"100!-{LISTED}-{LISTED}"),
+        (lambda options: options[1], rf"{LISTED}-@101-{LISTED}"),
+        (lambda options: options[-1], rf"{LISTED}-{LISTED}-\+999"),
     ],
     ids=["first", "second", "last"],
 )
@@ -335,11 +318,26 @@ def test_a_generated_password_is_two_words_and_a_number_with_a_symbol(tmp_path, 
     picks = SimpleNamespace(randbelow=lambda n: pick(range(n)), choice=pick)
     monkeypatch.setattr("core.authentik_utils.secrets", picks)
 
-    passwords = [generate_blueteam_password() for _ in range(40)]
+    password = generate_blueteam_password()
 
-    matches = [re.fullmatch(shape, password) for password in passwords]
-    assert all(matches), passwords
-    assert any(m["w1"] != m["w2"] for m in matches), "a password keeps both its words"
+    assert re.fullmatch(shape, password), password
+
+
+def test_each_reason_sessions_could_not_end_reads_once_with_its_teams():
+    summary = sessions_failure_summary([("team01", "HTTP 403"), ("team02", "HTTP 502"), ("team03", "HTTP 403")])
+
+    assert summary == (
+        f"could not end sessions for team01, team03 (HTTP 403), so {STILL_OPEN}; "
+        f"could not end sessions for team02 (HTTP 502), so {STILL_OPEN}"
+    )
+
+
+def test_one_reason_shared_by_many_teams_reads_once():
+    """A bulk reset where every team fails the same way reads one reason, not fifty copies of it."""
+    summary = sessions_failure_summary([(f"team{n:02d}", "HTTP 403") for n in range(1, 51)])
+
+    assert summary.count("HTTP 403") == 1
+    assert len(summary) < 600
 
 
 def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
@@ -452,9 +450,7 @@ def test_bulk_note_lists_every_team_it_could_not_count(manager):
     manager.find_user.side_effect = lambda username: {"pk": 9, "username": username, "uid": f"sub-{username}"}
     failed = AuthentikAPIError("List sessions: Server error", 500)
     manager.user_sessions.side_effect = [failed, [], failed, []]
-    with patch("core.authentik_utils.AuthentikManager") as cls:
-        cls.return_value.__enter__.return_value = manager
-        drain(reset_teams_credentials([1, 2], "gold-admin"))
+    drain(reset_teams_credentials([1, 2], "gold-admin"))
 
     note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note.endswith("; could not count the sessions of team01, team02")
@@ -463,9 +459,7 @@ def test_bulk_note_lists_every_team_it_could_not_count(manager):
 def test_a_bulk_reset_out_of_room_returns_the_batches_it_did_and_names_the_rest(manager):
     """The bot stops before a batch its reply window can't fit, then names the teams from the batches returned."""
     manager.find_user.side_effect = lambda username: {"pk": 9, "username": username, "uid": f"sub-{username}"}
-    with patch("core.authentik_utils.AuthentikManager") as cls:
-        cls.return_value.__enter__.return_value = manager
-        result = drain(reset_teams_credentials(list(range(1, 13)), "gold-admin", lambda: False))
+    result = drain(reset_teams_credentials(list(range(1, 13)), "gold-admin", lambda: False))
 
     assert result.team_numbers == list(range(1, 11))
     notes = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]

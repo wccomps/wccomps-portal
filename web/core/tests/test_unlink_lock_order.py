@@ -1,20 +1,22 @@
 """Unlinking a team and the Close Out wipe lock the team rows before the links, so neither order deadlocks. The wipe
-runs at REPEATABLE READ, as Close Out runs it, where a row changed under it is a refusal (40001), never a deadlock."""
+runs at REPEATABLE READ, as Close Out runs it, where a row changed under it is a refusal (40001), never a deadlock.
+The team lock leaves rows referencing the team writable, and linking waits for it."""
 
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
-from django.db import connection, transaction
+from django.db import OperationalError, connection, transaction
 from registration.services import SERIALIZATION_FAILURE
 
 from core import competition_utils
 from core.competition_utils import wipe_competition_data
 from core.services import linking
-from core.services.linking import unlink_teams
+from core.services.linking import execute_link, unlink_teams
 from team.models import DiscordLink, Team, TeamQuerySet
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -134,9 +136,9 @@ def test_a_feedback_edit_holding_a_score_does_not_deadlock_the_wipe(team):
     assert _not_refusals(errors) == []
 
 
-def test_a_locked_team_still_takes_a_new_link(team):
-    """The team lock is FOR NO KEY UPDATE, so while an unlink or the wipe holds a team, a link to it can still be
-    made: the new row's foreign key needs only a key share lock on the team."""
+@contextmanager
+def _another_transaction_holding(team: Team) -> Iterator[None]:
+    """Another transaction holds the team's lock, as an unlink or the wipe does, until the block ends."""
     errors: list[BaseException] = []
     team_locked = threading.Event()
     release = threading.Event()
@@ -149,14 +151,39 @@ def test_a_locked_team_still_takes_a_new_link(team):
     holding = _in_thread(hold, errors)
     try:
         assert team_locked.wait(10)
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute("SET LOCAL lock_timeout = '2s'")
-            joiner = User.objects.create(username="joiner06")
-            DiscordLink.objects.create(user=joiner, discord_id=607, discord_username="j", team=team, is_active=True)
+        yield
     finally:
         release.set()
         holding.join(30)
-
     assert errors == []
+
+
+def _lock_timeout(seconds: int) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(f"SET LOCAL lock_timeout = '{seconds}s'")
+
+
+def test_a_locked_team_still_takes_rows_that_reference_it(team):
+    """The team lock is FOR NO KEY UPDATE, so while an unlink or the wipe holds a team, rows referencing it stay
+    writable: an insert's foreign key check needs only a key share lock on the team. The row here is a link inserted
+    directly; a link made through execute_link takes the team lock itself and waits."""
+    joiner = User.objects.create(username="joiner06")
+
+    with _another_transaction_holding(team), transaction.atomic():
+        _lock_timeout(2)
+        DiscordLink.objects.create(user=joiner, discord_id=607, discord_username="j", team=team, is_active=True)
+
     assert DiscordLink.objects.filter(team=team, is_active=True).count() == 2
+
+
+def test_a_link_waits_while_another_transaction_holds_the_team(team):
+    """A reset's unlink holds the team lock, so a link confirmed meanwhile waits for it rather than being made beside
+    the unlink and outlasting the reset."""
+    joiner = User.objects.create(username="joiner06")
+
+    with _another_transaction_holding(team), transaction.atomic():
+        _lock_timeout(1)
+        with pytest.raises(OperationalError):
+            execute_link(607, "j", joiner, team)
+
+    assert not DiscordLink.objects.filter(discord_id=607).exists()

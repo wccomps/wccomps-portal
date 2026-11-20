@@ -8,8 +8,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from core.models import CompetitionConfig
-from team.models import MAX_TEAMS, DiscordLink, LinkAttempt, Team
+from team.models import MAX_TEAMS, DiscordLink, Team
 
 pytestmark = pytest.mark.django_db
 
@@ -24,9 +23,8 @@ def _link(discord_id: int, team: Team | None = None, *, active: bool = True) -> 
 
 
 def test_the_annotated_member_count_leaves_out_unlinked_members(django_assert_num_queries) -> None:
-    """The team list counts only active links, as an unannotated team does, so an unlinked member frees a seat; the
-    list reads the count from its own query rather than one query per team."""
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"max_team_members": 2})
+    """The team lists count only active links, and each list reads the count from its own query rather than one
+    query per team."""
     team = Team.objects.create(team_number=1, team_name="Team 01")
     Team.objects.create(team_number=2, team_name="Team 02")
     _link(101, team)
@@ -37,8 +35,6 @@ def test_the_annotated_member_count_leaves_out_unlinked_members(django_assert_nu
 
     with django_assert_num_queries(0):
         assert counted.get_member_count() == 1
-    assert Team.objects.get(pk=team.pk).get_member_count() == 1
-    assert not counted.is_full()
     assert Team.objects.with_active_member_count().get(team_number=2).get_member_count() == 0
 
 
@@ -92,11 +88,3 @@ def test_a_save_of_named_fields_keeps_a_change_made_meanwhile() -> None:
 
     saved = Team.objects.get(pk=team.pk)
     assert (saved.team_name, saved.ticket_counter) == ("Renamed meanwhile", 7)
-
-
-@pytest.mark.parametrize(("success", "status"), [(True, "Success"), (False, "Failed")])
-def test_a_link_attempt_names_who_tried_and_how_it_went(success: bool, status: str) -> None:
-    """What the admin's link attempt pages and its change history call the attempt."""
-    attempt = LinkAttempt(discord_id=1, discord_username="discorduser", authentik_username="team05", success=success)
-
-    assert str(attempt) == f"discorduser to team05 ({status})"

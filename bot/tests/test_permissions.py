@@ -88,7 +88,7 @@ async def test_a_seat_the_groups_hold_is_the_members_team() -> None:
     member = await linked_team_member(discord_id)
 
     assert member is not None and member.team == team
-    assert member.user.username == f"perm{discord_id}"  # who /submit records as the submitter
+    assert member.user.username == f"perm{discord_id}"  # who /incident-report records as the submitter
     assert await check_blue_team(_interaction(discord_id))
 
 
