@@ -234,30 +234,32 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     rows: list[CSVRowData] = []
     errors: list[str] = []
     warnings: list[str] = []
-
+    # The line the next row starts on, which a csv.Error names: a quoted cell can run over several lines
+    row_start = 1
     try:
         # utf-8-sig: spreadsheet programs start a UTF-8 CSV with a byte order mark
         content = csv_file.read().decode("utf-8-sig")
         csv_file.seek(0)
 
         # newline="": the csv module reads line ends itself, so CR alone, LF and CRLF all end a row
-        reader = csv.DictReader(io.StringIO(content, newline=""))
+        reader = csv.reader(io.StringIO(content, newline=""))
+        header = next(reader, [])
 
         required_headers = set(REQUIRED_SCHOOL_COLUMNS)
         all_headers = set(SCHOOL_COLUMNS)
 
-        if not reader.fieldnames:
+        if not header:
             errors.append("CSV file is empty or has no headers")
             return {"rows": rows, "errors": errors, "warnings": warnings}
 
-        header_mapping = _infer_header_mapping(list(reader.fieldnames))
+        header_mapping = _infer_header_mapping(header)
         if header_mapping:
             mapped_names = set(header_mapping.values())
             warnings.append(
                 "Columns auto-detected: " + ", ".join(f"{raw} as {canon}" for raw, canon in header_mapping.items())
             )
         else:
-            mapped_names = set(reader.fieldnames)
+            mapped_names = set(header)
 
         headers = mapped_names
 
@@ -270,10 +272,17 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
         if unknown_headers:
             warnings.append(f"Unknown columns will be ignored: {', '.join(sorted(unknown_headers))}")
 
-        for row_num, raw_row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
-            row = {header_mapping.get(k, k): v for k, v in raw_row.items()} if header_mapping else raw_row
+        names = [header_mapping.get(name, name) for name in header] if header_mapping else header
+        row_start = reader.line_num + 1
+        row_num = 1  # the header is row 1; a blank line isn't a row
+        for cells in reader:
+            row_start = reader.line_num + 1
+            if not cells:
+                continue
+            row_num += 1
+            row = dict(zip(names, cells, strict=False))
             # A row is checked as the school info form checks one school: lengths, emails, no NUL characters.
-            # A cell missing from a short row is None.
+            # A short row's missing cells and a long row's extra ones are left out.
             # A cell may be the school info export's, so the formula guard's quote comes off first
             form = SchoolInfoEditForm({name: unquote_cell(row.get(name) or "") for name in all_headers})
             if form.is_valid():
@@ -297,8 +306,8 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
         errors.append("File encoding error. Please ensure the file is UTF-8 encoded.")
     except csv.Error:
         errors.append(
-            f"The file isn't a CSV the import can read (line {reader.line_num}): save it from your spreadsheet as CSV "
-            "and upload it again."
+            f"The file isn't a CSV the import can read (line {row_start}): save it from your spreadsheet as CSV and "
+            "upload it again."
         )
 
     return {"rows": rows, "errors": errors, "warnings": warnings}

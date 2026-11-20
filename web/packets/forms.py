@@ -21,20 +21,26 @@ def parse_team_extras(csv_text: str) -> dict[str, dict[str, str]]:
     saying what to fix when the text has no team column, no team rows, or isn't CSV.
     """
     # newline="": the csv module reads line ends itself, so CR alone, LF and CRLF all end a row
-    reader = csv.DictReader(io.StringIO(csv_text.strip(), newline=""))
+    rows = csv.reader(io.StringIO(csv_text.strip(), newline=""))
     result: dict[str, dict[str, str]] = {}
+    # The line the next row starts on, which a csv.Error names: a quoted cell can run over several lines
+    row_start = 1
     try:
-        team_col = next((col for col in reader.fieldnames or [] if "team" in col.lower()), None)
+        header = next(rows, [])
+        team_col = next((col for col in header if "team" in col.lower()), None)
         if team_col is None:
             raise forms.ValidationError(f"The per-team data has no 'team' column. {TEAM_EXTRAS_HELP}")
-        other_cols = [c for c in reader.fieldnames or [] if c != team_col]
-        for row in reader:
+        other_cols = [c for c in header if c != team_col]
+        row_start = rows.line_num + 1
+        for cells in rows:
+            row_start = rows.line_num + 1
+            row = dict(zip(header, cells, strict=False))
             digits = re.sub(r"[^0-9]", "", row.get(team_col) or "")
             if digits and len(digits) <= 9:
                 result[str(int(digits))] = {col: (row.get(col) or "").strip() for col in other_cols}
     except csv.Error as e:
         raise forms.ValidationError(
-            f"The per-team data isn't CSV the upload can read (line {reader.line_num}). {TEAM_EXTRAS_HELP}"
+            f"The per-team data isn't CSV the upload can read (line {row_start}). {TEAM_EXTRAS_HELP}"
         ) from e
     if not result:
         raise forms.ValidationError(f"No row of the per-team data has a team number. {TEAM_EXTRAS_HELP}")
