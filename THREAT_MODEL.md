@@ -61,8 +61,9 @@ during an event.
    (`web/quotient/archive_scoring_host.py`).
 12. **Quotient admin login** (`web/portal/settings.py` `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD`): reads every team's
    check output, including the credentials each check used, and can pause the engine and reset or change Quotient's
-   scores (asset 6). The worker holds it for the metadata sync and the preflight report, and the chat process for the
-   stop's score sync (boundary 7).
+   scores (asset 6). Web holds it for inject grading, ticket check history, the setup page's sync and the score sync,
+   the worker for the metadata sync and the preflight report, and the chat process for the stop's score sync (boundary
+   7).
 
 ## Trust boundaries and data flows
 

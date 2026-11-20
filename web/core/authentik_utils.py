@@ -544,7 +544,7 @@ def _combined(batches: list[BulkPasswordResetResult]) -> BulkPasswordResetResult
 def _bulk_reset_note(
     actor: str, team_numbers: list[int], batches: list[BulkPasswordResetResult], handed_over: int
 ) -> str:
-    """Lost and unreached teams first: a long note is cut at Discord's limit, and those are what ops must act on."""
+    """Lost and unreached teams first: those are what ops must act on."""
     parts = []
     if lost := [username for batch in batches[handed_over:] for _num, username, _pw in batch.password_list]:
         parts.append(f"the new passwords of {', '.join(lost)} were never handed over: reset them again")
