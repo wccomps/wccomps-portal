@@ -59,6 +59,10 @@ during an event.
    it does the same datasets live (`web/scoring/views/export.py`). Off the portal, the scoring host's archive script
    writes a tarball of the teams' inject uploads and the divisor log of runner source addresses
    (`web/quotient/archive_scoring_host.py`).
+12. **Quotient admin login** (`web/portal/settings.py` `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD`): reads every team's
+   check output, including the credentials each check used, and can pause the engine and reset or change Quotient's
+   scores (asset 6). The worker holds it for the metadata sync and the preflight report, and the chat process for the
+   stop's score sync (boundary 7).
 
 ## Trust boundaries and data flows
 

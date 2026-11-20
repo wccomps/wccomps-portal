@@ -382,6 +382,17 @@ async def test_a_long_ops_notice_is_posted_whole_and_a_retry_skips_the_parts_sen
     assert len(calls) == 3  # the retry skipped the part already sent
 
 
+async def test_an_ops_notices_times_are_converted_before_it_is_split(processor, fake_zulip):
+    """A Discord time grows as Zulip's, so the notice is measured against Zulip's limit after converting it."""
+    message = "\n".join(f"- **Team {n % 50 + 1}** at <t:1795278600:t>" for n in range(400))
+
+    await run(processor, LogToChannel(message=message))
+
+    parts = [content for _, _, content in fake_zulip.sent]
+    assert all(len(part) <= 10000 and not part.endswith("…") for part in parts)
+    assert "\n".join(parts) == to_zulip(message)
+
+
 async def test_empty_log_fails_for_good(processor):
     with pytest.raises(PermanentTaskError):
         await run(processor, LogToChannel(message=""))
