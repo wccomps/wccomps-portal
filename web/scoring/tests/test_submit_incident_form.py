@@ -72,7 +72,10 @@ def test_a_team_at_its_submission_limit_is_refused(client: Client, blue_team: Te
     response = client.post(reverse("scoring:submit_incident_report"), _report(), follow=True)
 
     assert IncidentReport.objects.filter(team=blue_team).count() == IncidentReport.SUBMISSION_LIMIT
-    assert f"Your team has filed {IncidentReport.SUBMISSION_LIMIT} incident reports" in response.content.decode()
+    minutes = IncidentReport.SUBMISSION_WINDOW // timedelta(minutes=1)
+    assert (
+        f"Your team has filed {IncidentReport.SUBMISSION_LIMIT} incident reports in the last {minutes} minutes."
+    ) in response.content.decode()
 
 
 def test_reports_older_than_the_window_dont_count(client: Client, blue_team: Team, blue_team_user: User) -> None:
@@ -83,6 +86,16 @@ def test_reports_older_than_the_window_dont_count(client: Client, blue_team: Tea
 
     assert response.status_code == 302
     assert IncidentReport.objects.filter(team=blue_team).count() == 2 * IncidentReport.SUBMISSION_LIMIT
+
+
+def test_another_teams_reports_dont_count(client: Client, blue_team: Team, blue_team_user: User) -> None:
+    other = Team.objects.create(team_number=blue_team.team_number + 1, team_name="Other team")
+    _filed(other, blue_team_user, IncidentReport.SUBMISSION_LIMIT)
+
+    response = client.post(reverse("scoring:submit_incident_report"), _report())
+
+    assert response.status_code == 302
+    assert IncidentReport.objects.filter(team=blue_team).count() == 1
 
 
 def test_staff_filing_for_a_team_arent_limited(
