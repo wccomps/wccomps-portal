@@ -25,14 +25,14 @@ from django.test import Client, override_settings
 from hypothesis import example, given
 from hypothesis import strategies as st
 from quotient.client import (
+    EngineStatus,
     Inject,
-    PreflightRound,
     QuotientBox,
     QuotientClient,
     QuotientInfrastructure,
     QuotientService,
+    RoundCheck,
     ServiceCheck,
-    TeamOutage,
     TeamServiceExport,
     TeamUptime,
 )
@@ -113,22 +113,48 @@ SERVICE_CHECKS = [
         "Error": "unexpected status code",
     }
 ]
-PREFLIGHT = {
-    "round": 4,
-    "start_time": "2026-10-31T15:30:00Z",
-    "checks": [
-        {
-            "team_id": 1,
-            "team_name": "team01",
-            "service_name": "web-http",
-            "service_type": "Custom",
-            "result": False,
-            "error": "exit status 1",
-            "debug": "check_web.py 10.0.0.5 output: FAILURE: wiki returned HTTP 503",
-        }
-    ],
+# GET /api/engine and GET /api/teams as Quotient answers an admin: Go field names, no json tags
+ENGINE = {
+    "last_round": {
+        "ID": 4,
+        "StartTime": "2026-11-21T16:30:00Z",
+        "Checks": [
+            {
+                "TeamID": 1,
+                "RoundID": 4,
+                "Round": {"ID": 0, "StartTime": "0001-01-01T00:00:00Z", "Checks": None, "SLAs": None},
+                "ServiceName": "web-http",
+                "Points": 5,
+                "Result": False,
+                "Error": "unexpected status code",
+                "Debug": "HTTP 503",
+            }
+        ],
+        "SLAs": None,
+    },
+    "current_round_time": "2026-11-21T16:30:00Z",
+    "next_round_time": "2026-11-21T16:31:00Z",
+    "running": True,
+    "competition_started": False,
+    "scheduled_start_time": "2026-11-21T17:00:00Z",
+    "scheduled_end_time": "2026-11-22T01:00:00Z",
+    "schedule_source": "config",
+    "preflight": True,
+    "competition_timezone": "America/Los_Angeles",
 }
-OUTAGES = [{"team_id": 16, "team_name": "team16", "rounds_down": 4, "down_since": "2026-10-31T19:00:20.936611Z"}]
+TEAMS = [
+    {
+        "ID": 1,
+        "Name": "team01",
+        "Identifier": "01",
+        "Token": "",
+        "Active": True,
+        "Checks": None,
+        "ManualAdjustments": None,
+        "SLAs": None,
+        "SubmissionData": None,
+    }
+]
 PROXMOX_POOL = {
     "data": {
         "members": [
@@ -289,42 +315,6 @@ def check_injects(result: object) -> None:
     )
 
 
-def check_preflight(result: object) -> None:
-    def ok(r: object) -> bool:
-        return r is None or (
-            isinstance(r, PreflightRound)
-            and is_int(r.round_number)
-            and (r.start_time is None or isinstance(r.start_time, datetime))
-            and all(
-                is_str(c.team_name)
-                and is_str(c.service_name)
-                and is_str(c.service_type)
-                and type(c.passed) is bool
-                and is_str(c.error)
-                and is_str(c.debug)
-                for c in r.checks
-            )
-        )
-
-    outcome(result, ok, "None or a preflight round of team checks")
-
-
-def check_outages(result: object) -> None:
-    def ok(r: object) -> bool:
-        return r is None or (
-            isinstance(r, list)
-            and all(
-                isinstance(o, TeamOutage)
-                and is_str(o.team_name)
-                and is_int(o.rounds_down)
-                and (o.down_since is None or isinstance(o.down_since, datetime))
-                for o in r
-            )
-        )
-
-    outcome(result, ok, "None or teams with a whole number of rounds down")
-
-
 def check_export(result: object) -> None:
     def ok(r: object) -> bool:
         return r is None or (
@@ -383,6 +373,38 @@ def check_service_checks(result: object) -> None:
             )
         ),
         "None or service checks with a round, timestamp, pass/fail, debug and error",
+    )
+
+
+def check_engine_status(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, EngineStatus)
+                and type(r.running) is bool
+                and (r.preflight is None or type(r.preflight) is bool)
+                and is_int(r.round_id)
+                and (r.round_start is None or isinstance(r.round_start, datetime))
+                and all(
+                    isinstance(c, RoundCheck)
+                    and is_int(c.team_id)
+                    and is_str(c.service_name)
+                    and type(c.passed) is bool
+                    for c in r.checks
+                )
+            )
+        ),
+        "None or the engine status with its last round's team checks",
+    )
+
+
+def check_team_names(result: object) -> None:
+    outcome(
+        result,
+        lambda r: r is None or (isinstance(r, dict) and all(is_int(k) and is_str(v) for k, v in r.items())),
+        "None or team names by whole-number ID",
     )
 
 
@@ -726,18 +748,18 @@ READERS = [
         (f"{QC}.get_service_checks", f"{QC}._cached", QJ),
     ),
     Reader(
-        "get_preflight",
-        lambda: quotient().get_preflight(),
-        (DONE, PREFLIGHT),
-        check_preflight,
-        (f"{QC}.get_preflight", QJ),
+        "get_engine_status",
+        lambda: quotient().get_engine_status(),
+        (DONE, ENGINE),
+        check_engine_status,
+        (f"{QC}.get_engine_status", f"{QC}._fetch", QJ),
     ),
     Reader(
-        "get_outages",
-        lambda: quotient().get_outages(),
-        (DONE, OUTAGES),
-        check_outages,
-        (f"{QC}.get_outages", QJ),
+        "get_team_names",
+        lambda: quotient().get_team_names(),
+        (DONE, TEAMS),
+        check_team_names,
+        (f"{QC}.get_team_names", f"{QC}._fetch", QJ),
     ),
     Reader(
         "proxmox_list_team_vms",

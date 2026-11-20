@@ -69,7 +69,7 @@ def test_beat_outside_a_loop_records_nothing(hb_dir):
 
 
 def test_worker_health_checks_worker_loops(hb_dir):
-    for name in ("timer", "groups", "quotient", "sessions", "queue-worker"):
+    for name in ("timer", "groups", "quotient", "preflight", "sessions", "queue-worker"):
         heartbeat.record(name)
     assert health.check("worker") == []
     (hb_dir / "groups").write_text(str(time.time() - 1000))
@@ -77,7 +77,7 @@ def test_worker_health_checks_worker_loops(hb_dir):
 
 
 def test_worker_health_reports_a_missing_loop(hb_dir):
-    for name in ("timer", "groups", "sessions", "queue-worker"):
+    for name in ("timer", "groups", "preflight", "sessions", "queue-worker"):
         heartbeat.record(name)
 
     assert health.check("worker") == [f"quotient: heartbeat missing ({hb_dir / 'quotient'})"]
@@ -90,6 +90,7 @@ def test_worker_budgets_ignore_chat_settings(monkeypatch):
         "timer": 300,
         "groups": 900,
         "quotient": 1800,
+        "preflight": 300,
         "sessions": 11400,
         "queue-worker": 60,
     }

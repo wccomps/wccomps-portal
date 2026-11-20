@@ -1,5 +1,5 @@
-"""The worker's periodic jobs: the competition timer, the Authentik group refresh, the Quotient sync and the expired
-session cleanup.
+"""The worker's periodic jobs: the competition timer, the Authentik group refresh, the Quotient sync, the preflight
+report and the expired session cleanup.
 
 None of them talks to a chat system: what they announce is queued (notify_ops, the competition service's status
 refreshes). Each loop runs a pass at once, then one each interval from the start of the last, and advances its
@@ -10,14 +10,17 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
 
 from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.utils import timezone
+from quotient.client import get_quotient_client
+from scoring.preflight import preflight_report
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.authentik_manager import AuthentikManager
-from core.heartbeat import GROUPS, QUOTIENT, SESSIONS, TIMER, beat, beat_for
+from core.heartbeat import GROUPS, PREFLIGHT, QUOTIENT, SESSIONS, TIMER, beat, beat_for
 from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
@@ -38,7 +41,7 @@ from core.services.user_groups import (
     GroupRefreshResult,
     refresh_user_groups_unless_running,
 )
-from core.utils import recycle_db_connection, run_blocking
+from core.utils import recycle_db_connection, run_blocking, split_message
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,11 @@ SYNC_MINUTES = 5
 # Quotient is routinely off between competitions; check less often and log state changes only
 BACKOFF_MINUTES = 15
 SESSION_CLEANUP_MINUTES = 60
+PREFLIGHT_SECONDS = 60
+# Minutes before the scheduled start at which the preflight report is posted
+PREFLIGHT_REPORT_MINUTES = (30, 10)
+# Discord's message limit, the lowest of the chat systems'
+OPS_MESSAGE_CHARS = 2000
 
 
 async def _every(name: str, seconds: Callable[[], float], run_pass: Callable[[], Awaitable[None]]) -> None:
@@ -232,6 +240,48 @@ class QuotientSync:
 async def quotient_sync_loop() -> None:
     sync = QuotientSync()
     await _every(QUOTIENT, lambda: sync.interval_minutes * 60, sync.run_pass)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Preflight report: Quotient's latest preflight round, posted to ops before the scheduled start
+# ---------------------------------------------------------------------------------------------------------------
+
+
+def read_preflight(now: datetime) -> str:
+    client = get_quotient_client()
+    status = client.get_engine_status()
+    return preflight_report(status, client.get_team_names() if status else None, now)
+
+
+class PreflightReports:
+    """Queues the preflight report at each of PREFLIGHT_REPORT_MINUTES before the scheduled start, once per start time
+    (in this process: a worker restarted inside a report's window posts it again)."""
+
+    def __init__(self) -> None:
+        # (scheduled start, minutes before it) for each report time posted or covered by a later report
+        self.sent: set[tuple[datetime, int]] = set()
+
+    async def run_pass(self) -> None:
+        """Queue the report if one is due. Quotient being unavailable is reported, not raised; a database that can't be
+        read raises, so the pass skips its heartbeat."""
+        await recycle_db_connection()
+        config = await sync_to_async(CompetitionConfig.get_config)()
+        now = timezone.now()
+        start = config.competition_start_time
+        if not start or config.applications_enabled or now >= start:
+            return
+        due = [m for m in PREFLIGHT_REPORT_MINUTES if now >= start - timedelta(minutes=m)]
+        if not due or (start, min(due)) in self.sent:
+            return
+        self.sent.update((start, m) for m in due)
+        report = await run_blocking(read_preflight, now)
+        for part in split_message(report, OPS_MESSAGE_CHARS):
+            await sync_to_async(notify_ops)(part)
+
+
+async def preflight_report_loop() -> None:
+    reports = PreflightReports()
+    await _every(PREFLIGHT, lambda: PREFLIGHT_SECONDS, reports.run_pass)
 
 
 # ---------------------------------------------------------------------------------------------------------------

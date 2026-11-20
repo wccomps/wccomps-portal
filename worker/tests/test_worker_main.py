@@ -65,6 +65,7 @@ async def test_a_crashing_loop_ends_the_worker(monkeypatch):
     monkeypatch.setattr(worker_main, "WorkerQueueProcessor", _Queue)
     monkeypatch.setattr(worker_main, "competition_timer_loop", _forever)
     monkeypatch.setattr(worker_main, "quotient_sync_loop", _forever)
+    monkeypatch.setattr(worker_main, "preflight_report_loop", _forever)
     monkeypatch.setattr(worker_main, "session_cleanup_loop", _forever)
     monkeypatch.setattr(worker_main, "group_refresh_loop", crash)
 

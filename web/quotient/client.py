@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 _SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _INJECT_POINTS_RE = re.compile(r"\(\s*([\d,]+)\s*(?:pts?|points?)\s*\)", re.IGNORECASE)
 MAX_CHECK_OUTPUT_CHARS = 16_384
-TRUNCATED = "\n... [truncated]"
 _UNSAFE_OUTPUT_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -67,7 +66,7 @@ def _clean_output(value: object, what: str) -> str:
     """Sanitize untrusted check output from a team's box: strip control/BiDi chars and cap length."""
     cleaned = _UNSAFE_OUTPUT_CHARS_RE.sub("", _text(value, what))
     if len(cleaned) > MAX_CHECK_OUTPUT_CHARS:
-        return cleaned[:MAX_CHECK_OUTPUT_CHARS] + TRUNCATED
+        return f"{cleaned[:MAX_CHECK_OUTPUT_CHARS]}\n... [truncated]"
     return cleaned
 
 
@@ -211,31 +210,24 @@ class ServiceCheck:
 
 
 @dataclass
-class PreflightCheck:
-    team_name: str
+class RoundCheck:
+    team_id: int
     service_name: str
-    service_type: str
     passed: bool
-    error: str
-    debug: str
 
 
 @dataclass
-class PreflightRound:
-    """The latest round Quotient ran before the competition started; round_number 0 if none ran."""
+class EngineStatus:
+    """Quotient's engine status: whether it is running, and its last round, the latest preflight round while preflight
+    is true (before the competition starts, when no round has been scored). round_id is 0 when no such round has run.
+    preflight is None when the answer has no such field: a Quotient build older than its preflight status.
+    """
 
-    round_number: int
-    start_time: datetime | None
-    checks: list[PreflightCheck]
-
-
-@dataclass
-class TeamOutage:
-    """A team whose every check failed in each of its last rounds_down scored rounds."""
-
-    team_name: str
-    rounds_down: int
-    down_since: datetime | None
+    running: bool
+    preflight: bool | None
+    round_id: int
+    round_start: datetime | None
+    checks: list[RoundCheck]
 
 
 class QuotientAPIError(Exception):
@@ -373,13 +365,13 @@ class QuotientClient:
             "service checks",
         )
 
-    def get_preflight(self) -> PreflightRound | None:
-        """Fetch the latest preflight round from Quotient, or None if unavailable."""
-        return self._fetch("/api/engine/preflight", _preflight, "the preflight round")
+    def get_engine_status(self) -> EngineStatus | None:
+        """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
+        return self._fetch("/api/engine", _engine_status, "the engine status")
 
-    def get_outages(self) -> list[TeamOutage] | None:
-        """Fetch the teams with every check failing in the latest scored round, or None if unavailable."""
-        return self._fetch("/api/engine/outages", _outages, "team outages")
+    def get_team_names(self) -> dict[int, str] | None:
+        """Fetch each team's name by its Quotient ID, or None if unavailable."""
+        return self._fetch("/api/teams", _team_names, "the teams")
 
 
 def _infrastructure(data: object) -> QuotientInfrastructure:
@@ -481,35 +473,35 @@ def _service_checks(data: object) -> list[ServiceCheck]:
     return checks
 
 
-def _preflight(data: object) -> PreflightRound:
-    checks = [
-        PreflightCheck(
-            team_name=_text(_field(entry, "team_name", "a preflight check"), "a team's name"),
-            service_name=_text(_field(entry, "service_name", "a preflight check"), "a service's name"),
-            service_type=_text(entry.get("service_type", ""), "a service's type"),
-            passed=_boolean(_field(entry, "result", "a preflight check"), "a preflight check's result"),
-            error=_clean_output(entry.get("error", ""), "a preflight check's error"),
-            debug=_clean_output(entry.get("debug", ""), "a preflight check's debug output"),
-        )
-        for entry in _objects(_field(data, "checks", "the preflight round"), "the preflight checks")
-    ]
-    start = _field(data, "start_time", "the preflight round")
-    return PreflightRound(
-        round_number=_whole(_field(data, "round", "the preflight round"), "a preflight round number"),
-        start_time=None if start is None else _timestamp(start, "a preflight round's start time"),
-        checks=checks,
+def _engine_status(data: object) -> EngineStatus:
+    # /api/engine returns {"running": bool, "preflight": bool, "last_round": {"ID": int, "StartTime": str,
+    # "Checks": [{"TeamID": int, "ServiceName": str, "Result": bool, ...}] or null, ...}, ...}
+    status = _object(data, "the engine status")
+    last_round = _object(_field(status, "last_round", "the engine status"), "the last round")
+    preflight = status.get("preflight")
+    checks = last_round.get("Checks")
+    return EngineStatus(
+        running=_boolean(_field(status, "running", "the engine status"), "whether the engine is running"),
+        preflight=None if preflight is None else _boolean(preflight, "whether the engine is in preflight"),
+        round_id=_whole(_field(last_round, "ID", "the last round"), "a round number"),
+        round_start=_timestamp(last_round.get("StartTime", ""), "a round's start time"),
+        checks=[
+            RoundCheck(
+                team_id=_whole(_field(entry, "TeamID", "a check"), "a check's team"),
+                service_name=_text(_field(entry, "ServiceName", "a check"), "a check's service"),
+                passed=_boolean(_field(entry, "Result", "a check"), "a check's result"),
+            )
+            for entry in ([] if checks is None else _objects(checks, "the last round's checks"))
+        ],
     )
 
 
-def _outages(data: object) -> list[TeamOutage]:
-    return [
-        TeamOutage(
-            team_name=_text(_field(entry, "team_name", "an outage"), "a team's name"),
-            rounds_down=_whole(_field(entry, "rounds_down", "an outage"), "an outage's rounds"),
-            down_since=_timestamp(_field(entry, "down_since", "an outage"), "an outage's start"),
-        )
-        for entry in _objects(data, "the outages")
-    ]
+def _team_names(data: object) -> dict[int, str]:
+    # /api/teams returns every team to an admin: [{"ID": int, "Name": str, ...}]
+    return {
+        _whole(_field(team, "ID", "a team"), "a team's ID"): _text(_field(team, "Name", "a team"), "a team's name")
+        for team in _objects(data, "the teams")
+    }
 
 
 @lru_cache(maxsize=1)
