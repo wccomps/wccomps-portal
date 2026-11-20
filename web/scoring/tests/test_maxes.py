@@ -44,17 +44,13 @@ def test_inject_max_none_if_any_title_unparsed() -> None:
     assert inject_max_from_titles(_injects("A (100 pts)", "C (no value)")) is None
 
 
-def test_inject_max_none_without_any_values() -> None:
-    assert inject_max_from_titles(_injects("A", "B")) is None
-
-
-def test_inject_max_none_when_the_titles_add_up_to_nothing() -> None:
-    assert inject_max_from_titles([]) is None
-    assert inject_max_from_titles(_injects("A (0 pts)")) is None
-
-
-def test_inject_max_of_a_single_point() -> None:
-    assert inject_max_from_titles(_injects("A (1 pts)")) == Decimal("1")
+@pytest.mark.parametrize(
+    ("titles", "expected"),
+    [((), None), (("A", "B"), None), (("A (0 pts)",), None), (("A (1 pts)",), Decimal("1"))],
+    ids=["no-injects", "no-values", "adds-up-to-nothing", "a-single-point"],
+)
+def test_inject_max_of_one_set_of_titles(titles: tuple[str, ...], expected: Decimal | None) -> None:
+    assert inject_max_from_titles(_injects(*titles)) == expected
 
 
 def _detail(team: Team, name: str, points: str, uptime: str) -> None:
@@ -95,34 +91,25 @@ def test_service_max_ignores_zero_point_best_sample() -> None:
     assert service_max_from_details() == Decimal("2116")  # 1000 + 1116, not 1116
 
 
-def test_service_max_none_without_uptime() -> None:
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    _detail(t1, "web", "1000", "0")  # uptime 0 -> excluded
-    assert service_max_from_details() is None
-
-
-def test_service_max_trusts_a_sample_at_the_reliable_uptime_floor() -> None:
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    _detail(t1, "web", "100", "0.1")
-    assert service_max_from_details() == Decimal("1000")
+@pytest.mark.parametrize(
+    ("points", "uptime", "expected"),
+    [
+        ("1000", "0", None),
+        ("100", "0.1", Decimal("1000")),
+        ("1", "1", Decimal("1")),
+        ("0.01", "1", None),
+    ],
+    ids=["no-uptime", "at-the-reliable-uptime-floor", "a-single-point", "rounds-to-nothing"],
+)
+def test_service_max_of_one_sample(points: str, uptime: str, expected: Decimal | None) -> None:
+    _detail(Team.objects.create(team_number=1, team_name="T1"), "web", points, uptime)
+    assert service_max_from_details() == expected
 
 
 def test_service_max_none_when_a_scored_service_has_only_unreliable_samples() -> None:
     t1 = Team.objects.create(team_number=1, team_name="T1")
     _detail(t1, "web", "100", "0.5")
     _detail(t1, "ssh", "10", "0.0999")
-    assert service_max_from_details() is None
-
-
-def test_service_max_of_a_single_point() -> None:
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    _detail(t1, "web", "1", "1")
-    assert service_max_from_details() == Decimal("1")
-
-
-def test_service_max_none_when_it_rounds_to_nothing() -> None:
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    _detail(t1, "web", "0.01", "1")
     assert service_max_from_details() is None
 
 

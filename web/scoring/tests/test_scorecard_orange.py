@@ -1,5 +1,6 @@
 """The scorecard shows the per-check orange breakdown (approved checks only)."""
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -48,10 +49,13 @@ def test_scorecard_page_renders_the_orange_breakdown(gold_team_user):
     assert b"Keycloak Check (max 10 pts)" in response.content
 
 
-def test_a_manual_orange_score_has_no_maximum():
-    from scoring.views.leaderboard import _scorecard_context
-
+def test_a_manual_orange_score_shows_no_maximum(gold_team_user):
     team = Team.objects.create(team_number=7, team_name="Team G", is_active=True)
     _orange(team, "Manual bonus", 5)
 
-    assert [o.max_points for o in _scorecard_context(7)["orange_scores"]] == [None]
+    client = Client()
+    client.force_login(gold_team_user)
+    html = client.get(reverse("scoring:scorecard", args=[7])).content.decode()
+
+    points = re.search(r"<td>Manual bonus</td>\s*<td[^>]*>(.*?)</td>", html, re.S)
+    assert points and points.group(1).strip() == "5"

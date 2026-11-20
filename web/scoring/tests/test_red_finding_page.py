@@ -1,4 +1,5 @@
-"""A finding's Gold Team review page and its Red Team page each keep their own nav, links and actions."""
+"""A finding's Gold Team review page and its Red Team page each keep their own nav, links and actions; the Red Team
+page shows the finding's source IP or pool and its boxes."""
 
 import re
 from collections.abc import Callable

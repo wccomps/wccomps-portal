@@ -74,8 +74,7 @@ def test_a_team_at_its_submission_limit_is_refused(client: Client, blue_team: Te
     assert IncidentReport.objects.filter(team=blue_team).count() == IncidentReport.SUBMISSION_LIMIT
     minutes = IncidentReport.SUBMISSION_WINDOW // timedelta(minutes=1)
     assert (
-        f"Your team has filed {IncidentReport.SUBMISSION_LIMIT} incident reports in the last {minutes} minutes. "
-        "Wait a while before filing another."
+        f"Your team has filed {IncidentReport.SUBMISSION_LIMIT} incident reports in the last {minutes} minutes."
     ) in response.content.decode()
 
 

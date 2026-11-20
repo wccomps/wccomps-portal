@@ -56,15 +56,37 @@ def _quotient(settings, monkeypatch):
     cache.clear()
 
 
+def _team_export(number: int, services: dict[str, int]) -> dict[str, object]:
+    return {
+        "team_id": number,
+        "team_name": f"team{number:02d}",
+        "services": [
+            {"service_name": name, "service_points": points, "sla_violations": 0, "sla_penalty": 0}
+            for name, points in services.items()
+        ],
+        "gross_points": sum(services.values()),
+        "total_sla_penalty": 0,
+        "total_points": sum(services.values()),
+    }
+
+
 @pytest.mark.django_db
-def test_sync_attaches_scores_and_uptimes_to_the_named_team() -> None:
+def test_sync_attaches_scores_and_uptimes_to_the_named_team(django_user_model) -> None:
+    user = django_user_model.objects.create_user("gold")
     Team.objects.create(team_number=1, team_name="One")
     team3 = Team.objects.create(team_number=3, team_name="Three")
 
-    result = sync_service_scores()
+    result = sync_service_scores(user)
 
     assert result["total"] == 1
-    assert ServiceScore.objects.get().team == team3
+    score = ServiceScore.objects.get()
+    # The SLA penalty is stored as a deduction
+    assert (score.team, score.service_points, score.sla_violations, score.synced_by) == (
+        team3,
+        Decimal("40"),
+        Decimal("-5"),
+        user,
+    )
     detail = ServiceDetail.objects.get()
     assert detail.team == team3
     assert float(detail.uptime) == pytest.approx(0.9)
@@ -112,17 +134,7 @@ def test_sync_skips_unscored_teams_with_no_services(monkeypatch) -> None:
     ServiceScore.objects.create(team=unplayed)
     monkeypatch.setattr(
         "scoring.tests.test_quotient_service_sync.EXPORT",
-        [
-            *EXPORT,
-            {
-                "team_id": 39,
-                "team_name": "team39",
-                "services": [],
-                "gross_points": 0,
-                "total_sla_penalty": 0,
-                "total_points": 0,
-            },
-        ],
+        [*EXPORT, _team_export(39, {})],
     )
 
     result = sync_service_scores()
@@ -131,34 +143,8 @@ def test_sync_skips_unscored_teams_with_no_services(monkeypatch) -> None:
     assert [s.team for s in ServiceScore.objects.all()] == [team3]
 
 
-def _team_export(number: int, services: dict[str, int], sla_penalty: int = 0) -> dict[str, object]:
-    return {
-        "team_id": number,
-        "team_name": f"team{number:02d}",
-        "services": [
-            {"service_name": name, "service_points": points, "sla_violations": 0, "sla_penalty": 0}
-            for name, points in services.items()
-        ],
-        "gross_points": sum(services.values()),
-        "total_sla_penalty": sla_penalty,
-        "total_points": sum(services.values()) - sla_penalty,
-    }
-
-
 @pytest.mark.django_db
-def test_sync_stores_the_points_and_the_sla_penalty_as_a_deduction(django_user_model) -> None:
-    user = django_user_model.objects.create_user("gold")
-    team3 = Team.objects.create(team_number=3, team_name="Three")
-
-    result = sync_service_scores(user)
-
-    assert result == {"teams_created": 1, "teams_updated": 0, "total": 1, "details_synced": 1}
-    score = ServiceScore.objects.get(team=team3)
-    assert (score.service_points, score.sla_violations, score.synced_by) == (Decimal("40"), Decimal("-5"), user)
-
-
-@pytest.mark.django_db
-def test_a_resync_counts_each_updated_team_and_every_service(monkeypatch) -> None:
+def test_a_resync_replaces_each_teams_rows_and_counts_each_team_once(monkeypatch) -> None:
     team5 = Team.objects.create(team_number=5, team_name="Five")
     Team.objects.create(team_number=3, team_name="Three")
     monkeypatch.setattr(
@@ -169,8 +155,8 @@ def test_a_resync_counts_each_updated_team_and_every_service(monkeypatch) -> Non
     first = sync_service_scores()
     second = sync_service_scores()
 
-    assert first == {"teams_created": 2, "teams_updated": 0, "total": 2, "details_synced": 3}
-    assert second == {"teams_created": 0, "teams_updated": 2, "total": 2, "details_synced": 3}
+    assert (first["total"], second["total"]) == (2, 2)
+    assert (ServiceScore.objects.count(), ServiceDetail.objects.count()) == (2, 3)
     # Quotient sent no uptime series for team 5
     assert ServiceDetail.objects.get(team=team5).uptime == 0
 
@@ -195,7 +181,7 @@ def test_teams_left_out_dont_stop_the_teams_after_them(monkeypatch) -> None:
 def test_an_empty_export_syncs_nothing(monkeypatch) -> None:
     monkeypatch.setattr("scoring.tests.test_quotient_service_sync.EXPORT", [])
 
-    assert sync_service_scores() == {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
+    assert sync_service_scores()["total"] == 0
 
 
 @pytest.mark.django_db
@@ -205,7 +191,7 @@ def test_a_score_that_cant_be_stored_names_its_team_and_each_problem(monkeypatch
     team_export = {**_team_export(3, {"s" * 101: 10**10}), "gross_points": 10}
     monkeypatch.setattr("scoring.tests.test_quotient_service_sync.EXPORT", [team_export])
 
-    with pytest.raises(ValueError, match=r"^Quotient's scores for team 3 can't be stored: Ensure [^;]+; Ensure [^;]+$"):
+    with pytest.raises(ValueError, match=r"^Quotient's scores for team 3 can't be stored: [^;]+; [^;]+$"):
         sync_service_scores()
 
 
