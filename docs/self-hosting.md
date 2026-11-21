@@ -413,7 +413,10 @@ its original text. Files posted in one are stored on the ticket and not re-poste
    right-click, Copy ID). An ID at 0 turns off what needs it; at startup the bot logs the required ones still at 0 and
    posts them to the ops log channel, and the readiness checks list them.
 
-Members run `/link`, sign in to the portal, and get their roles; a team member also gets the team's role (`Team NN`) and
+Members run `/link` and confirm the Discord and portal accounts shown before receiving roles. Relinking may reuse
+an existing Authentik session. If the account or team is wrong, choose **Switch account**. If Authentik refuses
+that request, open the original link from Discord in a private window and sign in with the intended account.
+A team member also gets the team's role (`Team NN`) and
 category (`team NN`, with `teamNN-chat` and `teamNN-voice`), which the bot creates. Besides the white and orange team
 roles, these roles see every team category when they exist, found by name: `<ORG_SHORT_NAME> Observers` (read only),
 `Orange Team Guest`, `Black Team Guest`, `<ORG_SHORT_NAME> Room Judge` (read only), `<ORG_SHORT_NAME> Operations Team`,
