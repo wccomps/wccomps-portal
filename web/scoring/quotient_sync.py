@@ -1,6 +1,7 @@
 import ipaddress
 import logging
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import TypedDict
 
@@ -98,7 +99,7 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
         debug = check.debug or ""
         if not domain and (domain_match := _DNS_RECORD_DOMAIN_RE.search(debug)):
             fqdn = domain_match.group(1).lower()
-            if not fqdn.endswith(".arpa") and not all(part.isdigit() for part in fqdn.split(".")):
+            if _is_host_name(fqdn):
                 domain = fqdn.split(".", 1)[1] if fqdn.count(".") >= 2 else fqdn
         if not internal_mask and (ip_match := _DNS_ANSWER_IPV4_PREFIX_RE.search(debug)):
             try:
@@ -109,6 +110,33 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
         if domain and internal_mask:
             break
     return domain, internal_mask
+
+
+def _is_host_name(fqdn: str) -> bool:
+    """A host name, not an address, an address or name template (10.100.1xx.44, www.teamxx.ice.land: any label with
+    `xx`) or a reverse-lookup name."""
+    labels = fqdn.split(".")
+    return (
+        len(fqdn) <= 253
+        and len(labels) >= 2
+        and all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+        and labels[-1][0].isalpha()
+        and labels[-1] != "arpa"
+        and "xx" not in fqdn
+    )
+
+
+def _box_hostname_domain(boxes_data: list[BoxData]) -> str:
+    """The narrowest domain that covers the most boxes addressed by name (borgar.ice.land and www.corp.ice.land:
+    ice.land; web.inv3.example.org and git.inv3.example.org: inv3.example.org), or "" when no box is. Narrowest, so
+    the proxy's browser file doesn't send the rest of a shared parent domain through the team ports."""
+    covered: Counter[str] = Counter()
+    for box in boxes_data:
+        host = box["ip"].strip().lower().rstrip(".")
+        if _is_host_name(host):
+            labels = host.split(".")
+            covered.update(".".join(labels[i:]) for i in range(1, len(labels) - 1))
+    return max(covered, key=lambda domain: (covered[domain], domain.count(".")), default="")
 
 
 def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> None:
@@ -149,6 +177,10 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
                 break
         if "external_mask" in payload and "team_domain_name" in payload and "internal_mask" in payload:
             break
+
+    # Without a domain the proxy keeps the last event's and refuses every name in this one
+    if "team_domain_name" not in payload and (domain := _box_hostname_domain(boxes_data)):
+        payload["team_domain_name"] = domain
 
     if not payload:
         return
