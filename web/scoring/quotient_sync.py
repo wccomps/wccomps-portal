@@ -367,6 +367,19 @@ def get_box_choices() -> list[tuple[str, str]]:
     return []
 
 
+def affected_box_labels(boxes: list[str] | str | None) -> str:
+    """Use picker labels only when the inventory agrees on a name's label."""
+    if not boxes:
+        return ""
+    labels: dict[str, str] = {}
+    for name, label in get_box_choices():
+        if labels.setdefault(name, label) != label:
+            labels[name] = name
+    if isinstance(boxes, str):
+        return labels.get(boxes, boxes)
+    return ", ".join(labels.get(box, box) for box in boxes)
+
+
 def get_service_choices() -> list[tuple[str, str]]:
     """Service dropdown choices from cached metadata, ending with 'Other' for unscored services."""
     metadata = QuotientMetadataCache.objects.first()
