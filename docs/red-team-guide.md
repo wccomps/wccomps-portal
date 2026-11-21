@@ -67,6 +67,9 @@ Free text for additional context about the attack.
 
 The findings list supports filtering by status (pending/approved), team, attack type, and submitter.
 
+On a finding's detail page, **Affected Boxes** uses the same inventory labels as the picker
+(for example, `.12 TREX`). Names that are no longer in the inventory are shown as recorded.
+
 You can **delete** your own findings as long as they haven't been approved yet.
 
 ## IP Pool Management

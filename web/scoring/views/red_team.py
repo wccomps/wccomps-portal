@@ -19,7 +19,7 @@ from ..models import (
     RedTeamScore,
     RedTeamScreenshot,
 )
-from ..quotient_sync import get_box_metadata
+from ..quotient_sync import affected_box_labels, get_box_metadata
 
 
 def findings_list(request: HttpRequest, *, default_status: str, page_size: int) -> dict[str, object]:
@@ -178,13 +178,19 @@ def view_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
     if not has_permission(user, "red_team"):
         return redirect("scoring:review_red_finding", finding_id=finding_id)
     finding = _finding(finding_id)
-    context = {"finding": finding, "can_delete": finding.submitted_by == user and not finding.is_approved}
+    context = {
+        "finding": finding,
+        "affected_box_labels": affected_box_labels(finding.affected_boxes),
+        "can_delete": finding.submitted_by == user and not finding.is_approved,
+    }
     return render(request, "scoring/view_red_finding.html", context)
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can review findings")
 def review_red_finding(request: HttpRequest, finding_id: int) -> HttpResponse:
-    return render(request, "scoring/review_red_finding.html", {"finding": _finding(finding_id)})
+    finding = _finding(finding_id)
+    context = {"finding": finding, "affected_box_labels": affected_box_labels(finding.affected_boxes)}
+    return render(request, "scoring/review_red_finding.html", context)
 
 
 @require_permission("red_team", error_message="Only Red Team members can delete findings")
