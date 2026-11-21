@@ -727,6 +727,13 @@ READERS = [
         (f"{QC}.get_service_checks", f"{QC}._cached", QJ),
     ),
     Reader(
+        "get_team_service_names",
+        lambda: quotient().get_team_service_names(1, force_refresh=True),
+        (DONE, [{"ServiceName": "web-http", "Last10Rounds": []}]),
+        lambda r: outcome(r, lambda x: x is None or (isinstance(x, set) and all(is_str(s) for s in x)), "check names"),
+        (f"{QC}.get_team_service_names", f"{QC}._cached", QJ),
+    ),
+    Reader(
         "get_engine_status",
         lambda: quotient().get_engine_status(),
         (DONE, ENGINE),

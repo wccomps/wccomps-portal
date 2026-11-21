@@ -310,7 +310,8 @@ Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 - A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped. Ticket
   check history and the preflight report take a team's Quotient ID as its number, so create Quotient's teams in order.
 - An inject's point value comes from its title: `(10 pts)`, `(1,000 points)`.
-- A ticket's service is matched to Quotient's check `box-service`.
+- Ticket history first looks for the exact `box-service` name. If that returns no checks, it uses a case-insensitive
+  match only when the team's stored check history has exactly one matching name.
 
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every

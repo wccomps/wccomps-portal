@@ -365,6 +365,17 @@ class QuotientClient:
             "service checks",
         )
 
+    def get_team_service_names(self, team_number: int, *, force_refresh: bool = False) -> set[str] | None:
+        """Stored check names from the team's history summary, not the current scoring configuration."""
+        return self._cached(
+            f"quotient_team_service_names_{team_number}",
+            30,
+            force_refresh,
+            f"/api/services/{team_number}",
+            _team_service_names,
+            "team service names",
+        )
+
     def get_engine_status(self) -> EngineStatus | None:
         """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
         return self._fetch("/api/engine", _engine_status, "the engine status")
@@ -446,6 +457,20 @@ def _uptimes(data: object) -> list[TeamUptime]:
         result.append(TeamUptime(team_name=team_name, team_number=_team_number(team_name), uptimes=uptimes))
     logger.info(f"Fetched uptimes for {len(result)} teams")
     return result
+
+
+def _team_service_names(data: object) -> set[str]:
+    if data is None:
+        return set()
+    if not isinstance(data, list):
+        raise ValueError("the team service summary isn't a list")
+    names: set[str] = set()
+    for entry in data:
+        if not isinstance(entry, dict) or not isinstance(name := entry.get("ServiceName"), str):
+            raise ValueError("a team service summary entry is missing its service name")
+        if _SERVICE_NAME_RE.fullmatch(name) and ".." not in name:
+            names.add(name)
+    return names
 
 
 def _service_checks(data: object) -> list[ServiceCheck]:
