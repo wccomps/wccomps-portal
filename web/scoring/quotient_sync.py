@@ -368,10 +368,13 @@ def get_box_choices() -> list[tuple[str, str]]:
 
 
 def affected_box_labels(boxes: list[str] | str | None) -> str:
-    """Display stored box names like the picker, without guessing aliases for legacy values."""
+    """Use picker labels only when the inventory agrees on a name's label."""
     if not boxes:
         return ""
-    labels = dict(get_box_choices())
+    labels: dict[str, str] = {}
+    for name, label in get_box_choices():
+        if labels.setdefault(name, label) != label:
+            labels[name] = name
     if isinstance(boxes, str):
         return labels.get(boxes, boxes)
     return ", ".join(labels.get(box, box) for box in boxes)

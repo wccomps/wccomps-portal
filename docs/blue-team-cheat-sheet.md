@@ -41,8 +41,8 @@ Submit an **Incident Report** at `portal.wccomps.org/scoring/incident/submit/` t
 - **What happened:** How they got in, what accounts/data they touched, and how you fixed it
 - **Proof:** Attach logs, screenshots, PDFs, or archives (up to 20 files, 10MB each, 50MB total)
 
-The incident report's **Affected Boxes** row uses the same labels as the picker. If a box is no longer
-in the inventory, the report shows the recorded name.
+The incident report's **Affected Boxes** row uses the same labels as the picker. If the inventory has
+no match or lists conflicting labels, the report shows the recorded name.
 
 ---
 
