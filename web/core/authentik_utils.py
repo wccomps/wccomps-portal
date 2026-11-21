@@ -595,29 +595,16 @@ def generate_blueteam_password() -> str:
     """Generate a readable blue team password like "Correct-Horse-742!" or "Battery-@199-Staple"."""
     from xkcdpass import xkcd_password as xp
 
-    # Get EFF long wordlist (7,776 words)
-    wordlist = xp.generate_wordlist(wordfile=xp.locate_wordfile())
-
-    words = xp.generate_xkcdpassword(wordlist, numwords=2, delimiter="-", case="capitalize")
+    # The EFF long wordlist, letters only, so each word is one part of the password (no t-shirt or yo-yo)
+    wordlist = xp.generate_wordlist(valid_chars="[a-z]")
+    parts = [secrets.choice(wordlist).capitalize() for _ in range(2)]
 
     number = secrets.randbelow(900) + 100
-
-    special_chars = "!@#$%&*+"
-    special_char = secrets.choice(special_chars)
-
+    special_char = secrets.choice("!@#$%&*+")
     insert_value = f"{number}{special_char}" if secrets.choice([True, False]) else f"{special_char}{number}"
+    parts.insert(secrets.randbelow(3), insert_value)
 
-    position = secrets.randbelow(3)
-
-    word_parts = words.split("-")
-    if position == 0:
-        result = f"{insert_value}-{words}"
-    elif position == 1:
-        result = f"{word_parts[0]}-{insert_value}-{word_parts[1]}"
-    else:  # position == 2
-        result = f"{words}-{insert_value}"
-
-    return result
+    return "-".join(parts)
 
 
 def parse_team_range(range_str: str) -> list[int]:
