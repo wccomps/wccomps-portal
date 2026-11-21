@@ -16,7 +16,7 @@ from team.models import Team
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
 from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import INCIDENT_STAFF, IncidentReport, IncidentScreenshot
-from ..quotient_sync import get_box_metadata
+from ..quotient_sync import get_incident_box_metadata
 
 
 @transaction.atomic
@@ -73,7 +73,8 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
         "form": form,
         "team": team,
         "is_admin": is_admin,
-        "box_metadata": get_box_metadata(),
+        "box_metadata": get_incident_box_metadata(),
+        "autofilled_ip": request.POST.get("autofilled_ip", ""),
     }
     return render(request, "scoring/submit_incident.html", context)
 

@@ -315,12 +315,34 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
 def get_box_metadata() -> dict[str, dict[str, object]]:
     """Each box's IP and service names from cached metadata, for the forms' IP auto-fill and service filter."""
     metadata = QuotientMetadataCache.objects.first()
+    return _box_metadata(metadata.boxes) if metadata else {}
+
+
+def _box_metadata(boxes: list[BoxData]) -> dict[str, dict[str, object]]:
+    return {
+        box["name"]: {"ip": box["ip"], "services": [svc["name"] for svc in box.get("services", [])]} for box in boxes
+    }
+
+
+def get_incident_box_metadata() -> dict[str, dict[str, object]]:
+    """The portal has no mapping to Quotient's team Identifier, so only literal addresses can fill an incident."""
+    metadata = QuotientMetadataCache.objects.first()
     if not metadata:
         return {}
-    return {
-        box["name"]: {"ip": box["ip"], "services": [svc["name"] for svc in box.get("services", [])]}
-        for box in metadata.boxes
-    }
+    boxes = _box_metadata(metadata.boxes)
+    addresses: dict[str, str] = {}
+    for box in metadata.boxes:
+        raw = box["ip"].strip()
+        try:
+            address = str(ipaddress.ip_address(raw)) if "%" not in raw else ""
+        except ValueError:
+            address = ""
+        name = box["name"]
+        if addresses.setdefault(name, address) != address:
+            addresses[name] = ""
+    for name, box in boxes.items():
+        box["ip"] = addresses[name]
+    return boxes
 
 
 def ticket_infrastructure(*, staff: bool = False) -> tuple[list[str], dict[str, str], list[dict[str, str]]]:

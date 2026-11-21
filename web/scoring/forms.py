@@ -293,7 +293,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
             "attack_mitigated": "Attack Mitigated",
         }
         help_texts = {
-            "destination_ip": "Filled in from the first box you pick; type or change it if needed",
+            "destination_ip": "Enter one IP address. A box with a known address can fill it in for you.",
             "affected_service": "",
             "source_ip": "",
             "attack_detected_at": "",

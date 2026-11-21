@@ -21,6 +21,10 @@
                     <div class="grid-2">
                         {{ form.affected_service.as_field_group }}
                         {{ form.destination_ip.as_field_group }}
+                        <input type="hidden"
+                               name="autofilled_ip"
+                               id="autofilled-ip"
+                               value="{{ autofilled_ip }}">
                     </div>
                 </c-fieldset>
                 <c-fieldset heading="Attack Details">
@@ -80,42 +84,23 @@
     {{ box_metadata|json_script:"box-metadata" }}
     <script>
         const boxMetadata = JSON.parse(document.getElementById('box-metadata').textContent);
-        let teamNumber = {% if team %}{{ team.team_number }}{% else %}null{% endif %};
-
-        function getSelectedTeamNumber() {
-            const teamSelect = document.getElementById('id_team');
-            if (teamSelect && teamSelect.value) {
-                const match = teamSelect.selectedOptions[0].text.match(/(\d+)/);
-                return match ? parseInt(match[1], 10) : null;
-            }
-            return teamNumber;
-        }
 
         function getSelectedBoxes() {
             const select = document.getElementById('id_affected_boxes');
             return Array.from(select.selectedOptions).map(opt => opt.value);
         }
 
-        // The IP the boxes last filled in: a box change replaces it, never an IP the team typed
-        let filledIP = '';
-
         function boxIP() {
-            const currentTeam = getSelectedTeamNumber();
-            if (!currentTeam) return '';
-            for (const name of getSelectedBoxes()) {
-                const box = boxMetadata[name];
-                if (box && box.ip) {
-                    return box.ip.replace('_', currentTeam.toString().padStart(2, '0'));
-                }
-            }
-            return '';
+            const teamSelect = document.getElementById('id_team');
+            if (teamSelect && !teamSelect.value) return '';
+            return getSelectedBoxes().map(name => boxMetadata[name]?.ip).find(Boolean) || '';
         }
 
-        function updateIP() {
+        function updateIP(address) {
             const ipField = document.getElementById('id_destination_ip');
-            if (!ipField || (ipField.value !== '' && ipField.value !== filledIP)) return;
-            filledIP = boxIP();
-            ipField.value = filledIP;
+            const autofilled = document.getElementById('autofilled-ip');
+            if (ipField.value && ipField.value !== autofilled.value) return;
+            ipField.value = autofilled.value = address;
         }
 
         const allServiceOptions = Array.from(
@@ -142,7 +127,7 @@
         }
 
         function onBoxSelectionChange() {
-            updateIP();
+            updateIP(boxIP());
             updateServiceDropdown();
         }
 
@@ -184,18 +169,16 @@
         document.addEventListener('DOMContentLoaded', function() {
             const teamSelect = document.getElementById('id_team');
 
-            document.getElementById('id_affected_boxes').addEventListener('change', onBoxSelectionChange);
-
-            // A re-rendered form's IP counts as box-filled only when it matches the boxes
+            const boxes = document.getElementById('id_affected_boxes');
             const ipField = document.getElementById('id_destination_ip');
-            if (ipField && ipField.value === boxIP()) filledIP = ipField.value;
-
-            if (getSelectedBoxes().length > 0) {
-                onBoxSelectionChange();
-            }
+            const autofilled = document.getElementById('autofilled-ip');
+            if (!boxes || !ipField || !autofilled) return;
+            boxes.addEventListener('change', onBoxSelectionChange);
+            ipField.addEventListener('input', () => { autofilled.value = ''; });
+            onBoxSelectionChange();
 
             if (teamSelect) {
-                teamSelect.addEventListener('change', updateIP);
+                teamSelect.addEventListener('change', () => updateIP(''));
             }
         });
     </script>
