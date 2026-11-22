@@ -1,5 +1,6 @@
 """Team password resets, and what unlinking a team member tells Discord."""
 
+import re
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +20,7 @@ from core.authentik_utils import (
     SignedOut,
     Unlinked,
     _reset_credentials,
+    generate_blueteam_password,
     reset_team_credentials,
     reset_teams_credentials,
     sessions_failure_summary,
@@ -271,6 +273,24 @@ def test_one_reason_shared_by_many_teams_reads_once():
 
     assert summary.count("HTTP 403") == 1
     assert len(summary) < 600
+
+
+WORD = "[A-Z][a-z]+"
+INSERT = r"(?:[1-9][0-9]{2}[!@#$%&*+]|[!@#$%&*+][1-9][0-9]{2})"
+PASSWORD = re.compile(f"{INSERT}-{WORD}-{WORD}|{WORD}-{INSERT}-{WORD}|{WORD}-{WORD}-{INSERT}")
+
+
+def test_a_generated_password_leaves_out_hyphenated_words(tmp_path, monkeypatch):
+    """The EFF list has yo-yo, drop-down, felt-tip and t-shirt; a password is two letters-only words and the number."""
+    from xkcdpass import xkcd_password
+
+    words = tmp_path / "words"
+    words.write_text("t-shirt\nzebra\n")
+    monkeypatch.setattr(xkcd_password, "locate_wordfile", lambda wordfile=None: str(words))
+
+    passwords = [generate_blueteam_password() for _ in range(50)]
+
+    assert [p for p in passwords if not PASSWORD.fullmatch(p)] == []
 
 
 def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
