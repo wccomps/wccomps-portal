@@ -1,4 +1,4 @@
-"""Metadata caches empty answers; scoring and history reads always fetch without caching."""
+"""Infrastructure and inject reads cache empty answers; score exports, uptimes and service checks always fetch."""
 
 from collections.abc import Callable
 

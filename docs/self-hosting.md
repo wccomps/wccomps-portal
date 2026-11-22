@@ -314,7 +314,8 @@ Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
   team `team09` or `Team 9` for portal team 9. History is unavailable unless that number has a unique roster
   entry with a valid DB ID. It first looks up the exact service name. After an empty response it retries only
   a unique case-insensitive match across all names in the team's current history summary, and only if the
-  exact spelling is a safe URL segment. A failed lookup is unavailable, not empty history.
+  exact spelling is a safe URL segment. Request or parse errors show history as unavailable; a valid summary
+  without an eligible match leaves history empty.
 
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
