@@ -1,5 +1,3 @@
-"""The staff ticket history resolves a casing mismatch against the same team's stored checks."""
-
 import json
 
 import pytest

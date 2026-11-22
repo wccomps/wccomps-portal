@@ -161,7 +161,7 @@ def ticket_service_checks(request: HttpRequest, ticket_number: str) -> HttpRespo
         raw_checks = None
         team_id = client.resolve_history_team_id(ticket.team.team_number)
         if team_id is not None:
-            raw_checks = client.get_service_checks(team_id, quotient_service, force_refresh=True)
+            raw_checks = client.get_service_checks(team_id, quotient_service)
             if raw_checks == []:
                 names = client.get_team_service_names(team_id)
                 if names is None:
@@ -170,7 +170,7 @@ def ticket_service_checks(request: HttpRequest, ticket_number: str) -> HttpRespo
                     matches = [name for name in names if name.casefold() == quotient_service.casefold()]
                     if len(matches) == 1 and matches[0] != quotient_service and is_service_check_name(matches[0]):
                         quotient_service = matches[0]
-                        raw_checks = client.get_service_checks(team_id, quotient_service, force_refresh=True)
+                        raw_checks = client.get_service_checks(team_id, quotient_service)
 
     checks = raw_checks[:10] if raw_checks is not None else None
     streak_count = (

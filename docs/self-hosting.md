@@ -313,8 +313,8 @@ Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 - Staff ticket history resolves the ticket's portal team from Quotient's current `/api/teams` roster. Name the
   team `team09` or `Team 9` for portal team 9. History is unavailable unless that number has a unique roster
   entry with a valid DB ID. It first looks up the exact service name. After an empty response it retries only
-  a unique case-insensitive match across all stored names, and only if the exact spelling is a safe URL
-  segment. A failed lookup is unavailable, not empty history.
+  a unique case-insensitive match across all names in the team's current history summary, and only if the
+  exact spelling is a safe URL segment. A failed lookup is unavailable, not empty history.
 
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every

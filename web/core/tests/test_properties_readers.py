@@ -721,10 +721,10 @@ READERS = [
     ),
     Reader(
         "get_service_checks",
-        lambda: quotient().get_service_checks(1, "web:http", force_refresh=True),
+        lambda: quotient().get_service_checks(1, "web:http"),
         (DONE, SERVICE_CHECKS),
         check_service_checks,
-        (f"{QC}.get_service_checks", f"{QC}._cached", QJ),
+        (f"{QC}.get_service_checks", f"{QC}._fetch", QJ),
     ),
     Reader(
         "get_team_service_names",

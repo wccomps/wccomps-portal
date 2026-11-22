@@ -38,8 +38,12 @@ def _is_unavailable(exc: BaseException | None) -> bool:
 
 
 def _log_failure(message: str, exc: Exception) -> None:
-    """Log a request failure: one line if Quotient is just down, full traceback otherwise."""
-    if not _is_unavailable(exc):
+    """Keep response headers out of logs; use a traceback for unexpected non-HTTP failures."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        log = logger.warning if status >= 500 else logger.error
+        log("%s: HTTP %d", message, status)
+    elif not _is_unavailable(exc):
         logger.exception(f"{message}: {exc}")
     elif isinstance(exc, QuotientAPIError):
         # Login already logged the unavailability; don't repeat it for every request
@@ -352,26 +356,12 @@ class QuotientClient:
         roster = self._fetch("/api/teams", _history_team_roster, "the team roster")
         return roster.get(team_number) if roster is not None else None
 
-    def get_service_checks(
-        self,
-        team_number: int,
-        service_name: str,
-        *,
-        force_refresh: bool = False,
-    ) -> list[ServiceCheck] | None:
-        """Fetch per-round check results for a team's service from Quotient (newest first), or None if unavailable."""
+    def get_service_checks(self, team_id: int, service_name: str) -> list[ServiceCheck] | None:
+        """Fetch fresh per-round checks by Quotient DB ID, or None if unavailable."""
         target = quotient_service_name(service_name)
-        if not target or team_number <= 0:
+        if not target or team_id <= 0:
             return []
-
-        return self._cached(
-            f"quotient_service_checks_{team_number}_{target}",
-            30,
-            force_refresh,
-            f"/api/services/{team_number}/{quote(target, safe='')}",
-            _service_checks,
-            "service checks",
-        )
+        return self._fetch(f"/api/services/{team_id}/{quote(target, safe='')}", _service_checks, "service checks")
 
     def get_team_service_names(self, team_id: int) -> set[str] | None:
         """Stored check names from the team's history summary, not the current scoring configuration."""
@@ -470,10 +460,9 @@ def _team_service_names(data: object) -> set[str]:
         raise ValueError("Invalid team service summary.") from None
 
 
-def _history_team_roster(data: object) -> dict[int, int]:
-    roster: dict[int, int] = {}
+def _history_team_roster(data: object) -> dict[int, int | None]:
+    roster: dict[int, int | None] = {}
     ids: set[int] = set()
-    ambiguous: set[int] = set()
     if not isinstance(data, list):
         raise ValueError("Invalid team roster.")
     for row in data:
@@ -484,10 +473,8 @@ def _history_team_roster(data: object) -> dict[int, int]:
         match = re.fullmatch(r"team ?0*([1-9][0-9]{0,8})", name, re.IGNORECASE | re.ASCII)
         if match:
             number = int(match[1])
-            if number in roster:
-                ambiguous.add(number)
-            roster[number] = team_id
-    return {number: team_id for number, team_id in roster.items() if number not in ambiguous}
+            roster[number] = None if number in roster else team_id
+    return roster
 
 
 def _service_checks(data: object) -> list[ServiceCheck]:
