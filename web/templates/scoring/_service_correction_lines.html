@@ -4,10 +4,10 @@
         {% for correction in score.service_corrections %}
             <li>
                 {{ correction.service_name }} ({{ correction.ruling }}):
-                +{{ correction.service_credit }} raw service points at a multiplier of {{ correction.service_modifier|floatformat:2 }},
+                {{ correction.service_credit }} raw service points at a multiplier of {{ correction.service_modifier|floatformat:2 }},
                 +{{ correction.sla_credit }} SLA points restored.
             </li>
         {% endfor %}
     </ul>
-    <p>The score includes these credits. Service Uptime Detail shows the unadjusted per-service totals.</p>
+    <p>The score includes these corrections. Service Uptime Detail shows the unadjusted per-service totals.</p>
 {% endif %}
