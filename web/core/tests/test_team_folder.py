@@ -402,9 +402,12 @@ def test_readiness_fails_more_than_one_blue_team_binding_in_the_folder_mode(team
     assert severity == "fail" and "vpn (extra b-2)" in detail and "remove the extra ones" in detail
 
 
-def test_a_lone_blue_team_group_binding_passes_without_the_folder(controlled_vpn):
+def test_a_lone_blue_team_group_binding_fails_without_the_folder_too(controlled_vpn):
+    """Team accounts are on from the packet send, so an app whose only binding is the closed blue team one would let
+    them in before the start."""
     with _readiness(FakeAuthentik([], [dict(GROUP_BINDING)])):
-        assert _check_blueteam_bindings()[0] == "pass"
+        severity, detail, _ = _check_blueteam_bindings()
+    assert severity == "fail" and "vpn" in detail
 
 
 # ---------------------------------------------------------------------------------------------------------------
