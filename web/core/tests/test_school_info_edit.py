@@ -191,6 +191,11 @@ def test_the_export_shows_the_school_name(client):
     response = client.get(reverse("school_info_export"))
 
     assert "9,Team 09,Example U,captain@example.edu" in response.content.decode()
+    # A download named for the school list, which the import reads back
+    assert (response["Content-Type"], response["Content-Disposition"]) == (
+        "text/csv",
+        'attachment; filename="school_info.csv"',
+    )
 
 
 def test_two_teams_cannot_share_a_school_with_no_open_event(client):
