@@ -1,5 +1,7 @@
 """Season.activate, the only writer of Season.is_active, takes the school list lock and leaves one active season."""
 
+import re
+
 import pytest
 from django.contrib.auth.models import User
 from django.db import connection
@@ -65,6 +67,16 @@ def test_the_edit_page_cannot_deactivate_the_active_season(gold_client):
 
     season.refresh_from_db()
     assert (season.name, season.is_active) == ("Renamed", True)
+
+
+def test_the_edit_page_shows_the_active_season_ticked_and_locked(gold_client):
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+
+    page = gold_client.get(reverse("registration_season_edit", args=[season.pk])).content.decode()
+
+    box = re.search(r'<input[^>]*name="is_active"[^>]*>', page).group()
+    assert " checked" in box
+    assert " disabled" in box
 
 
 def test_the_admin_shows_is_active_read_only_and_activates_through_its_action():

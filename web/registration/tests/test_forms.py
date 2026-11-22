@@ -4,6 +4,7 @@ import pytest
 from django.utils import timezone
 
 from ..forms import (
+    EventForm,
     RegistrationForm,
 )
 from ..models import Event, RegistrationContact, RegistrationEventEnrollment, Season, TeamRegistration
@@ -316,6 +317,14 @@ class TestRegistrationFormRegionValidation:
         assert not form.is_valid()
         assert "events" in form.errors
 
+    def test_non_wrccdc_is_told_every_restricted_event_to_remove(self, form_data, season_with_events):
+        _, invitational, qualifier, regional = season_with_events
+        form_data["region"] = "mwccdc"
+        form_data["events"] = [invitational.id, qualifier.id, regional.id]
+        form = RegistrationForm(data=form_data)
+        assert not form.is_valid()
+        assert form.errors["events"][0].endswith("Please remove: Qualifier 1, Regional")
+
 
 def test_the_region_rule_names_the_ticked_events_on_the_events_field(active_season_with_event):
     season, _ = active_season_with_event
@@ -349,3 +358,22 @@ def test_name_placeholders_are_not_sample_names():
         assert "placeholder" not in form.fields[name].widget.attrs
     for name in ("captain_email", "coach_email"):
         assert form.fields[name].widget.attrs["placeholder"] == "name@school.edu"
+
+
+@pytest.mark.parametrize(
+    ("posted", "error_on"),
+    [({"event_type": "bogus", "event_number": "2"}, "event_type"), ({"event_number": "abc"}, "event_number")],
+)
+def test_an_invalid_type_or_number_is_not_also_called_a_clash(active_season_with_event, posted, error_on):
+    """Only the field's own error: the stored type or number it leaves in place would clash with another event."""
+    season, _ = active_season_with_event  # Invitational 1
+    edited = Event.objects.create(season=season, name="Q1", event_type="qualifier", event_number=1, date="2026-03-01")
+    Event.objects.create(season=season, name="Q2", event_type="qualifier", event_number=2, date="2026-03-02")
+    post = {"name": "Q1", "event_type": "invitational", "date": "2026-03-01", "start_time": "09:00"}
+    post |= {"end_time": "17:00", "max_teams": "50"} | posted
+
+    form = EventForm(post, instance=edited)
+
+    assert not form.is_valid()
+    assert list(form.errors) == [error_on]
+    assert len(form.errors[error_on]) == 1

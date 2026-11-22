@@ -158,7 +158,12 @@ def test_cancelling_resets_for_the_next_event(event):
     from core.models import QueuedAnnouncement
 
     CompetitionConfig.objects.update_or_create(
-        pk=1, defaults={"competition_start_time": datetime(2099, 10, 3, tzinfo=UTC), "start_message": "Default login"}
+        pk=1,
+        defaults={
+            "competition_start_time": datetime(2099, 10, 3, tzinfo=UTC),
+            "start_message": "Default login",
+            "started_this_window": True,
+        },
     )
     QueuedAnnouncement.objects.create(team=Team.objects.first(), message="Default login", sender_name="Black Team")
 
@@ -166,17 +171,21 @@ def test_cancelling_resets_for_the_next_event(event):
 
     config = CompetitionConfig.get_config()
     assert (config.competition_start_time, config.start_message) == (None, "")
+    # The next event's start window starts with no start run in it
+    assert not config.started_this_window
     assert not QueuedAnnouncement.objects.exists()
 
 
 def test_cancelling_removes_the_start_broadcasts_copies(event):
     """The broadcasts the starts recorded keep the credentials in their payloads (admin, backups, retries), whatever the
-    message says now: each is scrubbed, and an unsent one failed so it never goes out. Other broadcasts stay."""
+    message says now: each is scrubbed, and an unsent or half-sent one failed with the reason, so it sends no more.
+    Other broadcasts stay."""
     from core.models import QueuedTask
-    from registration.services import START_MESSAGE_SCRUBBED
+    from registration.services import START_BROADCAST_CUT_OFF, START_BROADCAST_STOPPED, START_MESSAGE_SCRUBBED
 
     start = {"target": "all-teams", "message": "Default login", "sender": "Black Team"}
     unsent = QueuedTask.objects.create(task_type="broadcast_message", payload=start, status="pending")
+    sending = QueuedTask.objects.create(task_type="broadcast_message", payload=start, status="processing")
     sent = QueuedTask.objects.create(
         task_type="broadcast_message",
         payload=start,
@@ -187,15 +196,17 @@ def test_cancelling_removes_the_start_broadcasts_copies(event):
         task_type="broadcast_message", payload={**start, "message": "Lunch at noon"}, status="pending"
     )
     CompetitionConfig.objects.update_or_create(
-        pk=1, defaults={"start_message": "Edited since", "start_broadcasts": [unsent.pk, sent.pk]}
+        pk=1, defaults={"start_message": "Edited since", "start_broadcasts": [unsent.pk, sending.pk, sent.pk]}
     )
 
     cancel_event(event, "gold")
 
-    for task, status in ((unsent, "failed"), (sent, "completed")):
+    for task, status in ((unsent, "failed"), (sending, "failed"), (sent, "completed")):
         task.refresh_from_db()
         assert (task.status, task.payload["message"]) == (status, START_MESSAGE_SCRUBBED)
         assert "Default login" not in task.error_message
+    assert unsent.error_message == START_BROADCAST_STOPPED
+    assert sending.error_message == START_BROADCAST_CUT_OFF
     other.refresh_from_db()
     assert (other.status, other.payload["message"]) == ("pending", "Lunch at noon")
     assert CompetitionConfig.get_config().start_broadcasts == []

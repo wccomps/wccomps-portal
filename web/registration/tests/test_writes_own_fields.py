@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from core.models import UserGroups
-from registration.models import Event, School, Season, TeamRegistration
+from registration.models import Event, RegistrationEventEnrollment, School, Season, TeamRegistration
 from registration.services import set_team_school
 from team.models import SchoolInfo, Team
 
@@ -49,6 +49,52 @@ def test_setting_a_school_never_writes_the_stored_password():
     assert updates
     assert all('"password"' not in sql for sql in updates)
     assert SchoolInfo.objects.get().contact_email == "new@example.edu"
+
+
+def test_a_new_spelling_of_a_school_writes_only_its_name():
+    """The key a rename (set_team_school) gives the record isn't put back from the copy for_name read."""
+    School.for_name("Example University")
+
+    with CaptureQueriesContext(connection) as queries:
+        school = School.for_name("example  UNIVERSITY")
+
+    updates = _updates(queries, "registration_school")
+    assert updates
+    assert all('"name_key"' not in sql for sql in updates)
+    assert School.objects.get().name == school.name == "example UNIVERSITY"
+
+
+def test_renaming_a_teams_school_never_writes_its_registrations_status(event):
+    """The rename gives the open event's registrations of the school the new name, never putting back a status an
+    approve or reject may have set meanwhile."""
+    event.open()
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+    set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+
+    with CaptureQueriesContext(connection) as queries:
+        set_team_school(team, "Renamed College", contact_email="c@example.edu", rename=True)
+
+    updates = _updates(queries, "registration_teamregistration")
+    assert updates
+    assert all('"status"' not in sql for sql in updates)
+    registration.refresh_from_db()
+    assert registration.school_name == "Renamed College"
+
+
+def test_giving_a_registration_its_school_keeps_a_status_set_meanwhile():
+    """Only the registration's school is written: a reject since the caller read it stays."""
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
+    stale = TeamRegistration.objects.get(pk=registration.pk)
+    TeamRegistration.objects.filter(pk=registration.pk).update(status="rejected")
+
+    info = set_team_school(team, "Example University", contact_email="c@example.edu", registration=stale)
+
+    registration.refresh_from_db()
+    assert registration.school == info.school
+    assert registration.status == "rejected"
 
 
 @pytest.fixture
