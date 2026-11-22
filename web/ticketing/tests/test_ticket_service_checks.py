@@ -52,6 +52,7 @@ def service_ticket(blue_team):
         ("", "TREX", ""),
         (".", "", ""),
         ("..", "", ""),
+        ("web..http", "", ""),
         ("../2/TREX-DNS", "", ""),
         ("2/TREX-DNS", "TREX", ""),
         ("TREX:../2/TREX-DNS", "", ""),
