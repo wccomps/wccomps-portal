@@ -68,8 +68,10 @@ def parse_manifest(data: bytes, approved_sha256: str) -> list[Credit]:
         raise ValueError("Expected the canonical correction CSV header and a final LF.")
     credits: list[Credit] = []
     for line in data[len(MANIFEST_HEADER) : -1].split(b"\n"):
-        if not re.fullmatch(rb"(?:0|[1-9][0-9]{0,8})(?:,(?:0|[1-9][0-9]{0,8})){3}", line):
-            raise ValueError("Correction rows must contain four canonical unsigned integers.")
+        if not re.fullmatch(
+            rb"[1-9][0-9]{0,8},(?:0|-?[1-9][0-9]{0,8}),(?:0|[1-9][0-9]{0,8}),(?:0|-?[1-9][0-9]{0,8})", line
+        ):
+            raise ValueError("Use canonical integers; only the service and net deltas may be negative.")
         team, service, sla, net = map(int, line.split(b","))
         if team <= (credits[-1].quotient_team_id if credits else 0) or net != service + sla:
             raise ValueError("Correction rows must be unique, ordered by Quotient team ID, and reconcile to net.")
@@ -90,6 +92,10 @@ class SourceRow:
     @property
     def team_number(self) -> int:
         return self.portal[0]
+
+    @property
+    def service_points(self) -> int:
+        return self.portal[3]
 
 
 def _digest(rows: object) -> str:

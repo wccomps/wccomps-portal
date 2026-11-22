@@ -13,7 +13,7 @@ from registration.models import Event, EventResult
 
 from core.models import AuditLog, CompetitionConfig
 from core.services.competition import run_lock
-from scoring.calculator import compute_standings
+from scoring.calculator import _template, compute_standings
 from scoring.models import ServiceCorrection, ServiceCorrectionBatch
 from scoring.service_corrections import (
     MANIFEST_LIMIT,
@@ -41,11 +41,13 @@ class Command(BaseCommand):
             action.add_argument("--manifest-sha256", required=True)
             if name != "revoke":
                 action.add_argument("--manifest", type=Path, required=True)
+                action.add_argument("--full-void", action="store_true")
             if name != "verify":
                 action.add_argument("--actor", required=True)
             if name == "apply":
                 action.add_argument("--baseline-sha256", required=True)
                 action.add_argument("--expect-composite", type=Decimal, required=True)
+                action.add_argument("--expect-service-max", type=Decimal)
                 action.add_argument("--require-unchanged-ranks", action="store_true")
 
     def handle(  # noqa: PLR0913
@@ -61,6 +63,8 @@ class Command(BaseCommand):
         baseline_sha256: str = "",
         expect_composite: Decimal = Decimal(0),
         require_unchanged_ranks: bool = False,
+        full_void: bool = False,
+        expect_service_max: Decimal | None = None,
         **options: object,
     ) -> None:
         if not 0 < len(service) <= 100 or not 0 < len(ruling) <= 100 or len(actor) > 255:
@@ -87,6 +91,13 @@ class Command(BaseCommand):
                 raise ValueError("Manifest IDs do not match the complete Quotient service cohort.")
             if any(c.sla_credit > s.service_sla_deduction for c, s in zip(credits, sources, strict=True)):
                 raise ValueError("SLA credit exceeds the service's original deduction.")
+            if any(c.service_credit < -s.service_points for c, s in zip(credits, sources, strict=True)):
+                raise ValueError("Service debit exceeds points earned on the service.")
+            if full_void and any(
+                (c.service_credit, c.sla_credit) != (-s.service_points, s.service_sla_deduction)
+                for c, s in zip(credits, sources, strict=True)
+            ):
+                raise ValueError("A full void must remove all service points and restore all service SLA deductions.")
             source_sha = source_digest(sources)
             if operation == "apply" and baseline_sha256 != source_sha:
                 raise ValueError("Quotient baseline does not match the verified SHA256.")
@@ -109,6 +120,7 @@ class Command(BaseCommand):
                     source_sha,
                     expect_composite,
                     require_unchanged_ranks,
+                    expect_service_max,
                 )
             )
         except (OSError, ValueError, ValidationError) as exc:
@@ -146,6 +158,7 @@ class Command(BaseCommand):
         source_sha: str,
         expect_composite: Decimal,
         unchanged_ranks: bool,
+        expect_service_max: Decimal | None,
     ) -> str:
         with school_list_held(), run_lock() as locked, transaction.atomic():
             if not locked:
@@ -154,6 +167,8 @@ class Command(BaseCommand):
                 cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             CompetitionConfig.locked()
             teams = self._checked_teams(event_id, service, sources)
+            if expect_service_max is not None and _template().service_max != expect_service_max:
+                raise ValueError("The portal service maximum does not match the expected denominator.")
             batches = ServiceCorrectionBatch.objects.filter(event_id=event_id)
             if batch := batches.filter(service_name=service, ruling=ruling).first():
                 same_input = (batch.manifest_sha256, batch.baseline_sha256) == (manifest_sha, source_sha)

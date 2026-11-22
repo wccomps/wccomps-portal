@@ -31,7 +31,7 @@ RULING = "certificate-expiry-v1"
 
 
 @pytest.fixture
-def correction(current_event, tmp_path):
+def correction(current_event, tmp_path, request):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     team, _ = Team.objects.update_or_create(team_number=7, defaults={"team_name": "Team 07", "is_active": True})
     set_team_school(team, "Example University", contact_email="coach@example.edu")
@@ -49,7 +49,7 @@ def correction(current_event, tmp_path):
         ]
     )
     uptimes = [TeamUptime("team07", 7, {SERVICE: 0.5})]
-    content = MANIFEST_HEADER + b"742,4,5,9\n"
+    content = MANIFEST_HEADER + getattr(request, "param", b"742,4,5,9\n")
     manifest = tmp_path / "approved.csv"
     manifest.write_bytes(content)
     with (
@@ -182,3 +182,30 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
         row = next(row for row in rows if int(row["Team Number"]) == team.team_number)
         assert (row["Raw Service Credit"], row["SLA Credit"]) == ("4", "5")
     assert not next(s for s in compute_standings() if s.team.pk == team.pk).service_corrections
+
+
+@pytest.mark.parametrize("correction", [b"742,-100,5,-95\n"], indirect=True)
+def test_full_void_preserves_import_and_can_be_revoked(correction):
+    team, event, common, apply, _, _ = correction
+    ScoringTemplate.objects.create(service_max=3388)
+    args = [*apply, "--full-void", "--expect-composite", "-95"]
+    with pytest.raises(CommandError, match="expected denominator"):
+        call_command("service_correction", "apply", *args, "--expect-service-max", "3389")
+    assert not ServiceCorrectionBatch.objects.exists()
+    call_command("service_correction", "apply", *args, "--expect-service-max", "3388")
+    adjusted = next(s for s in compute_standings() if s.team.pk == team.pk)
+    assert adjusted.service_points == adjusted.sla_penalties == adjusted.total_score == 0
+    assert ScoringTemplate.objects.get().service_max == 3388
+    detail = ServiceDetail.objects.get(team=team, service_name=SERVICE)
+    assert (detail.points, detail.sla_violations) == (100, 1)
+    receipt = AuditLog.objects.get(action="service_correction_applied", target_id=event.pk)
+    assert receipt.details["service_credit"] == -100
+    call_command("service_correction", "revoke", *common, "--actor", "operator")
+    assert next(s for s in compute_standings() if s.team.pk == team.pk).total_score == 95
+
+
+def test_full_void_rejects_credit_that_does_not_zero_both_source_components(correction):
+    _, _, _, apply, _, _ = correction
+    with pytest.raises(CommandError, match="A full void must remove all service points"):
+        call_command("service_correction", "apply", *apply, "--full-void", "--expect-composite", "9")
+    assert not ServiceCorrectionBatch.objects.exists()

@@ -731,7 +731,7 @@ class ServiceCorrection(models.Model):
     batch = models.ForeignKey(ServiceCorrectionBatch, on_delete=models.PROTECT)
     team = models.ForeignKey("team.Team", on_delete=models.PROTECT)
     quotient_team_id = models.PositiveBigIntegerField()
-    service_credit = models.PositiveIntegerField()
+    service_credit = models.IntegerField()
     sla_credit = models.PositiveIntegerField()
 
     class Meta:

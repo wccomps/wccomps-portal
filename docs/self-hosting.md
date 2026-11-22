@@ -465,9 +465,9 @@ admin). If you replace Box Reset / Scrub, point `BOX_RESET_CATEGORY_ID` at the n
 For an approved ruling after a competition stops, an operator with deployment shell access can record separate
 raw service and SLA credits without replacing Quotient's check history. Keep the approved CSV private. Its exact
 header is `team_id,check_points_delta,sla_points_restored,net_points_delta`. Include one row per scored team on
-the service, sorted by unique positive **Quotient ID**. Each field is an unsigned decimal integer of at most
-nine digits with no padding. Use LF line endings, including a final LF, and no BOM. Net must equal the sum of the
-two credit columns; it is not a separate credit.
+the service, sorted by unique positive **Quotient ID**. Only service and net may be negative. Use at most
+nine digits per integer, with no padding, leading plus, or negative zero. Use LF line endings, including
+a final LF, and no BOM. Net must equal the service delta plus the SLA credit; it is never applied separately.
 
 Run `manage.py service_correction verify --event EVENT --service SERVICE --ruling SLUG --manifest PATH
 --manifest-sha256 APPROVED_SHA` with the independently approved digest. It reads the live Quotient export,
@@ -475,6 +475,9 @@ resolves each ID using the scored team's name and the event's portal team assign
 portal import. Keep its baseline digest with the decision record. Run `apply` with the same arguments plus
 `--baseline-sha256 BASELINE_SHA --actor OPERATOR --expect-composite POINTS`; add `--require-unchanged-ranks`
 when the ruling calls for it. A failed score or rank check rolls back the entire application.
+Use `--full-void` on both `verify` and `apply` to require exact removal of each team's earned service
+points and restoration of its entire SLA deduction. Use `--expect-service-max MAX` on `apply` to require the
+existing denominator. Neither flag rewrites the service or its checks, or changes the denominator.
 
 One batch can be active per event; an identical application is a no-op. The raw service credit uses the multiplier
 recorded at application. A detected sync conflict rolls back the import and blocks Close Out until a matching
