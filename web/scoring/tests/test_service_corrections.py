@@ -35,14 +35,19 @@ def correction(current_event, tmp_path):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     team, _ = Team.objects.update_or_create(team_number=7, defaults={"team_name": "Team 07", "is_active": True})
     set_team_school(team, "Example University", contact_email="coach@example.edu")
-    exports = _service_export([
-        {
-            "team_id": 742, "team_name": "team07", "gross_points": 100, "total_sla_penalty": 5,
-            "services": [
-                {"service_name": SERVICE, "service_points": 100, "sla_violations": 1, "sla_penalty": 5},
-            ],
-        },
-    ])
+    exports = _service_export(
+        [
+            {
+                "team_id": 742,
+                "team_name": "team07",
+                "gross_points": 100,
+                "total_sla_penalty": 5,
+                "services": [
+                    {"service_name": SERVICE, "service_points": 100, "sla_violations": 1, "sla_penalty": 5},
+                ],
+            },
+        ]
+    )
     uptimes = [TeamUptime("team07", 7, {SERVICE: 0.5})]
     content = MANIFEST_HEADER + b"742,4,5,9\n"
     manifest = tmp_path / "approved.csv"
@@ -55,8 +60,16 @@ def correction(current_event, tmp_path):
             client.return_value.get_service_export.return_value = exports
             client.return_value.get_uptimes.return_value = uptimes
         sync_service_scores()
-        common = ["--event", str(current_event.pk), "--service", SERVICE, "--ruling", RULING,
-                  "--manifest-sha256", hashlib.sha256(content).hexdigest()]
+        common = [
+            "--event",
+            str(current_event.pk),
+            "--service",
+            SERVICE,
+            "--ruling",
+            RULING,
+            "--manifest-sha256",
+            hashlib.sha256(content).hexdigest(),
+        ]
         supplied = [*common, "--manifest", str(manifest)]
         output = StringIO()
         call_command("service_correction", "verify", *supplied, stdout=output)
@@ -75,8 +88,9 @@ def test_correction_is_audited_idempotent_sync_safe_and_revocable(correction):
 
     for expected in ("applied", "already applied"):
         output = StringIO()
-        call_command("service_correction", "apply", *apply, "--expect-composite", "9",
-                     "--require-unchanged-ranks", stdout=output)
+        call_command(
+            "service_correction", "apply", *apply, "--expect-composite", "9", "--require-unchanged-ranks", stdout=output
+        )
         assert output.getvalue().startswith(f"{expected} batch=")
     credit = ServiceCorrection.objects.get()
     assert (credit.team_id, credit.quotient_team_id) == (team.pk, 742)
@@ -153,8 +167,13 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
     assert result.total_score == Decimal(104)
     frozen = context_from_snapshot(result.scorecard)
     assert frozen["score"]["service_corrections"] == [
-        {"service_name": SERVICE, "ruling": RULING, "service_credit": 4, "sla_credit": 5,
-         "service_modifier": Decimal(1)},
+        {
+            "service_name": SERVICE,
+            "ruling": RULING,
+            "service_credit": 4,
+            "sla_credit": 5,
+            "service_modifier": Decimal(1),
+        },
     ]
     service_detail = frozen["stats"]["service_stats"][0]
     assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)

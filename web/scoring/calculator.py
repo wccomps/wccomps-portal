@@ -153,7 +153,9 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
 
 
 def _breakdown(
-    raw: _RawScores, template: ScoringTemplate, credits: list[CreditLine],
+    raw: _RawScores,
+    template: ScoringTemplate,
+    credits: list[CreditLine],
 ) -> DetailedScoreBreakdown:
     service_mod, inject_mod, orange_mod = _get_modifiers(template)
     sla = raw["sla"] + sum(line["sla_credit"] for line in credits)

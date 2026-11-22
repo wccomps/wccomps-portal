@@ -305,9 +305,13 @@ def _run(
     config = CompetitionConfig.get_config()
     began_with = config.competition_start_time
     result = CompetitionRunResult(enable=enable, controlled_apps=list(config.controlled_applications))
-    if enable and ServiceCorrectionBatch.objects.filter(
-        event__is_active=True, revoked_at__isnull=True,
-    ).exists():
+    if (
+        enable
+        and ServiceCorrectionBatch.objects.filter(
+            event__is_active=True,
+            revoked_at__isnull=True,
+        ).exists()
+    ):
         return CompetitionRunResult(
             enable=enable,
             error="Revoke the active service correction before restarting the competition.",

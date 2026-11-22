@@ -34,16 +34,30 @@ class CreditLine(TypedDict):
 
 def current_credits(team_ids: list[int]) -> dict[int, list[CreditLine]]:
     credits: dict[int, list[CreditLine]] = {}
-    rows = ServiceCorrection.objects.filter(
-        batch__event__is_active=True, batch__revoked_at__isnull=True, team_id__in=team_ids
-    ).order_by("batch__service_name", "batch__ruling").values_list(
-        "team_id", "batch__service_name", "batch__ruling", "service_credit", "sla_credit", "batch__service_modifier",
+    rows = (
+        ServiceCorrection.objects.filter(
+            batch__event__is_active=True, batch__revoked_at__isnull=True, team_id__in=team_ids
+        )
+        .order_by("batch__service_name", "batch__ruling")
+        .values_list(
+            "team_id",
+            "batch__service_name",
+            "batch__ruling",
+            "service_credit",
+            "sla_credit",
+            "batch__service_modifier",
+        )
     )
     for team_id, service, ruling, service_credit, sla_credit, modifier in rows:
-        credits.setdefault(team_id, []).append(CreditLine(
-            service_name=service, ruling=ruling, service_credit=service_credit, sla_credit=sla_credit,
-            service_modifier=Decimal(modifier),
-        ))
+        credits.setdefault(team_id, []).append(
+            CreditLine(
+                service_name=service,
+                ruling=ruling,
+                service_credit=service_credit,
+                sla_credit=sla_credit,
+                service_modifier=Decimal(modifier),
+            )
+        )
     return credits
 
 
@@ -99,17 +113,33 @@ def source_rows(service_name: str, exports: list[TeamServiceExport], uptimes: li
         team_id, number = row.quotient_team_id, row.team_number
         team_uptime = uptime_by_team.get(number)
         if (
-            len(details) != 1 or team_id is None or team_id <= 0 or id_counts[team_id] != 1
-            or number <= 0 or number_counts[number] != 1 or number in ambiguous_uptime
-            or team_uptime is None or service_name not in team_uptime.uptimes
+            len(details) != 1
+            or team_id is None
+            or team_id <= 0
+            or id_counts[team_id] != 1
+            or number <= 0
+            or number_counts[number] != 1
+            or number in ambiguous_uptime
+            or team_uptime is None
+            or service_name not in team_uptime.uptimes
         ):
             raise ValueError("Missing or ambiguous Quotient team ID, portal team number, or service export.")
         detail = details[0]
         fraction = Decimal(str(team_uptime.uptimes[service_name])).quantize(Decimal("0.0001"))
-        rows.append(SourceRow(team_id, (
-            number, row.gross_points, row.total_sla_penalty, detail.service_points,
-            detail.sla_violations, int(fraction * 10000),
-        ), detail.sla_penalty))
+        rows.append(
+            SourceRow(
+                team_id,
+                (
+                    number,
+                    row.gross_points,
+                    row.total_sla_penalty,
+                    detail.service_points,
+                    detail.sla_violations,
+                    int(fraction * 10000),
+                ),
+                detail.sla_penalty,
+            )
+        )
     return sorted(rows, key=lambda row: row.quotient_team_id)
 
 
@@ -123,12 +153,22 @@ def expected_portal_digest(rows: list[SourceRow]) -> str:
 
 def portal_digest(service_name: str) -> str:
     details = ServiceDetail.objects.filter(service_name=service_name).values_list(
-        "team__team_number", "team__service_scores__service_points", "team__service_scores__sla_violations",
-        "points", "sla_violations", "uptime",
+        "team__team_number",
+        "team__service_scores__service_points",
+        "team__service_scores__sla_violations",
+        "points",
+        "sla_violations",
+        "uptime",
     )
     rows = [
-        (n, _integral(gross), _integral(-sla if sla is not None else None), _integral(points), count,
-         _integral(uptime * 10000))
+        (
+            n,
+            _integral(gross),
+            _integral(-sla if sla is not None else None),
+            _integral(points),
+            count,
+            _integral(uptime * 10000),
+        )
         for n, gross, sla, points, count, uptime in details
     ]
     return _digest(sorted(rows))

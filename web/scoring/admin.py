@@ -259,13 +259,20 @@ class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
 
     @staticmethod
     def _check_import_writable(locked: bool) -> None:
-        if not locked or ServiceCorrectionBatch.objects.filter(
-            event__is_active=True, revoked_at__isnull=True,
-        ).exists():
+        if (
+            not locked
+            or ServiceCorrectionBatch.objects.filter(
+                event__is_active=True,
+                revoked_at__isnull=True,
+            ).exists()
+        ):
             raise PermissionDenied("Imported service scores are locked by a competition transition or correction.")
 
     def changeform_view(
-        self, request: HttpRequest, object_id: str | None = None, form_url: str = "",
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
         extra_context: dict[str, object] | None = None,
     ) -> HttpResponse:
         if request.method == "POST":
@@ -275,7 +282,10 @@ class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
         return super().changeform_view(request, object_id, form_url, extra_context)
 
     def delete_view(
-        self, request: HttpRequest, object_id: str, extra_context: dict[str, object] | None = None,
+        self,
+        request: HttpRequest,
+        object_id: str,
+        extra_context: dict[str, object] | None = None,
     ) -> HttpResponse:
         if request.method == "POST":
             with run_lock() as locked:

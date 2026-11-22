@@ -28,11 +28,13 @@ class Migration(migrations.Migration):
             options={
                 "constraints": [
                     models.UniqueConstraint(
-                        fields=("event", "service_name", "ruling"), name="unique_service_correction_ruling",
+                        fields=("event", "service_name", "ruling"),
+                        name="unique_service_correction_ruling",
                     ),
                     models.UniqueConstraint(
                         condition=models.Q(revoked_at__isnull=True),
-                        fields=("event",), name="one_active_service_correction_per_event",
+                        fields=("event",),
+                        name="one_active_service_correction_per_event",
                     ),
                 ],
             },
@@ -54,7 +56,8 @@ class Migration(migrations.Migration):
                 "constraints": [
                     models.UniqueConstraint(fields=("batch", "team"), name="one_service_correction_per_team"),
                     models.UniqueConstraint(
-                        fields=("batch", "quotient_team_id"), name="one_service_correction_per_quotient_id",
+                        fields=("batch", "quotient_team_id"),
+                        name="one_service_correction_per_quotient_id",
                     ),
                 ],
             },

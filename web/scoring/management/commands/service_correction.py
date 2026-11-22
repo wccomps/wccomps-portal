@@ -49,9 +49,19 @@ class Command(BaseCommand):
                 action.add_argument("--require-unchanged-ranks", action="store_true")
 
     def handle(  # noqa: PLR0913
-        self, *, operation: str, event: int, service: str, ruling: str, manifest_sha256: str,
-        manifest: Path | None = None, actor: str = "", baseline_sha256: str = "",
-        expect_composite: Decimal = Decimal(0), require_unchanged_ranks: bool = False, **options: object,
+        self,
+        *,
+        operation: str,
+        event: int,
+        service: str,
+        ruling: str,
+        manifest_sha256: str,
+        manifest: Path | None = None,
+        actor: str = "",
+        baseline_sha256: str = "",
+        expect_composite: Decimal = Decimal(0),
+        require_unchanged_ranks: bool = False,
+        **options: object,
     ) -> None:
         if not 0 < len(service) <= 100 or not 0 < len(ruling) <= 100 or len(actor) > 255:
             raise CommandError("Invalid service, ruling, or audit actor.")
@@ -87,10 +97,20 @@ class Command(BaseCommand):
                     self._checked_teams(event, service, sources)
                 self.stdout.write(self._receipt("verified", credits, manifest_sha256, source_sha))
                 return
-            self.stdout.write(self._apply(
-                event, service, ruling, manifest_sha256, actor, credits, sources, source_sha,
-                expect_composite, require_unchanged_ranks,
-            ))
+            self.stdout.write(
+                self._apply(
+                    event,
+                    service,
+                    ruling,
+                    manifest_sha256,
+                    actor,
+                    credits,
+                    sources,
+                    source_sha,
+                    expect_composite,
+                    require_unchanged_ranks,
+                )
+            )
         except (OSError, ValueError, ValidationError) as exc:
             raise CommandError(str(exc)) from exc
 
@@ -115,8 +135,17 @@ class Command(BaseCommand):
         )
 
     def _apply(  # noqa: PLR0913
-        self, event_id: int, service: str, ruling: str, manifest_sha: str, actor: str, credits: list[Credit],
-        sources: list[SourceRow], source_sha: str, expect_composite: Decimal, unchanged_ranks: bool,
+        self,
+        event_id: int,
+        service: str,
+        ruling: str,
+        manifest_sha: str,
+        actor: str,
+        credits: list[Credit],
+        sources: list[SourceRow],
+        source_sha: str,
+        expect_composite: Decimal,
+        unchanged_ranks: bool,
     ) -> str:
         with school_list_held(), run_lock() as locked, transaction.atomic():
             if not locked:
@@ -131,7 +160,9 @@ class Command(BaseCommand):
                 if batch.revoked_at is not None or not same_input:
                     raise ValueError("This ruling already has a conflicting or revoked batch.")
                 receipt = AuditLog.objects.get(
-                    action="service_correction_applied", target_entity="event", target_id=event_id,
+                    action="service_correction_applied",
+                    target_entity="event",
+                    target_id=event_id,
                     details__batch=batch.pk,
                 ).details
                 composite, moves = Decimal(receipt["composite"]), receipt["rank_changes"]
@@ -142,14 +173,21 @@ class Command(BaseCommand):
                 raise ValueError("An active service correction already exists for this event.")
             before = {s.team.pk: s for s in compute_standings()}
             batch = ServiceCorrectionBatch.objects.create(
-                event_id=event_id, service_name=service, ruling=ruling, manifest_sha256=manifest_sha,
-                baseline_sha256=source_sha, portal_baseline_sha256=expected_portal_digest(sources),
+                event_id=event_id,
+                service_name=service,
+                ruling=ruling,
+                manifest_sha256=manifest_sha,
+                baseline_sha256=source_sha,
+                portal_baseline_sha256=expected_portal_digest(sources),
                 service_modifier=str(service_modifier()),
             )
             ServiceCorrection.objects.bulk_create(
                 ServiceCorrection(
-                    batch=batch, team_id=teams[source.team_number], quotient_team_id=credit.quotient_team_id,
-                    service_credit=credit.service_credit, sla_credit=credit.sla_credit,
+                    batch=batch,
+                    team_id=teams[source.team_number],
+                    quotient_team_id=credit.quotient_team_id,
+                    service_credit=credit.service_credit,
+                    sla_credit=credit.sla_credit,
                 )
                 for credit, source in zip(credits, sources, strict=True)
             )
@@ -162,13 +200,21 @@ class Command(BaseCommand):
             if composite != expect_composite or (unchanged_ranks and moves):
                 raise ValueError(f"Expected score or rank check failed: composite={composite}, rank_changes={moves}.")
             AuditLog.objects.create(
-                action="service_correction_applied", admin_user=actor, target_entity="event", target_id=event_id,
+                action="service_correction_applied",
+                admin_user=actor,
+                target_entity="event",
+                target_id=event_id,
                 details={
-                    "batch": batch.pk, "ruling": ruling, "service": service, "teams": len(credits),
-                    "manifest_sha256": manifest_sha, "baseline_sha256": source_sha,
+                    "batch": batch.pk,
+                    "ruling": ruling,
+                    "service": service,
+                    "teams": len(credits),
+                    "manifest_sha256": manifest_sha,
+                    "baseline_sha256": source_sha,
                     "service_credit": sum(c.service_credit for c in credits),
                     "sla_credit": sum(c.sla_credit for c in credits),
-                    "composite": str(composite), "rank_changes": moves,
+                    "composite": str(composite),
+                    "rank_changes": moves,
                 },
             )
             status = f"applied batch={batch.pk} event={event_id} composite={composite} rank_changes={moves}"
@@ -180,12 +226,19 @@ class Command(BaseCommand):
             if not locked:
                 raise ValueError("A competition transition is in progress.")
             config = CompetitionConfig.locked()
-            if config.applications_enabled or not Event.objects.filter(
-                pk=event_id, is_active=True, is_finalized=False,
-            ).exists():
+            if (
+                config.applications_enabled
+                or not Event.objects.filter(
+                    pk=event_id,
+                    is_active=True,
+                    is_finalized=False,
+                ).exists()
+            ):
                 raise ValueError("The target event must be open, unfinalized, and stopped.")
             batch = ServiceCorrectionBatch.objects.filter(
-                event_id=event_id, service_name=service, ruling=ruling,
+                event_id=event_id,
+                service_name=service,
+                ruling=ruling,
             ).first()
             if batch is None or batch.manifest_sha256 != manifest_sha:
                 raise ValueError("No matching batch with that manifest SHA256.")
@@ -196,7 +249,10 @@ class Command(BaseCommand):
             batch.revoked_at = timezone.now()
             batch.save(update_fields=["revoked_at"])
             AuditLog.objects.create(
-                action="service_correction_revoked", admin_user=actor, target_entity="event", target_id=event_id,
+                action="service_correction_revoked",
+                admin_user=actor,
+                target_entity="event",
+                target_id=event_id,
                 details={"batch": batch.pk, "service": service, "ruling": ruling, "manifest_sha256": manifest_sha},
             )
             return f"revoked batch={batch.pk} event={event_id}"

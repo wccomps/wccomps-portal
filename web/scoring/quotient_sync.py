@@ -315,7 +315,9 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             raise CorrectionConflictError(problem)
         if event_id is not None:
             ServiceCorrectionBatch.objects.filter(
-                event_id=event_id, revoked_at__isnull=True, sync_conflict=True,
+                event_id=event_id,
+                revoked_at__isnull=True,
+                sync_conflict=True,
             ).update(sync_conflict=False)
 
     return {
