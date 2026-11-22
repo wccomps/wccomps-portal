@@ -176,7 +176,6 @@ class ImportEventForm(NewEventFields):
 
     def __init__(self, *args: object, season: Season | None, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        self.season = season
         self.open_events = {str(ev.pk): ev for ev in season.events.filter(is_finalized=False)} if season else {}
         event = cast(forms.ChoiceField, self.fields["event"])
         if season is None:
