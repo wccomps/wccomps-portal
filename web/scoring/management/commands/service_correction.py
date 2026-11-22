@@ -179,7 +179,8 @@ class Command(BaseCommand):
         with school_list_held(), run_lock() as locked, transaction.atomic():
             if not locked:
                 raise ValueError("A competition transition is in progress.")
-            if CompetitionConfig.locked().applications_enabled or not Event.objects.filter(
+            config = CompetitionConfig.locked()
+            if config.applications_enabled or not Event.objects.filter(
                 pk=event_id, is_active=True, is_finalized=False,
             ).exists():
                 raise ValueError("The target event must be open, unfinalized, and stopped.")
@@ -190,6 +191,8 @@ class Command(BaseCommand):
                 raise ValueError("No matching batch with that manifest SHA256.")
             if batch.revoked_at is not None:
                 return f"already revoked batch={batch.pk} event={event_id}"
+            if config.schedule_will_start():
+                raise ValueError("Clear the pending competition start before revoking the correction.")
             batch.revoked_at = timezone.now()
             batch.save(update_fields=["revoked_at"])
             AuditLog.objects.create(

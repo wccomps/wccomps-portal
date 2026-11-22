@@ -180,6 +180,4 @@ def correction_problem(event_id: int | None, *, check_sync_conflict: bool = True
             return f"Score sync conflicted with service correction batch {batch.pk}. Reconcile before finalizing."
         if portal_digest(batch.service_name) != batch.portal_baseline_sha256:
             return f"Imported scores do not match service correction batch {batch.pk}. Reconcile before finalizing."
-        if service_modifier() != Decimal(batch.service_modifier):
-            return f"Service scaling changed for correction batch {batch.pk}. Reconcile before finalizing."
     return ""

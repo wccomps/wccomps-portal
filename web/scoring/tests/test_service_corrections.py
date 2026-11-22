@@ -1,6 +1,7 @@
 import csv
 import hashlib
 from dataclasses import replace
+from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -10,6 +11,7 @@ from zipfile import ZipFile
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.utils import timezone
 from quotient.client import TeamUptime, _service_export
 from registration.services import close_out_event, close_out_problem, set_team_school
 from registration.stage import event_stage
@@ -20,6 +22,7 @@ from scoring.calculator import compute_standings
 from scoring.models import ScoringTemplate, ServiceCorrection, ServiceCorrectionBatch, ServiceDetail
 from scoring.quotient_sync import sync_service_scores
 from scoring.service_corrections import MANIFEST_HEADER
+from scoring.snapshot import context_from_snapshot
 from team.models import Team
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -99,6 +102,10 @@ def test_correction_is_audited_idempotent_sync_safe_and_revocable(correction):
     assert not close_out_problem(event_stage())
     ServiceDetail.objects.filter(team=team, service_name=SERVICE).update(points=99)
     assert "Reconcile before finalizing" in close_out_problem(event_stage())
+    CompetitionConfig.objects.update(competition_start_time=timezone.now() + timedelta(hours=1))
+    with pytest.raises(CommandError, match="Clear the pending competition start"):
+        call_command("service_correction", "revoke", *common, "--actor", "operator")
+    CompetitionConfig.objects.update(competition_start_time=None)
 
     for expected in ("revoked", "already revoked"):
         output = StringIO()
@@ -123,21 +130,19 @@ def test_wrong_digest_and_ambiguous_mapping_do_not_apply(correction):
     assert not ServiceCorrectionBatch.objects.exists()
 
 
-def test_sync_refuses_scaling_drift_even_when_the_corrected_service_matches(correction):
+def test_sync_can_revalue_raw_scores_without_revaluing_an_applied_credit(correction):
     team, _, _, apply, importer, exports = correction
     ScoringTemplate.objects.create(service_max=400, inject_max=800)
     call_command("service_correction", "apply", *apply, "--expect-composite", "13")
     other = replace(exports[0].services[0], service_name="Example-DNS")
     importer.get_service_export.return_value = [replace(exports[0], services=[*exports[0].services, other])]
     importer.get_uptimes.return_value = [TeamUptime("team07", 7, {SERVICE: 0.5, "Example-DNS": 0.25})]
-    with pytest.raises(ValueError, match="Service scaling changed"):
-        sync_service_scores()
-    assert not ServiceDetail.objects.filter(team=team, service_name="Example-DNS").exists()
-    assert ScoringTemplate.objects.get().service_max == 400
-    assert "Score sync conflicted" in close_out_problem(event_stage())
-    ScoringTemplate.objects.update(inject_max=400)
+    sync_service_scores()
+    assert ServiceDetail.objects.filter(team=team, service_name="Example-DNS").exists()
+    assert ScoringTemplate.objects.get().service_max == 600
+    assert not close_out_problem(event_stage())
     changed = next(s for s in compute_standings() if s.team.pk == team.pk)
-    assert changed.service_points == Decimal(108)  # 100 at the live multiplier, 4 at the pinned multiplier of 2.
+    assert changed.service_points == Decimal("141.33")  # 100 at 4/3, 4 at the pinned multiplier of 2.
 
 
 def test_close_out_freezes_corrections_and_unaltered_service_history(correction):
@@ -146,12 +151,13 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
     close_out_event(event, "operator")
     result = event.results.get(team_number=team.team_number)
     assert result.total_score == Decimal(104)
-    assert result.scorecard["score"]["service_corrections"] == [
+    frozen = context_from_snapshot(result.scorecard)
+    assert frozen["score"]["service_corrections"] == [
         {"service_name": SERVICE, "ruling": RULING, "service_credit": 4, "sla_credit": 5,
-         "service_modifier": {"$d": "1"}},
+         "service_modifier": Decimal(1)},
     ]
-    service_detail = result.scorecard["stats"]["service_stats"][0]
-    assert (service_detail["points"], service_detail["sla_violations"]) == ({"$d": "100.00"}, 1)
+    service_detail = frozen["stats"]["service_stats"][0]
+    assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)
     with ZipFile(BytesIO(event.archive.data)) as archive:
         rows = csv.DictReader(StringIO(archive.read("final_scores.csv").decode()))
         row = next(row for row in rows if int(row["Team Number"]) == team.team_number)
