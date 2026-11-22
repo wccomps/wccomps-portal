@@ -4,9 +4,9 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("registration", "0016_remove_teamregistration_edit_token"),
+        ("registration", "0002_add_events_and_contacts"),
         ("scoring", "0050_metadata_jsonb_storable"),
-        ("team", "0018_team_channels_need_clearing"),
+        ("team", "0015_discordlink_forget_student_helper"),
     ]
 
     operations = [

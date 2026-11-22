@@ -20,7 +20,9 @@ def test_staff_scorecard_separates_correction_from_observed_history(scorecard_co
         path = reverse("leaderboard_scorecard", args=[team.team_number])
         assert page.goto(f"{live_server.url}{path}").status == 200
         assert page.get_by_role("heading", name="Service scoring corrections").is_visible()
-        assert page.get_by_text("+4 raw service points (× 1.00), +5 SLA points restored.", exact=False).is_visible()
+        assert page.get_by_text(
+            "+4 raw service points at a multiplier of 1.00, +5 SLA points restored.", exact=False
+        ).is_visible()
         assert page.get_by_text("Service: 100 raw", exact=False).is_visible()
         details = page.get_by_role("table", name="Service uptime scores")
         raw_row = details.get_by_role("row").filter(has_text=test_service_corrections.SERVICE)
