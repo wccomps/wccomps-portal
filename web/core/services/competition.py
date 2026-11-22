@@ -294,6 +294,7 @@ def _run(
     every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
+    from scoring.models import ServiceCorrectionBatch
     from scoring.quotient_sync import sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
@@ -304,6 +305,18 @@ def _run(
     config = CompetitionConfig.get_config()
     began_with = config.competition_start_time
     result = CompetitionRunResult(enable=enable, controlled_apps=list(config.controlled_applications))
+    if (
+        enable
+        and ServiceCorrectionBatch.objects.filter(
+            event__is_active=True,
+            revoked_at__isnull=True,
+        ).exists()
+    ):
+        return CompetitionRunResult(
+            enable=enable,
+            error="Revoke the active service correction before restarting the competition.",
+            refused=True,
+        )
     if not result.controlled_apps:
         result.error = "No controlled applications configured"
         return result

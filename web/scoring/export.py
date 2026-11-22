@@ -267,6 +267,16 @@ DATASETS: dict[str, ExportableDataset] = {
             Column("Red Deductions", "red_deductions", lambda sc: sc[0].red_deductions),
             Column("Incident Recovery Points", "incident_recovery_points", lambda sc: sc[0].incident_recovery_points),
             Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].sla_penalties),
+            Column(
+                "Raw Service Credit",
+                "raw_service_credit",
+                lambda sc: sum(line["service_credit"] for line in sc[0].service_corrections),
+            ),
+            Column(
+                "SLA Credit",
+                "sla_credit",
+                lambda sc: sum(line["sla_credit"] for line in sc[0].service_corrections),
+            ),
             Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].point_adjustments),
             Column("Calculated At", "calculated_at", lambda sc: sc[1]),
         ],
