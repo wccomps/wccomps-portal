@@ -8,13 +8,17 @@ import httpx
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import models
 from quotient.client import QuotientClient, ServiceCheck
+from registration.models import Event
 
+from core.models import CompetitionConfig
+from core.services.competition import run_lock
 from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
-from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+from .models import QuotientMetadataCache, ServiceCorrectionBatch, ServiceDetail, ServiceScore
+from .service_corrections import CorrectionConflictError, check_sync, correction_problem, guarded_service_sync
 
 logger = logging.getLogger(__name__)
 _DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
@@ -237,15 +241,13 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
     """Sync each team's aggregate ServiceScore and per-service ServiceDetail records from Quotient, removing and
     skipping teams with no services in the export. Raises ValueError, writing nothing, when Quotient's scores or
     uptimes can't be read or don't fit the portal's columns."""
+    event_id = Event.objects.filter(is_active=True).values_list("pk", flat=True).first()
     client = QuotientClient()
 
     export_data = client.get_service_export()
     if export_data is None:
         raise ValueError("Failed to retrieve service scores from Quotient")
-    if not export_data:
-        return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
-
-    uptimes_data = client.get_uptimes()
+    uptimes_data = client.get_uptimes() if export_data else []
     if uptimes_data is None:
         raise ValueError("Failed to retrieve uptimes from Quotient")
     uptimes_by_team = {tu.team_number: tu.uptimes for tu in uptimes_data}
@@ -276,12 +278,18 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             )
             for svc in team_export.services
         ]
-        for row in (score, *details):
-            _check_storable(row, f"Quotient's scores for team {team.team_number}")
         rows.append((team, score, details))
 
-    with transaction.atomic():
+    with run_lock() as locked, guarded_service_sync(event_id):
+        if not locked:
+            raise ValueError("A competition transition or score sync is in progress.")
+        CompetitionConfig.locked()
+        if Event.objects.filter(is_active=True).values_list("pk", flat=True).first() != event_id:
+            raise ValueError("The active event changed during score sync.")
+        check_sync(event_id, export_data, uptimes_data)
         for team, score, details in rows:
+            for row in (score, *details):
+                _check_storable(row, f"Quotient's scores for team {team.team_number}")
             ServiceDetail.objects.filter(team=team).delete()
             if not details:
                 ServiceScore.objects.filter(team=team).delete()
@@ -301,8 +309,14 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             ServiceDetail.objects.bulk_create(details)
             details_synced += len(details)
 
-    # Keep the reactive service scaling current: the max service points at full uptime.
-    set_template_max("service_max", service_max_from_details())
+        if export_data:
+            set_template_max("service_max", service_max_from_details())
+        if problem := correction_problem(event_id, check_sync_conflict=False):
+            raise CorrectionConflictError(problem)
+        if event_id is not None:
+            ServiceCorrectionBatch.objects.filter(
+                event_id=event_id, revoked_at__isnull=True, sync_conflict=True,
+            ).update(sync_conflict=False)
 
     return {
         "teams_created": teams_created,

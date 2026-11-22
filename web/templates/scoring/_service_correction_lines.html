@@ -1,0 +1,13 @@
+{% if score.service_corrections %}
+    <h3>Service scoring corrections</h3>
+    <ul>
+        {% for correction in score.service_corrections %}
+            <li>
+                {{ correction.service_name }} ({{ correction.ruling }}):
+                +{{ correction.service_credit }} raw service points (× {{ correction.service_modifier|floatformat:2 }}),
+                +{{ correction.sla_credit }} SLA points restored.
+            </li>
+        {% endfor %}
+    </ul>
+    <p>The score includes these credits. Service Uptime Detail shows the unadjusted per-service totals.</p>
+{% endif %}

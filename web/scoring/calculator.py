@@ -19,6 +19,7 @@ from .models import (
     ScoringTemplate,
     ServiceScore,
 )
+from .service_corrections import CreditLine, current_credits
 
 
 class ScoreBreakdown(TypedDict):
@@ -151,15 +152,20 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
     return raw
 
 
-def _breakdown(raw: _RawScores, template: ScoringTemplate) -> DetailedScoreBreakdown:
+def _breakdown(
+    raw: _RawScores, template: ScoringTemplate, credits: list[CreditLine],
+) -> DetailedScoreBreakdown:
     service_mod, inject_mod, orange_mod = _get_modifiers(template)
-    scaled_service = raw["service"] * service_mod
+    sla = raw["sla"] + sum(line["sla_credit"] for line in credits)
+    scaled_service = raw["service"] * service_mod + sum(
+        line["service_credit"] * line["service_modifier"] for line in credits
+    )
     scaled_inject = raw["inject"] * inject_mod
     scaled_orange = raw["orange"] * orange_mod
 
     two_places = Decimal("0.01")
     total_score = (
-        scaled_service + scaled_inject + scaled_orange + raw["sla"] + raw["adjustments"] + raw["red"] + raw["recovery"]
+        scaled_service + scaled_inject + scaled_orange + sla + raw["adjustments"] + raw["red"] + raw["recovery"]
     ).quantize(two_places, rounding=ROUND_HALF_UP)
 
     return {
@@ -167,7 +173,7 @@ def _breakdown(raw: _RawScores, template: ScoringTemplate) -> DetailedScoreBreak
         "inject_points": scaled_inject.quantize(two_places, rounding=ROUND_HALF_UP),
         "orange_points": scaled_orange.quantize(two_places, rounding=ROUND_HALF_UP),
         "red_deductions": raw["red"],
-        "sla_penalties": raw["sla"],
+        "sla_penalties": sla,
         "point_adjustments": raw["adjustments"],
         "incident_recovery_points": raw["recovery"],
         "total_score": total_score,
@@ -191,13 +197,13 @@ def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
     """A team's score with its raw scores, modifiers and weights.
 
     Formula:
-        total = (service × service_modifier)
+        total = (service × service_modifier) + credits at their recorded service_modifier
               + (inject × inject_modifier)
               + (orange × orange_modifier)
-              + sla_violations + point_adjustments
+              + sla_violations + SLA credits + point_adjustments
               + red_deductions + incident_recovery
     """
-    return _breakdown(_raw_scores([team])[team.pk], _template())
+    return _breakdown(_raw_scores([team])[team.pk], _template(), current_credits([team.pk]).get(team.pk, []))
 
 
 @dataclass
@@ -216,6 +222,7 @@ class Standing:
     is_excluded: bool
     rank: int | None = None
     scaling: dict[str, Decimal] = field(default_factory=dict)
+    service_corrections: list[CreditLine] = field(default_factory=list)
 
     @property
     def has_scoring_activity(self) -> bool:
@@ -240,16 +247,19 @@ def compute_standings() -> list[Standing]:
     """
     teams = list(Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number"))
     raw = _raw_scores(teams)
+    credits = current_credits([team.pk for team in teams])
     template = _template()
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
 
     standings = []
     for team in teams:
-        breakdown = _breakdown(raw[team.pk], template)
+        lines = credits.get(team.pk, [])
+        breakdown = _breakdown(raw[team.pk], template, lines)
         standings.append(
             Standing(
                 team=team,
                 is_excluded=team.pk in excluded_team_ids,
+                service_corrections=lines,
                 total_score=breakdown["total_score"],
                 scaling={key: breakdown[key] for key in SCALING_FIELDS},  # type: ignore[literal-required]
                 **{field: breakdown[field] for field in SCORE_COMPONENT_FIELDS},  # type: ignore[literal-required]

@@ -12,6 +12,7 @@ from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
 from scoring.models import QuotientMetadataCache
 from scoring.scorecard import build_peer_context, build_scorecard_context
+from scoring.service_corrections import correction_problem
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
@@ -592,6 +593,8 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
         return f"Nothing to close out for {stage.event}. {stage.alternative}"
     if not stage.played:
         return f"Nothing to close out. {stage.status} {stage.next_step}"
+    if problem := correction_problem(stage.event.pk if stage.event else None):
+        return problem
     if stage.event is None and not Season.objects.filter(is_active=True).exists():
         return (
             "No season is active, and Close Out records these scores at a new event in the active season. Make a "

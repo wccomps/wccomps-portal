@@ -702,6 +702,47 @@ class ServiceDetail(models.Model):
         return f"{self.team.team_name}, {self.service_name}: {self.points}"
 
 
+class ServiceCorrectionBatch(models.Model):
+    event = models.ForeignKey("registration.Event", on_delete=models.PROTECT)
+    service_name = models.CharField(max_length=100)
+    ruling = models.SlugField(max_length=100)
+    manifest_sha256 = models.CharField(max_length=64)
+    baseline_sha256 = models.CharField(max_length=64)
+    portal_baseline_sha256 = models.CharField(max_length=64)
+    service_modifier = models.CharField(max_length=64)
+    sync_conflict = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "service_name", "ruling"], name="unique_service_correction_ruling"
+            ),
+            models.UniqueConstraint(
+                fields=["event"],
+                condition=models.Q(revoked_at__isnull=True),
+                name="one_active_service_correction_per_event",
+            ),
+        ]
+
+
+class ServiceCorrection(models.Model):
+    batch = models.ForeignKey(ServiceCorrectionBatch, on_delete=models.PROTECT)
+    team = models.ForeignKey("team.Team", on_delete=models.PROTECT)
+    quotient_team_id = models.PositiveBigIntegerField()
+    service_credit = models.PositiveIntegerField()
+    sla_credit = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["batch", "team"], name="one_service_correction_per_team"),
+            models.UniqueConstraint(
+                fields=["batch", "quotient_team_id"], name="one_service_correction_per_quotient_id"
+            ),
+        ]
+
+
 class ScoringExclusion(models.Model):
     """A team left off the leaderboard and out of comparative stats; its own score still computes."""
 

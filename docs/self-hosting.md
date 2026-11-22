@@ -460,6 +460,28 @@ Scoring Service Check, Black Team Phone Consultation, Black Team Hands-on Consul
 with its point cost and required fields. Edit, add or delete them at `/ops/admin/categories/` (gold team or ticketing
 admin). If you replace Box Reset / Scrub, point `BOX_RESET_CATEGORY_ID` at the new category's ID.
 
+## Service scoring corrections
+
+For an approved ruling after a competition stops, an operator with deployment shell access can record separate
+raw service and SLA credits without replacing Quotient's check history. Keep the approved CSV private. Its exact
+header is `team_id,check_points_delta,sla_points_restored,net_points_delta`. Include one row per scored team on
+the service, sorted by unique positive **Quotient ID**. Each field is an unsigned decimal integer of at most
+nine digits with no padding. Use LF line endings, including a final LF, and no BOM. Net must equal the sum of the
+two credit columns; it is not a separate credit.
+
+Run `manage.py service_correction verify --event EVENT --service SERVICE --ruling SLUG --manifest PATH
+--manifest-sha256 APPROVED_SHA` with the independently approved digest. It reads the live Quotient export,
+resolves each ID using the scored team's name and the event's portal team assignment, and checks the current
+portal import. Keep its baseline digest with the decision record. Run `apply` with the same arguments plus
+`--baseline-sha256 BASELINE_SHA --actor OPERATOR --expect-composite POINTS`; add `--require-unchanged-ranks`
+when the ruling calls for it. A failed score or rank check rolls back the entire application.
+
+One batch can be active per event; an identical application is a no-op. The raw service credit uses the multiplier
+recorded at application. A detected sync conflict rolls back the import and blocks Close Out until a matching
+sync or audited revocation. To revoke before Close Out, pass the event, service, ruling, manifest digest and
+revoking operator, without the manifest path. Frozen scorecards show the credit and unadjusted service detail;
+the close-out ZIP's final scores export carries the two credit columns.
+
 ## Settings reference
 
 Every setting, with its default when unset and its meaning. `.env.example` has the same groups.
