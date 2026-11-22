@@ -126,6 +126,11 @@ def _team_number(team_name: str) -> int:
     return int("".join(c for c in team_name if c.isdigit()) or "0")
 
 
+def is_service_check_name(name: str) -> bool:
+    """Whether a check name can be used unchanged as one URL segment."""
+    return _SERVICE_NAME_RE.fullmatch(name) is not None
+
+
 def quotient_service_name(service_name: str, hostname: str = "") -> str:
     """Quotient's check name ("box-service") from a ticket's service_name ("box:service", "box-service", or
     "service" with hostname="box"), or "" if it isn't a valid Quotient check identifier."""
@@ -136,9 +141,7 @@ def quotient_service_name(service_name: str, hostname: str = "") -> str:
         host = box.strip() or host
         name = svc.strip()
     candidate = f"{host}-{name}" if host and name and not name.lower().startswith(f"{host.lower()}-") else name
-    if not _SERVICE_NAME_RE.match(candidate) or ".." in candidate:
-        return ""
-    return candidate
+    return candidate if is_service_check_name(candidate) else ""
 
 
 @dataclass
@@ -344,6 +347,11 @@ class QuotientClient:
         """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
         return self._fetch("/api/graphs/uptimes", _uptimes, "uptimes")
 
+    def resolve_history_team_id(self, team_number: int) -> int | None:
+        """Resolve a portal team against Quotient's current roster, never by assuming its DB ID."""
+        roster = self._fetch("/api/teams", _history_team_roster, "the team roster")
+        return roster.get(team_number) if roster is not None else None
+
     def get_service_checks(
         self,
         team_number: int,
@@ -365,16 +373,9 @@ class QuotientClient:
             "service checks",
         )
 
-    def get_team_service_names(self, team_number: int, *, force_refresh: bool = False) -> set[str] | None:
+    def get_team_service_names(self, team_id: int) -> set[str] | None:
         """Stored check names from the team's history summary, not the current scoring configuration."""
-        return self._cached(
-            f"quotient_team_service_names_{team_number}",
-            30,
-            force_refresh,
-            f"/api/services/{team_number}",
-            _team_service_names,
-            "team service names",
-        )
+        return self._fetch(f"/api/services/{team_id}", _team_service_names, "team service names")
 
     def get_engine_status(self) -> EngineStatus | None:
         """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
@@ -460,17 +461,33 @@ def _uptimes(data: object) -> list[TeamUptime]:
 
 
 def _team_service_names(data: object) -> set[str]:
-    if data is None:
-        return set()
+    try:
+        return {
+            _text(_field(entry, "ServiceName", "a service summary"), "a service name")
+            for entry in ([] if data is None else _objects(data, "the team service summary"))
+        }
+    except ValueError:
+        raise ValueError("Invalid team service summary.") from None
+
+
+def _history_team_roster(data: object) -> dict[int, int]:
+    roster: dict[int, int] = {}
+    ids: set[int] = set()
+    ambiguous: set[int] = set()
     if not isinstance(data, list):
-        raise ValueError("the team service summary isn't a list")
-    names: set[str] = set()
-    for entry in data:
-        if not isinstance(entry, dict) or not isinstance(name := entry.get("ServiceName"), str):
-            raise ValueError("a team service summary entry is missing its service name")
-        if _SERVICE_NAME_RE.fullmatch(name) and ".." not in name:
-            names.add(name)
-    return names
+        raise ValueError("Invalid team roster.")
+    for row in data:
+        team_id, name = (row.get("ID"), row.get("Name")) if isinstance(row, dict) else (None, None)
+        if type(team_id) is not int or not 0 < team_id < 2**32 or team_id in ids or not isinstance(name, str):
+            raise ValueError("The team roster has an invalid or duplicate identity.")
+        ids.add(team_id)
+        match = re.fullmatch(r"team ?0*([1-9][0-9]{0,8})", name, re.IGNORECASE | re.ASCII)
+        if match:
+            number = int(match[1])
+            if number in roster:
+                ambiguous.add(number)
+            roster[number] = team_id
+    return {number: team_id for number, team_id in roster.items() if number not in ambiguous}
 
 
 def _service_checks(data: object) -> list[ServiceCheck]:

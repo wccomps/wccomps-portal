@@ -52,6 +52,8 @@ def service_ticket(blue_team):
         ("", "TREX", ""),
         (".", "", ""),
         ("..", "", ""),
+        ("A..B", "", "A..B"),
+        ("bad\nname", "", ""),
         ("../2/TREX-DNS", "", ""),
         ("2/TREX-DNS", "TREX", ""),
         ("TREX:../2/TREX-DNS", "", ""),
@@ -198,6 +200,7 @@ def test_non_staff_roles_cannot_fetch_service_checks_endpoint(
 
 def test_service_checks_endpoint_shows_unreachable_message_when_quotient_down(ticketing_support_user, service_ticket):
     mock_client = MagicMock()
+    mock_client.resolve_history_team_id.return_value = 42
     mock_client.get_service_checks.return_value = None
     with patch("quotient.client.get_quotient_client", return_value=mock_client):
         response = _client(ticketing_support_user).get(
@@ -206,7 +209,7 @@ def test_service_checks_endpoint_shows_unreachable_message_when_quotient_down(ti
 
     assert response.status_code == 200
     html = response.content.decode()
-    assert "Quotient isn't reachable." in html
+    assert "Quotient history is unavailable." in html
     assert "Refresh" in html
 
 
@@ -230,6 +233,7 @@ def test_service_checks_endpoint_renders_streak_last_passed_and_recent_10(ticket
         )
     ]
     mock_client = MagicMock()
+    mock_client.resolve_history_team_id.return_value = 42
     mock_client.get_service_checks.return_value = checks
     with patch("quotient.client.get_quotient_client", return_value=mock_client):
         response = _client(ticketing_support_user).get(
@@ -239,7 +243,7 @@ def test_service_checks_endpoint_renders_streak_last_passed_and_recent_10(ticket
 
     assert response.status_code == 200
     mock_client.get_service_checks.assert_called_once_with(
-        service_ticket.team.team_number,
+        42,
         "TREX-DNS",
         force_refresh=True,
     )
@@ -299,6 +303,7 @@ def test_service_checks_endpoint_escapes_and_collapses_large_html_debug_output(t
         )
     ]
     mock_client = MagicMock()
+    mock_client.resolve_history_team_id.return_value = 42
     mock_client.get_service_checks.return_value = checks
     with patch("quotient.client.get_quotient_client", return_value=mock_client):
         response = _client(ticketing_support_user).get(

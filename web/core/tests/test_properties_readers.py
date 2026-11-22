@@ -728,10 +728,17 @@ READERS = [
     ),
     Reader(
         "get_team_service_names",
-        lambda: quotient().get_team_service_names(1, force_refresh=True),
+        lambda: quotient().get_team_service_names(1),
         (DONE, [{"ServiceName": "web-http", "Last10Rounds": []}]),
         lambda r: outcome(r, lambda x: x is None or (isinstance(x, set) and all(is_str(s) for s in x)), "check names"),
-        (f"{QC}.get_team_service_names", f"{QC}._cached", QJ),
+        (f"{QC}.get_team_service_names", f"{QC}._fetch", QJ),
+    ),
+    Reader(
+        "resolve_history_team_id",
+        lambda: quotient().resolve_history_team_id(1),
+        (DONE, [{"ID": 42, "Name": "team01"}]),
+        lambda r: outcome(r, lambda x: x is None or type(x) is int and 0 < x < 2**32, "Quotient team ID"),
+        (f"{QC}.resolve_history_team_id", f"{QC}._fetch", QJ),
     ),
     Reader(
         "get_engine_status",

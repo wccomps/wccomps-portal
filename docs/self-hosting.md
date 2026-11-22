@@ -307,11 +307,14 @@ round, queued for the ops channel 30 and 10 minutes before a scheduled start; it
 later), and the service scores the competition stop pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from
 Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 
-- A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped. Ticket
-  check history and the preflight report take a team's Quotient ID as its number, so create Quotient's teams in order.
+- Score imports take the team number from the digits in its name. Preflight still takes the Quotient ID as the
+  team number, so create Quotient's teams in order for that report.
 - An inject's point value comes from its title: `(10 pts)`, `(1,000 points)`.
-- Ticket history first looks for the exact `box-service` name. If that returns no checks, it uses a case-insensitive
-  match only when the team's stored check history has exactly one matching name.
+- Staff ticket history resolves the ticket's portal team from Quotient's current `/api/teams` roster. Name the
+  team `team09` or `Team 9` for portal team 9. History is unavailable unless that number has a unique roster
+  entry with a valid DB ID. It first looks up the exact service name. After an empty response it retries only
+  a unique case-insensitive match across all stored names, and only if the exact spelling is a safe URL
+  segment. A failed lookup is unavailable, not empty history.
 
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
