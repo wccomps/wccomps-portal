@@ -1,4 +1,4 @@
-"""The Quotient client answers from its cache, an empty answer included; the score sync's reads always fetch."""
+"""Metadata caches empty answers; scoring and history reads always fetch without caching."""
 
 from collections.abc import Callable
 
@@ -12,11 +12,11 @@ Getter = tuple[str, object, Callable[[QuotientClient], object]]
 CACHED: list[Getter] = [
     ("/api/metadata", {"boxes": []}, lambda c: c.get_infrastructure()),
     ("/api/injects", [], lambda c: c.get_injects()),
-    ("/api/services/1/web", [], lambda c: c.get_service_checks(1, "web")),
 ]
 UNCACHED: list[Getter] = [
     ("/api/engine/export/scores", [], lambda c: c.get_service_export()),
     ("/api/graphs/uptimes", {"series": []}, lambda c: c.get_uptimes()),
+    ("/api/services/1/web", [], lambda c: c.get_service_checks(1, "web")),
 ]
 
 
@@ -50,9 +50,10 @@ def test_an_empty_answer_is_cached_like_any_other(
 
 
 @pytest.mark.parametrize(("endpoint", "body", "get"), UNCACHED, ids=[g[0] for g in UNCACHED])
-def test_the_score_syncs_reads_fetch_every_time_and_cache_nothing(
+def test_uncached_reads_fetch_every_time(
     monkeypatch: pytest.MonkeyPatch, endpoint: str, body: object, get: Callable[[QuotientClient], object]
 ) -> None:
     assert _asked_twice(monkeypatch, body, get) == [endpoint, endpoint]
     assert cache.get("quotient_service_export") is None
     assert cache.get("quotient_uptimes") is None
+    assert cache.get("quotient_service_checks_1_web") is None

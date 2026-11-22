@@ -38,7 +38,7 @@ def _is_unavailable(exc: BaseException | None) -> bool:
 
 
 def _log_failure(message: str, exc: Exception) -> None:
-    """Keep response headers out of logs; use a traceback for unexpected non-HTTP failures."""
+    """Log direct HTTP status errors without response headers."""
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         log = logger.warning if status >= 500 else logger.error
