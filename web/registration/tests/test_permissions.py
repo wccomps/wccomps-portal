@@ -81,7 +81,6 @@ class TestSeasonManagementPermissions:
 
 @pytest.fixture
 def assignable(current_event):
-    """The open event with one approved, enrolled registration that has a captain, and a free team for it."""
     registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
     RegistrationEventEnrollment.objects.create(registration=registration, event=current_event)
     RegistrationContact.objects.create(registration=registration, role="captain", name="C", email="c@example.edu")

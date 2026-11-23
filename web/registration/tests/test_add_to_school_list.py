@@ -211,7 +211,6 @@ def test_two_hand_overs_queue_one_removal_and_one_reset(event, teams):
 
 
 def test_hand_overs_of_two_teams_queue_a_removal_and_a_reset_for_each(event, teams):
-    """One team's pending removal and reset are no other team's."""
     from core.models import QueuedTask
 
     Team.objects.filter(pk__in=[teams[1].pk, teams[2].pk]).update(discord_role_id=5, discord_category_id=6)
@@ -233,8 +232,6 @@ def test_hand_overs_of_two_teams_queue_a_removal_and_a_reset_for_each(event, tea
     ids=["role only", "category only", "removal still owed"],
 )
 def test_any_one_discord_leftover_queues_its_removal_on_a_hand_over(event, teams, leftover):
-    """A role without a category, a category without a role, or a removal marked but never queued (its task was
-    deleted) is each still on Discord: the hand-over marks the team and queues the removal for it."""
     from core.models import QueuedTask
 
     Team.objects.filter(pk=teams[1].pk).update(**leftover)
