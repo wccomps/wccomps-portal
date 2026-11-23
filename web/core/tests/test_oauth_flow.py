@@ -43,7 +43,7 @@ GOOD_ANSWERS = (_json(GOOD_TOKEN), _json(GOOD_USERINFO))
 
 
 def _start_sign_in(client: Client, next_url: str | None = None) -> str:
-    """Begin a login in this browser, coming back to next_url; the signed state Authentik hands back."""
+    """Return the signed state from the sign-in redirect."""
     with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
         response = client.get("/auth/login/", {} if next_url is None else {"next": next_url})
     assert response.status_code == 302
@@ -68,14 +68,16 @@ def _id_token(auth_time: float) -> str:
     return f"header.{payload}.signature"
 
 
-def _shown(response) -> tuple[int, str, str]:
-    """The error page's status, the title its browser tab shows before the site's name, and its message. The site's
-    name comes from a context processor, so it shows only on a page rendered with its request."""
-    title = re.search(r"<title>\s*(.*?)\s*</title>", response.content.decode(), re.S)
-    assert title, response.content
+def _shown(response: HttpResponse) -> tuple[int, str, str]:
+    """The status, browser tab title without the site name, and HTML-escaped alert message."""
+    body = response.content.decode()
+    title = re.search(r"<title>\s*(.*?)\s*</title>", body, re.S)
+    assert title, body
     site = f" - {escape(settings.SITE_NAME)}"
     assert title.group(1).endswith(site), title.group(1)
-    return response.status_code, title.group(1).removesuffix(site), response.context["error_message"]
+    message = re.search(r'<div\b[^>]*\brole="alert"[^>]*>\s*<p\b[^>]*>\s*(.*?)\s*</p>', body, re.S)
+    assert message, body
+    return response.status_code, title.group(1).removesuffix(site), message.group(1)
 
 
 @pytest.fixture
@@ -203,8 +205,11 @@ class TestOAuthCallback:
 
         assert ("_auth_user_id" in client.session) is not before
         if before:
-            assert _shown(response)[:2] == (200, "Signed Out")
-            assert b"password was reset" in response.content
+            assert _shown(response) == (
+                200,
+                "Signed Out",
+                escape("This account's password was reset after you signed in. Sign in again with it."),
+            )
 
     def test_without_auth_time_the_sign_in_counts_from_when_it_began(self, oauth_state_session):
         """The login page signed when it started; a reset after that is later than this sign-in."""
@@ -392,7 +397,7 @@ class TestOAuthCallback:
         session["oauth_nonce"] = "test-nonce"
         session.save()
 
-        # oauth_login drops an external next before signing it, so only a forged state carries one
+        # Bypass the login view's next URL filtering to exercise the callback's own check.
         state = signing.dumps({"n": "test-nonce", "next": "https://evil.com/steal"})
 
         response = _login(client, state, {"sub": "redirect-test-id-2", "preferred_username": "safeuser", "groups": []})
@@ -475,9 +480,7 @@ class TestEachRefusal:
 
 @pytest.mark.django_db
 def test_the_code_is_redeemed_and_the_claims_read_as_authentik_expects(oauth_state_session):
-    """The token request carries the grant, the code, the client's credentials and the redirect URI the login sent;
-    the userinfo request carries the access token the exchange answered. Both give up after the configured timeout,
-    so a hung Authentik can't hold the sign-in open."""
+    """Check the token exchange and userinfo request parameters, including the configured HTTPX timeouts."""
     client, state = oauth_state_session
 
     with (
