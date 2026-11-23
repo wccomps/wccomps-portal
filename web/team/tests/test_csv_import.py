@@ -315,24 +315,33 @@ Example U,captain@example.edu,coach@example.edu
         ]
 
     @pytest.mark.parametrize(
-        ("headers", "cells", "detected", "ignored"),
+        ("headers", "emails", "warnings"),
         [
-            ("Contact Email,CONTACT_EMAIL,Contact Email", "first,ignored,last", "Contact Email", "CONTACT_EMAIL"),
-            ("Contact Email,contact_email,Contact Email", "ignored,last,ignored", None, "Contact Email"),
+            (
+                "Contact Email,CONTACT_EMAIL,Contact Email",
+                "first@example.edu,ignored@example.edu,last@example.edu",
+                [
+                    "Columns auto-detected: Contact Email as contact_email",
+                    "Unknown columns will be ignored: CONTACT_EMAIL",
+                ],
+            ),
+            (
+                "Contact Email,contact_email,Contact Email",
+                "ignored@example.edu,last@example.edu,ignored@example.edu",
+                ["Unknown columns will be ignored: Contact Email"],
+            ),
         ],
     )
     def test_exact_then_first_distinct_spelling_wins_over_equivalent_aliases(
-        self, headers: str, cells: str, detected: str | None, ignored: str
+        self, headers: str, emails: str, warnings: list[str]
     ) -> None:
-        emails = ",".join(f"{cell}@example.edu" for cell in cells.split(","))
         content = f"school_name,{headers},notes\nExample U,{emails},Example note\n"
 
         result = parse_csv_file(SimpleUploadedFile("test.csv", content.encode()))
 
         assert result["errors"] == []
         assert result["rows"][0]["contact_email"] == "last@example.edu"
-        warnings = [f"Columns auto-detected: {detected} as contact_email"] if detected else []
-        assert result["warnings"] == [*warnings, f"Unknown columns will be ignored: {ignored}"]
+        assert result["warnings"] == warnings
 
     def test_identical_inferred_headings_count_once(self) -> None:
         content = (
