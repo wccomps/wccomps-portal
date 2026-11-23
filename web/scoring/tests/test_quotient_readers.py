@@ -6,7 +6,6 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-import httpx
 import pytest
 from django.core.cache import cache
 from django.test import override_settings
@@ -24,7 +23,6 @@ from quotient.client import (
 )
 
 from core.tests.external_json import Answer, serving
-from scoring.tests.test_quotient_client_logging import _client_with
 
 
 def _read[T](body: object, get: Callable[[QuotientClient], T]) -> T:
@@ -196,7 +194,7 @@ def test_an_expired_session_signs_in_again_and_asks_once_more() -> None:
     ] * 2
 
 
-def test_one_sign_in_serves_every_later_read() -> None:
+def test_metadata_and_inject_reads_share_one_sign_in() -> None:
     cache.clear()
     answers = [Answer(200, b"{}"), Answer(200, b'{"boxes": []}'), Answer(200, b"[]")]
     with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers) as requests:
@@ -211,18 +209,13 @@ def test_one_sign_in_serves_every_later_read() -> None:
     ]
 
 
-def test_the_sign_in_sends_the_configured_account_with_the_configured_timeout(monkeypatch, settings) -> None:
+def test_the_sign_in_sends_the_configured_account_with_the_configured_timeout(settings) -> None:
     settings.QUOTIENT_USERNAME = "admin"
     settings.QUOTIENT_PASSWORD = "secret"
     settings.HTTPX_DEFAULT_TIMEOUT = 7
     cache.clear()
-    seen: list[httpx.Request] = []
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(200, json={} if request.url.path == "/api/login" else [])
-
-    assert _client_with(monkeypatch, answer).get_injects(force_refresh=True) == []
+    with serving([Answer(200, b"{}"), Answer(200, b"[]")]) as seen:
+        assert QuotientClient(base_url="https://quotient.test").get_injects(force_refresh=True) == []
     login = seen[0]
     assert login.url.path == "/api/login"
     assert json.loads(login.content) == {"username": "admin", "password": "secret"}
