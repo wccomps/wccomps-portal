@@ -90,7 +90,7 @@ def test_staff_history_loads_only_an_unambiguous_stored_name(
                 expect(panel.get_by_role("cell", name="91", exact=True)).to_be_visible()
                 expect(panel.get_by_text("Passed", exact=True)).to_be_visible()
             assert failures == []
-            assert [url.removeprefix(settings.QUOTIENT_API_URL) for url in requested] == expected
+            assert [request.url.path for request in requested] == expected
     finally:
         cache.clear()
         get_quotient_client.cache_clear()

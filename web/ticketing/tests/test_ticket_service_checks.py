@@ -100,7 +100,10 @@ def test_get_service_checks_parses_and_sorts_results():
             error="",
         ),
     ]
-    assert requests == ["https://quotient.test/api/login", "https://quotient.test/api/services/1/TREX-DNS"]
+    assert [str(request.url) for request in requests] == [
+        "https://quotient.test/api/login",
+        "https://quotient.test/api/services/1/TREX-DNS",
+    ]
 
 
 def test_get_service_checks_handles_go_null_slice_and_zero_timestamp():
