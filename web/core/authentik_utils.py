@@ -267,6 +267,30 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
     return password, error
 
 
+def enable_team_account(team_number: int, actor: str) -> None:
+    """Turn an active team's account on; audited when it does or can't. Nothing with several accounts per team, or for
+    a team that isn't active (as the start enables only active teams' accounts)."""
+    if not single_account() or not Team.objects.filter(team_number=team_number, is_active=True).exists():
+        return
+    with AuthentikManager() as manager:
+        try:
+            user = _team_user(manager, team_number)
+            if user.get("is_active") is True:
+                return
+            manager.set_user_active(user, True)
+            error = ""
+        except AuthentikAPIError as e:
+            logger.warning(f"Failed to enable the account of team {team_number}: {e}")
+            error = reason_for(e)
+    AuditLog.objects.create(
+        action="team_account_enabled",
+        admin_user=actor,
+        target_entity="team",
+        target_id=team_number,
+        details={"enabled": not error, "error": error or None},
+    )
+
+
 # Told a team's new password as soon as Authentik has it
 type OnSet = Callable[[int, str], None]
 
@@ -544,7 +568,7 @@ def _combined(batches: list[BulkPasswordResetResult]) -> BulkPasswordResetResult
 def _bulk_reset_note(
     actor: str, team_numbers: list[int], batches: list[BulkPasswordResetResult], handed_over: int
 ) -> str:
-    """Lost and unreached teams first: a long note is cut at Discord's limit, and those are what ops must act on."""
+    """Lost and unreached teams first: those are what ops must act on."""
     parts = []
     if lost := [username for batch in batches[handed_over:] for _num, username, _pw in batch.password_list]:
         parts.append(f"the new passwords of {', '.join(lost)} were never handed over: reset them again")
@@ -595,29 +619,16 @@ def generate_blueteam_password() -> str:
     """Generate a readable blue team password like "Correct-Horse-742!" or "Battery-@199-Staple"."""
     from xkcdpass import xkcd_password as xp
 
-    # Get EFF long wordlist (7,776 words)
-    wordlist = xp.generate_wordlist(wordfile=xp.locate_wordfile())
-
-    words = xp.generate_xkcdpassword(wordlist, numwords=2, delimiter="-", case="capitalize")
+    # The EFF long wordlist, letters only, so each word is one part of the password (no t-shirt or yo-yo)
+    wordlist = xp.generate_wordlist(valid_chars="[a-z]")
+    parts = [secrets.choice(wordlist).capitalize() for _ in range(2)]
 
     number = secrets.randbelow(900) + 100
-
-    special_chars = "!@#$%&*+"
-    special_char = secrets.choice(special_chars)
-
+    special_char = secrets.choice("!@#$%&*+")
     insert_value = f"{number}{special_char}" if secrets.choice([True, False]) else f"{special_char}{number}"
+    parts.insert(secrets.randbelow(3), insert_value)
 
-    position = secrets.randbelow(3)
-
-    word_parts = words.split("-")
-    if position == 0:
-        result = f"{insert_value}-{words}"
-    elif position == 1:
-        result = f"{word_parts[0]}-{insert_value}-{word_parts[1]}"
-    else:  # position == 2
-        result = f"{words}-{insert_value}"
-
-    return result
+    return "-".join(parts)
 
 
 def parse_team_range(range_str: str) -> list[int]:

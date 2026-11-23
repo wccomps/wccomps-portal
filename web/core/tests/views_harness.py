@@ -57,6 +57,7 @@ from orange_team.models import (
 from packets.models import Packet, PacketDistribution
 from registration.models import (
     Event,
+    EventArchive,
     EventTeamAssignment,
     RegistrationContact,
     RegistrationEventEnrollment,
@@ -156,6 +157,11 @@ def build_world() -> World:
         date=date(2026, 11, 7),
         registration_open=True,
     )
+    # Closed out before the open event: its archive is what the event page offers to download
+    archived = Event.objects.create(
+        season=season, name="State", event_type="state", event_number=1, date=date(2026, 9, 5), is_finalized=True
+    )
+    EventArchive.objects.create(event=archived, data=b"PK\x05\x06" + bytes(18))
     teams = [
         Team.objects.get(team_number=1),  # role_user made it, for the blue_team role
         *(Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (2, 3)),
@@ -354,6 +360,7 @@ def build_world() -> World:
         "registration_id": [r.pk for r in registrations],
         "season_id": [season.pk],
         "event_id": [event.pk, later.pk],
+        "archived_event_id": [archived.pk],
         "event_assignment_id": list(EventTeamAssignment.objects.values_list("pk", flat=True)),
         "link_token": [link_token.token],
         "app_label": sorted({model._meta.app_label for model in admin.site._registry}),

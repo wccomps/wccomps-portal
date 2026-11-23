@@ -133,6 +133,41 @@ def test_an_unreachable_quotient_is_reported_not_answered_as_a_server_error(admi
     assert not AuditLog.objects.filter(action="quotient_metadata_synced").exists()
 
 
+def test_metadata_jsonb_cant_store_is_reported_naming_the_text(admin_user):
+    """A box name holding a NUL is refused before the save, and the page names the text."""
+    from quotient.client import QuotientBox, QuotientInfrastructure
+
+    QuotientMetadataCache.objects.create(boxes=[{"name": "web", "ip": "10.0.0.5"}])
+
+    response = _post_sync(admin_user, QuotientInfrastructure(boxes=[QuotientBox(name="db\x00", ip="", services=[])]))
+
+    assert response.json() == {
+        "success": False,
+        "message": "Sync failed: Quotient's metadata can't be stored: "
+        "'db\\x00' holds a NUL character or a lone surrogate, which can't be stored.",
+    }
+    assert QuotientMetadataCache.objects.get().boxes == [{"name": "web", "ip": "10.0.0.5"}]
+
+
+def test_the_admin_refuses_metadata_whose_key_jsonb_cant_store(admin_user):
+    """An object's key is text too: the admin's form says so rather than the save failing."""
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(admin_user)
+    response = client.post(
+        reverse("admin:scoring_quotientmetadatacache_add"),
+        {"boxes": '[{"na\\u0000me": "web"}]', "services": "[]"},
+    )
+
+    assert response.status_code == 200
+    assert response.context["adminform"].form.errors["boxes"] == [
+        "'na\\x00me' holds a NUL character or a lone surrogate, which can't be stored."
+    ]
+    assert not QuotientMetadataCache.objects.exists()
+
+
 def _box(name, ip, *services):
     from quotient.client import QuotientBox, QuotientService
 
@@ -295,6 +330,53 @@ def test_the_dns_check_reads_only_the_first_three_sample_teams():
         "team_dns_server_last_octet": 10,
         "internal_mask": "192.168.220.",
     }
+
+
+def test_metadata_sync_pushes_the_domain_boxes_are_named_under_without_a_dns_service():
+    """With no DNS service the proxy gets the domain from box names, or it keeps the last event's. Address templates,
+    name templates and deeper names don't change which domain covers the boxes."""
+    from django.test import override_settings
+    from quotient.client import QuotientBox, QuotientInfrastructure, QuotientService
+
+    from team.models import Team
+
+    Team.objects.create(team_number=7, team_name="Team 07", is_active=True)
+    infra = QuotientInfrastructure(
+        boxes=[
+            QuotientBox(
+                name="WEB", ip="web.example.land", services=[QuotientService(name="HTTP", display_name="HTTP")]
+            ),
+            QuotientBox(name="GIT", ip="git.example.land", services=[QuotientService(name="SSH", display_name="SSH")]),
+            QuotientBox(name="FILES", ip="10.100.1XX.44", services=[QuotientService(name="SMB", display_name="SMB")]),
+            QuotientBox(name="PINS", ip="10.100.1_.67", services=[QuotientService(name="WEB", display_name="WEB")]),
+            QuotientBox(name="WIKI", ip="www.corp.example.land.", services=[]),
+            *(
+                QuotientBox(name=f"TPL{n}", ip=f"{n}.teamxx.other.land", services=[])
+                for n in ("www", "git", "ftp", "mail")
+            ),
+        ]
+    )
+
+    with (
+        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080", AWEFUL_PROXY_TOKEN="secret-token"),
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("scoring.quotient_sync.httpx.post") as mock_post,
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        sync_quotient_metadata()
+
+    client.return_value.get_service_checks.assert_not_called()
+    assert mock_post.call_args.kwargs["json"] == {"number_of_teams": 7, "team_domain_name": "example.land"}
+
+
+def test_box_name_domain_is_the_narrowest_that_covers_the_most_boxes():
+    """An event domain deeper than two labels stays whole; a parent it shares with other sites isn't pushed."""
+    from scoring.quotient_sync import _box_hostname_domain
+
+    boxes = [{"name": n, "ip": f"{n}.inv3.example.org", "services": []} for n in ("web", "git")]
+
+    assert _box_hostname_domain(boxes) == "inv3.example.org"
 
 
 def test_metadata_sync_pushes_config_to_aweful_proxy():

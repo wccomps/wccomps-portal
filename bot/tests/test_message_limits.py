@@ -59,14 +59,18 @@ async def test_sync_roles_preview_with_many_changes(mock_interaction: Any, mock_
 
 
 @pytest.mark.asyncio
-async def test_ops_channel_messages_are_trimmed_to_the_limit() -> None:
+async def test_ops_channel_messages_are_split_to_the_limit_and_lose_nothing() -> None:
     channel = MagicMock(spec=discord.TextChannel)
     channel.send = AsyncMock()
     bot = MagicMock()
     bot.get_channel.return_value = channel
+    message = "\n".join(f"- **Team {n}**: web-http, ssh, dns" for n in range(1, 151))
 
     with patch("bot.utils.settings") as settings:
         settings.DISCORD_LOG_CHANNEL_ID = 1
-        await log_to_ops_channel(bot, "x" * 5000)
+        assert await log_to_ops_channel(bot, message)
 
-    assert len(channel.send.await_args.args[0]) == DISCORD_MESSAGE_CHAR_LIMIT
+    sent = [c.args[0] for c in channel.send.await_args_list]
+    assert len(sent) > 1
+    assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in sent)
+    assert "\n".join(sent) == message

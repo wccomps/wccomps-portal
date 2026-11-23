@@ -242,6 +242,21 @@ def test_password_reset_refused_with_several_accounts(admin_client, settings, ac
     assert not QueuedTask.objects.exists()
 
 
+@pytest.mark.django_db
+def test_group_fix_refused_with_several_accounts(admin_client, settings):
+    """Fix Group Membership adds each team's one account to its group: with several accounts it asks Authentik
+    nothing and says why."""
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    Team.objects.create(team_number=3, team_name="Team 3", is_active=True)
+    with patch("core.admin_views.readiness.AuthentikManager") as manager:
+        response = admin_client.post(
+            reverse("admin_competition_action"), {"action": "fix_group_membership", "readiness_fix": "1"}
+        )
+    assert response.status_code == 400
+    assert response.json() == {"error": SEVERAL_ACCOUNTS}
+    manager.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("base_url", "origins"),
     [
@@ -425,6 +440,7 @@ def test_services_refuse_resets_with_several_accounts(settings):
     """The services answer Refused, which the bot shows, and ask Authentik nothing."""
     from core.authentik_utils import (
         Refused,
+        TeamReset,
         reset_team,
         reset_team_credentials,
         reset_teams_credentials,
@@ -435,7 +451,8 @@ def test_services_refuse_resets_with_several_accounts(settings):
     settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
     with patch("core.authentik_utils.AuthentikManager") as manager:
         assert reset_team_credentials(3, actor="admin") == Refused(SEVERAL_ACCOUNTS)
-        assert reset_team(3, actor="admin", recreate_channels=True).credentials == Refused(SEVERAL_ACCOUNTS)
+        refused = TeamReset(Refused(SEVERAL_ACCOUNTS), recreation_queued=False)
+        assert reset_team(3, actor="admin", recreate_channels=True) == refused  # No recreation promised
         bulk = drain(reset_teams_credentials([3, 4], "admin"))
         assert list(reset_teams_credentials([], "admin")) == []  # No empty batch for the bot to name
         assert set_team_password(3, actor="packets") == (None, SEVERAL_ACCOUNTS)

@@ -11,15 +11,7 @@ from django.test import Client
 
 from core import oauth
 from core.models import UserGroups
-
-OAUTH_CONFIG = {
-    "client_id": "test-client-id",
-    "client_secret": "test-secret",
-    "authorization_endpoint": "https://auth.example.com/authorize/",
-    "token_endpoint": "https://auth.example.com/token/",
-    "userinfo_endpoint": "https://auth.example.com/userinfo/",
-    "end_session_endpoint": "https://auth.example.com/end-session/",
-}
+from core.tests.test_oauth_flow import OAUTH_CONFIG
 
 
 @pytest.mark.django_db(transaction=True)

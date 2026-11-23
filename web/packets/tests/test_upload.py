@@ -58,3 +58,14 @@ def test_a_refused_upload_without_a_file_asks_only_for_the_file(gold_client):
 
     assert field_error(html, "id_packet_file") == "This field is required."
     assert 'value="No file"' in html
+
+
+def test_an_accepted_upload_keeps_the_files_name_and_size(gold_client):
+    response = gold_client.post(
+        reverse("upload_packet"),
+        {"title": "Qualifier packet", "packet_file": SimpleUploadedFile("qualifier rules.pdf", b"%PDF-1.7 packet")},
+    )
+
+    assert response.status_code == 302
+    packet = Packet.objects.get()
+    assert (packet.filename, packet.file_size) == ("qualifier rules.pdf", 15)

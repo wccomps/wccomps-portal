@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
+from bot.cogs.help_panels import TicketButton, _has_button, post_ticket_panel
 from bot.role_sync import sync_member_roles
 from bot.utils import (
     category_chat_channel,
@@ -289,13 +289,13 @@ def _category_overwrites(guild: discord.Guild, role: discord.Role) -> Overwrites
 
 async def _post_ticket_panel(bot: discord.Client | None, team_number: int, chat_channel: discord.TextChannel) -> None:
     """Post the team's ticket panel unless the bot's is among the chat channel's first messages."""
-    help_panels_cog = bot.get_cog("HelpPanelsCog") if isinstance(bot, commands.Bot) else None
-    if not isinstance(help_panels_cog, HelpPanelsCog):
+    if not isinstance(bot, commands.Bot):
+        logger.warning(f"No ticket panel posted to team {team_number}'s channel: the setup was given no bot")
         return
     async for message in chat_channel.history(limit=50, oldest_first=True):
-        if bot and message.author == bot.user and _has_button(message, TicketButton.CUSTOM_ID):
+        if message.author == bot.user and _has_button(message, TicketButton.CUSTOM_ID):
             return
-    await help_panels_cog.post_team_ticket_panel(chat_channel.id)
+    await post_ticket_panel(bot, chat_channel)
     logger.info(f"Posted ticket panel to team {team_number} channel")
 
 

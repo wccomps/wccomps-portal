@@ -7,7 +7,9 @@ from contextlib import aclosing, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
+from typing import ClassVar
 
+from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
 
@@ -15,6 +17,7 @@ from core.authentik_utils import set_team_account_active
 from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
+from core.services.ops import notify_ops
 from core.team_accounts import accounts_by_team, blueteam_kinds, team_folder
 from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
@@ -45,6 +48,8 @@ COUNTDOWN_MILESTONES: tuple[tuple[int, str], ...] = (
     (60, "1 hour"),
     (30, "30 minutes"),
 )
+# Minutes before the scheduled start at which the preflight report is queued for ops
+PREFLIGHT_REPORT_MINUTES = (30, 10)
 
 # Arbitrary, but fixed; CLAUDE.md says how to free it from a stuck holder
 COMPETITION_RUN_LOCK_ID = 7_261_640_003
@@ -289,6 +294,7 @@ def _run(
     every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
+    from scoring.models import ServiceCorrectionBatch
     from scoring.quotient_sync import sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
@@ -299,6 +305,18 @@ def _run(
     config = CompetitionConfig.get_config()
     began_with = config.competition_start_time
     result = CompetitionRunResult(enable=enable, controlled_apps=list(config.controlled_applications))
+    if (
+        enable
+        and ServiceCorrectionBatch.objects.filter(
+            event__is_active=True,
+            revoked_at__isnull=True,
+        ).exists()
+    ):
+        return CompetitionRunResult(
+            enable=enable,
+            error="Revoke the active service correction before restarting the competition.",
+            refused=True,
+        )
     if not result.controlled_apps:
         result.error = "No controlled applications configured"
         return result
@@ -570,6 +588,62 @@ def queue_due_countdown(now: datetime) -> str | None:
             },
         )
         return label
+
+
+@dataclass(frozen=True)
+class PreflightMark:
+    """A preflight report due: the scheduled start it is for and how many minutes before it; once queued, its audit
+    entry, so no pass or restart queues it again."""
+
+    ACTION: ClassVar = "preflight_report_queued"
+
+    start: datetime
+    minutes: int
+
+    def _details(self) -> dict[str, object]:
+        return {"start_time": self.start.isoformat(), "minutes": self.minutes}
+
+    def queued(self) -> bool:
+        return AuditLog.objects.filter(action=self.ACTION, details=self._details()).exists()
+
+    def record(self, config: CompetitionConfig) -> None:
+        AuditLog.objects.create(
+            action=self.ACTION,
+            admin_user=TIMER_ACTOR,
+            target_entity="competition_config",
+            target_id=config.pk,
+            details=self._details(),
+        )
+
+
+def _passed_preflight_mark(config: CompetitionConfig, now: datetime) -> PreflightMark | None:
+    """The nearest PREFLIGHT_REPORT_MINUTES mark now has passed, before a scheduled start the competition hasn't
+    reached."""
+    start = config.competition_start_time
+    if start is None or config.applications_enabled or now >= start:
+        return None
+    passed = [m for m in PREFLIGHT_REPORT_MINUTES if now >= start - timedelta(minutes=m)]
+    return PreflightMark(start, min(passed)) if passed else None
+
+
+def due_preflight_report(now: datetime) -> PreflightMark | None:
+    """The preflight report due now and not yet queued, if any; none while Quotient isn't configured. A later mark
+    covers an earlier one missed."""
+    if not settings.QUOTIENT_API_URL:
+        return None
+    mark = _passed_preflight_mark(CompetitionConfig.get_config(), now)
+    return None if mark is None or mark.queued() else mark
+
+
+def queue_preflight_report(mark: PreflightMark, report: str, now: datetime) -> None:
+    """Queue report for ops as mark's report and record it, unless mark is no longer due (the schedule moved or the
+    competition started) or was queued while Quotient was read."""
+    with transaction.atomic():
+        config = CompetitionConfig.locked()
+        if _passed_preflight_mark(config, now) != mark or mark.queued():
+            return
+        notify_ops(report, actor=TIMER_ACTOR)
+        mark.record(config)
 
 
 class ConfigEditError(ValueError):

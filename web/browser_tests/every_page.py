@@ -53,6 +53,7 @@ UNRENDERED: dict[str, str] = {
     "ops_ticket_list_redirect": "The old ops address of the ticket list: a permanent redirect to it",
     "orange_team:assignment_screenshot": FILE,
     "orange_team:export_scores": "A CSV download",
+    "registration_event_archive": ZIP + "the event's data, taken at Close Out",
     "school_info_export": "A CSV download",
     "scoring:export_all": ZIP + "every export",
     "scoring:export_final_scores": CSV,

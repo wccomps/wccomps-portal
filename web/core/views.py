@@ -52,7 +52,7 @@ from team.forms import (
     ImportMode,
     parse_csv_file,
 )
-from team.models import DiscordLink, SchoolInfo, Team, single_account
+from team.models import SchoolInfo, Team, single_account
 
 from .auth_utils import (
     get_authentik_id,
@@ -107,10 +107,6 @@ def link_initiate(request: HttpRequest) -> HttpResponse:
     request.session["pending_link_discord_id"] = link_token.discord_id
 
     params = {"next": f"/auth/link-callback?token={link_token.token}"}
-    if DiscordLink.objects.filter(discord_id=link_token.discord_id, is_active=False).exists():
-        # Someone unlinked from the wrong team still has that team's Authentik session in their browser;
-        # prompt=login makes Authentik ask for the right account's credentials instead of reusing it.
-        params["prompt"] = "login"
     return redirect(f"/auth/login/?{urlencode(params)}")
 
 

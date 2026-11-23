@@ -218,6 +218,7 @@ DJANGO_FORM_OPTION = "Django reads this form option by name"
 # fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
     "web/portal/urls.py:handler*": "Django reads the root URLconf's error handlers by name",
+    "web/quotient/archive_scoring_host.py:mtime": "tarfile writes a member's TarInfo.mtime into the tarball",
     # discord.py registers these through their decorators or calls them by name
     "@*.command": "discord.py registers a slash command through its decorator",
     "@discord.ui.button": "discord.py calls a button callback when the button is pressed",
@@ -240,6 +241,7 @@ CODE_EXCEPTIONS = {
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
+    "*/management/commands/*:add_arguments": "Django calls this hook when building the command's argument parser",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",
     "*:clean_*": "Django form validation calls clean_<field>",
@@ -368,6 +370,7 @@ URL_EXCEPTIONS = {
     "home": "The site root (/), requested when someone opens the portal domain",
     "admin:login": "The Django admin's own login page: Django links it (AuthentikAdminSite overrides the view to "
     "refuse a signed-in non-admin)",
+    "admin:scoring_servicescore_delete": "Django admin links to Delete from the imported service score change form",
     "health_check": "The Kubernetes readiness probe and the uptime probe request /health/ by path",
     "livez": "Liveness probe (docker-compose.yml healthcheck, the Kubernetes deployment), requested by path",
     "oauth_callback": "Authentik redirects here after login (core/oauth.py sends the path as redirect_uri)",

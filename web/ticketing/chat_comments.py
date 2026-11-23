@@ -28,6 +28,11 @@ DELETED_TEXT = "[Message deleted]"
 _MESSAGE_ID_FIELD = {TaskBackend.DISCORD: "discord_message_id", TaskBackend.ZULIP: "zulip_message_id"}
 
 
+def comment_origin(comment: TicketComment) -> TaskBackend | None:
+    """The chat backend the comment came from, or None for one written on the portal's ticket page."""
+    return next((backend for backend, field in _MESSAGE_ID_FIELD.items() if getattr(comment, field) is not None), None)
+
+
 def record_message(
     ticket: Ticket,
     origin: TaskBackend,

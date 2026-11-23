@@ -66,11 +66,11 @@ def test_add_keeps_the_list_and_gives_new_schools_free_teams(client, event, team
     set_team_school(teams[0], "School One", contact_email="c@example.edu")
     set_team_school(teams[2], "School Three", contact_email="c@example.edu")
 
-    page = _upload(client, event.pk, "School One", "School Two")
+    page = _upload(client, event.pk, "School One", "School Three", "School Two")
     preview = page.content.decode()
     response = _confirm(client, page)
 
-    assert "Already on the list, skipped: School One" in preview
+    assert "Already on the list, skipped: School One, School Three" in preview
     assert "Adds 1 school(s) to Invitational (2026); the 2 school(s) already on the list keep their team numbers." in (
         preview
     )

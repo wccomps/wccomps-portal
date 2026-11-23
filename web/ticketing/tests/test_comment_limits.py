@@ -212,6 +212,7 @@ def test_a_closed_ticket_takes_no_web_uploads(client: Client, team_ticket: Ticke
     response = _upload(client, team_ticket)
 
     assert not TicketAttachment.objects.exists()
+    assert not CommentRateLimit.objects.exists()
     assert f"Ticket is {status}; files can't be added to it" in _messages(response)
 
 
@@ -223,6 +224,7 @@ def test_a_ticket_takes_at_most_its_cap_of_files(client: Client, team_ticket: Ti
     response = _upload(client, team_ticket)
 
     assert TicketAttachment.objects.count() == TicketAttachment.MAX_PER_TICKET
+    assert not CommentRateLimit.objects.exists()
     assert f"Ticket already has the maximum of {TicketAttachment.MAX_PER_TICKET} attachments" in _messages(response)
 
 
@@ -243,6 +245,7 @@ def test_a_teams_tickets_together_hold_at_most_its_byte_cap(
     refused = _upload(client, team_ticket, b"c")
 
     assert TicketAttachment.objects.filter(ticket=team_ticket).count() == 1
+    assert CommentRateLimit.objects.count() == 1  # the upload that was saved
     assert any("total limit" in m for m in _messages(refused))
 
 
