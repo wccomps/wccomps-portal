@@ -345,17 +345,22 @@ INSERT = r"(?:[1-9][0-9]{2}[!@#$%&*+]|[!@#$%&*+][1-9][0-9]{2})"
 PASSWORD = re.compile(f"{INSERT}-{WORD}-{WORD}|{WORD}-{INSERT}-{WORD}|{WORD}-{WORD}-{INSERT}")
 
 
-def test_a_generated_password_leaves_out_hyphenated_words(tmp_path, monkeypatch):
-    """The EFF list has yo-yo, drop-down, felt-tip and t-shirt; a password is two letters-only words and the number."""
+def test_a_generated_password_keeps_both_word_draws_and_leaves_out_hyphenated_words(tmp_path, monkeypatch):
     from xkcdpass import xkcd_password
 
     words = tmp_path / "words"
-    words.write_text("t-shirt\nzebra\n")
+    words.write_text("apple\nt-shirt\nzebra\n")
     monkeypatch.setattr(xkcd_password, "locate_wordfile", lambda wordfile=None: str(words))
 
-    passwords = [generate_blueteam_password() for _ in range(50)]
+    word_indices = iter((0, 1))
 
-    assert [p for p in passwords if not PASSWORD.fullmatch(p)] == []
+    def choose(options):
+        index = next(word_indices, None)
+        return sorted(options)[index] if index is not None else options[0]
+
+    monkeypatch.setattr("core.authentik_utils.secrets", SimpleNamespace(randbelow=lambda n: 0, choice=choose))
+
+    assert generate_blueteam_password() == "100!-Apple-Zebra"
 
 
 def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
