@@ -153,10 +153,13 @@ def _action_set_schedule(request: HttpRequest, authentik_username: str) -> JsonR
 
 
 def _clear_schedule_time(request: HttpRequest, authentik_username: str, *, start: bool) -> JsonResponse:
-    if start:
-        set_schedule(authentik_username, start=None)
-    else:
-        set_schedule(authentik_username, end=None)
+    try:
+        if start:
+            set_schedule(authentik_username, start=None)
+        else:
+            set_schedule(authentik_username, end=None)
+    except ConfigEditError as e:
+        raise BadRequest(str(e)) from e
     return JsonResponse({"success": True, "message": f"Scheduled {'start' if start else 'stop'} cleared"})
 
 

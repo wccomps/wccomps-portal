@@ -29,7 +29,10 @@ from scoring.service_corrections import (
 
 
 class Command(BaseCommand):
-    help = "Verify or record an approved service correction for a played event; or revoke an existing batch."
+    help = (
+        "Verify or apply a correction for an open, unfinalized event with applications disabled, no pending start, "
+        "and a matching score import; or revoke an existing batch."
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
         sub = parser.add_subparsers(dest="operation", required=True)

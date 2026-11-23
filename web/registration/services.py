@@ -998,7 +998,7 @@ class EventKeptError(Exception):
 
 
 def event_delete_problem(event: Event) -> str:
-    """Why the event can't be deleted, or ''. Open, finalized and assigned events are kept as season history."""
+    """Why the event can't be deleted, or '' if no history requires keeping it."""
     if event.is_active:
         return f"{event} is open: the live scores and school list belong to it."
     if event.is_finalized or EventResult.objects.filter(event=event).exists():
@@ -1007,6 +1007,8 @@ def event_delete_problem(event: Event) -> str:
         return f"{event} has schools assigned to teams, which are kept as the season's history."
     if Packet.objects.sent().filter(event=event).exists():
         return f"Packets were sent for {event}; they are kept with it."
+    if event.servicecorrectionbatch_set.exists():
+        return f"{event} has service correction history, which is kept with it."
     return ""
 
 

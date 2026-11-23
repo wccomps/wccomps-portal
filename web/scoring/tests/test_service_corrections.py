@@ -166,22 +166,16 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
     result = event.results.get(team_number=team.team_number)
     assert result.total_score == Decimal(104)
     frozen = context_from_snapshot(result.scorecard)
-    assert frozen["score"]["service_corrections"] == [
-        {
-            "service_name": SERVICE,
-            "ruling": RULING,
-            "service_credit": 4,
-            "sla_credit": 5,
-            "service_modifier": Decimal(1),
-        },
-    ]
+    line = {"service_name": SERVICE, "ruling": RULING, "service_credit": 4, "sla_credit": 5}
+    assert result.scorecard["score"]["service_corrections"] == [{**line, "service_modifier": {"$d": "1.0"}}]
+    assert frozen["score"]["service_correction"] == {**line, "service_modifier": Decimal(1)}
     service_detail = frozen["stats"]["service_stats"][0]
     assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)
     with ZipFile(BytesIO(event.archive.data)) as archive:
         rows = csv.DictReader(StringIO(archive.read("final_scores.csv").decode()))
         row = next(row for row in rows if int(row["Team Number"]) == team.team_number)
         assert (row["Raw Service Credit"], row["SLA Credit"]) == ("4", "5")
-    assert not next(s for s in compute_standings() if s.team.pk == team.pk).service_corrections
+    assert next(s for s in compute_standings() if s.team.pk == team.pk).service_correction is None
 
 
 @pytest.mark.parametrize("correction", [b"742,-100,5,-95\n"], indirect=True)

@@ -67,3 +67,23 @@ def test_a_stored_v1_snapshot_renders_its_values(template):
     }
     assert len(expected) > 50
     assert missing == {}
+
+
+@pytest.mark.parametrize("template", ["scoring/_scorecard_body.html", "scoring/scorecard_print.html"])
+def test_a_stored_signed_correction_renders_in_a_v1_snapshot(template):
+    stored = json.loads(FIXTURE.read_text())
+    stored["score"]["service_corrections"] = [
+        {
+            "service_name": "Example-HTTPS",
+            "ruling": "certificate-expiry",
+            "service_credit": -100,
+            "sla_credit": 5,
+            "service_modifier": {"$d": "1.25"},
+        }
+    ]
+
+    page = render_to_string(template, {**context_from_snapshot(stored), "pdf_url": "/pdf/", "email_url": "/email/"})
+
+    assert "Example-HTTPS (certificate-expiry)" in page
+    assert "-100 raw service points at a multiplier of 1.25" in page
+    assert "+5 SLA points restored" in page

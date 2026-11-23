@@ -79,6 +79,7 @@ flowchart LR
         Q[(Postgres: rows, QueuedTask queue, uploaded files)]
         K[Worker: competition timer and preflight report, group refresh, Quotient sync, worker queue]
         C[Chat: discord.py, Discord queue, role sync; Zulip event loop and queue]
+        F[Deployment shell: manage.py service_correction]
     end
     A[Authentik: OIDC and admin API]
     P[Proxmox API]
@@ -106,6 +107,9 @@ flowchart LR
     Z -- "12 event queue long poll" --> C
     C -- "13 API key: posts, upload fetches" --> Z
     O[Operator] -- "14 runs the archive script" --> H
+    T[Deployment-shell operator] -- "15 verify, apply, revoke" --> F
+    F -- "15 event baseline, correction ledger and audit" --> Q
+    F -- "7 login session, live score export and uptimes" --> S
 ```
 
 The worker (`worker/__main__.py`) runs the competition timer (which also reads Quotient's admin-only engine status
@@ -185,6 +189,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 | 13 | Chat to Zulip | I: the API key sent in clear | The client refuses a `ZULIP_SITE` that isn't https, and fetches uploads only from that site (`chat/zulip/client.py` `ZulipClient`, `ZulipClient.fetch_upload`) |
 | 13 | Chat to Zulip | I: one team's broadcasts reach another team | A broadcast to teams goes to each team's own `ZULIP_TEAM_BROADCAST_STREAM` (by default its ticket stream); the settings refuse to load a pattern that gives two teams from 1 to `MAX_TEAMS` one stream, or a team another team's `ZULIP_TEAM_STREAM` (`web/portal/settings.py` `ZULIP_TEAM_BROADCAST_STREAM`; `chat/zulip/naming.py` `team_broadcast_stream`). Who may read each stream is the realm's to set |
 | 14 | Operator on the scoring host | I, T: a local user reads the archived team uploads and runner addresses, slips a host file into an archive through a symlink or hard link in `submissions/` (including a file swapped for a symlink while the archive runs), or replaces an archive | The operator runs the script with docker access (as good as root on that host). It walks `submissions/` by directory descriptor and opens each file through its parent's descriptor without following a symlink, stores only regular files and takes each one's size, contents and SHA-256 from that one open file, lists the symlinks it finds while listing each directory instead of following them (a directory swapped for a symlink after its listing is skipped, unlisted), and names every member by its path relative to `submissions/` (`web/quotient/archive_scoring_host.py` `_add_submissions`, `_add`); a hard link is a regular file, so keeping a hard link to a file its writer can't read out of `submissions/` rests on the kernel's `fs.protected_hardlinks=1` (Debian's default), which the script doesn't check; it writes the tarball and its `.sha256` mode 0600 and names them by hard link, which never replaces a file (`_name_without_replacing`); `verify` reads a copy's members without extracting them (`verify`). Who else can reach the archive directory is the operator's to set |
+| 15 | Deployment shell to portal scores | T, R: an unapproved or mismatched correction changes a result, or a correction cannot be traced | Only a deployment-shell operator can invoke `manage.py service_correction`. Verify and apply read a bounded manifest checked against the independently approved digest, validate the live Quotient service cohort, and check the open event's assignments and imported baseline. Apply and revoke audit the supplied operator and manifest digest, with the baseline digest also recorded on apply (`web/scoring/management/commands/service_correction.py` `Command.handle`, `_checked_teams`, `_apply`, `_revoke`; `web/scoring/service_corrections.py` `parse_manifest`). While a correction is active, sync rejects a changed baseline and rolls back the import, admin writes to imported service scores are blocked, and Close Out refuses a conflicting sync or mismatched import (`web/scoring/quotient_sync.py` `sync_service_scores`; `web/scoring/service_corrections.py` `guarded_service_sync`, `check_sync`, `correction_problem`; `web/scoring/admin.py` `ServiceScoreAdmin._check_import_writable`; `web/registration/services.py` `close_out_problem`). |
 | all | Logs and errors | I: tokens or OAuth codes in logs | The access log drops query strings and referers (`web/gunicorn.conf.py` `access_log_format`); httpx URL logging is off (`web/core/tests/test_httpx_logging.py`); error answers come from `web/core/errors.py`: a fixed message for 404, 405 and 500, and only the view's own stated reason for 400 and 403 |
 | all | Logs and errors | T: request text forges a log line or an alert | Request text is escaped where the app logs it (`web/core/middleware.py` `_field`; `web/core/log_safety.py`), the console formatter keeps every message on one line, gunicorn escapes its access and error lines (`web/gunicorn.conf.py` `EscapingLogger`), and the Discord alert shows request text in code spans (`web/core/discord_logging.py` `_code`); property tests cover each line (`web/core/tests/test_properties_log_lines.py`) |
 | all | Secrets | S: forged sessions | The web server, the worker and the chat process refuse to start without a fixed `DJANGO_SECRET_KEY` of at least 50 characters and 5 distinct ones, the `.env.example` placeholder counting as none (`web/portal/required.py` `secret_key_problem`); the session cookie is HttpOnly and SameSite=Lax, and outside `DEBUG` the session and CSRF cookies are Secure with HSTS (`web/portal/settings.py` `SESSION_COOKIE_HTTPONLY`, `SESSION_COOKIE_SAMESITE`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`) |
@@ -213,10 +218,10 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 - **Gold team holds near-admin power by design**: credential resets, app and account toggles, broadcasts and packet
   passwords. Only `PORTAL_ADMIN_GROUP` (default `Portal_Admin`, WRCCDC's `WCComps_Discord_Admin`) reaches Django admin.
 - **Upstream truth.** Quotient's scores and Proxmox's VM state are validated for shape, not for honesty.
-- **Service score corrections are operator-only.** The deployment-shell `manage.py service_correction` uses the
-  existing Quotient admin credential and HTTPS policy. Approval supplies the CSV digest independently of the CSV.
-  Apply and revoke audit the operator and manifest digest; apply also records the baseline digest. Scorecards and
-  exports carry the score credits, never the manifest, Quotient IDs, or per-team baseline.
+- **Service score correction approval and deployment access are trusted.** The command uses the existing Quotient
+  admin credential and HTTPS policy. Approval supplies the digest independently of the CSV; the command records
+  the operator label supplied by the shell caller. Scorecards and exports carry the score credits, not the
+  manifest, Quotient IDs, or per-team baseline.
 - **The proxy's client address is trusted only when configured.** A deployment behind Cloudflare, or behind a proxy
   that overwrites `CF-Connecting-IP` with the client address and is the origin's only way in, sets
   `TRUST_CF_CONNECTING_IP=true`; the self-hosting `docker-compose.yml` leaves it off, so its limits key on the

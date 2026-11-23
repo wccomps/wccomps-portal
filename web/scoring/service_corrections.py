@@ -32,33 +32,27 @@ class CreditLine(TypedDict):
     service_modifier: Decimal
 
 
-def current_credits(team_ids: list[int]) -> dict[int, list[CreditLine]]:
-    credits: dict[int, list[CreditLine]] = {}
-    rows = (
-        ServiceCorrection.objects.filter(
-            batch__event__is_active=True, batch__revoked_at__isnull=True, team_id__in=team_ids
-        )
-        .order_by("batch__service_name", "batch__ruling")
-        .values_list(
-            "team_id",
-            "batch__service_name",
-            "batch__ruling",
-            "service_credit",
-            "sla_credit",
-            "batch__service_modifier",
-        )
+def current_credits(team_ids: list[int]) -> dict[int, CreditLine]:
+    rows = ServiceCorrection.objects.filter(
+        batch__event__is_active=True, batch__revoked_at__isnull=True, team_id__in=team_ids
+    ).values_list(
+        "team_id",
+        "batch__service_name",
+        "batch__ruling",
+        "service_credit",
+        "sla_credit",
+        "batch__service_modifier",
     )
-    for team_id, service, ruling, service_credit, sla_credit, modifier in rows:
-        credits.setdefault(team_id, []).append(
-            CreditLine(
-                service_name=service,
-                ruling=ruling,
-                service_credit=service_credit,
-                sla_credit=sla_credit,
-                service_modifier=Decimal(modifier),
-            )
+    return {
+        team_id: CreditLine(
+            service_name=service,
+            ruling=ruling,
+            service_credit=service_credit,
+            sla_credit=sla_credit,
+            service_modifier=Decimal(modifier),
         )
-    return credits
+        for team_id, service, ruling, service_credit, sla_credit, modifier in rows
+    }
 
 
 def parse_manifest(data: bytes, approved_sha256: str) -> list[Credit]:

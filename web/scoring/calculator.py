@@ -155,13 +155,14 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
 def _breakdown(
     raw: _RawScores,
     template: ScoringTemplate,
-    credits: list[CreditLine],
+    credit: CreditLine | None,
 ) -> DetailedScoreBreakdown:
     service_mod, inject_mod, orange_mod = _get_modifiers(template)
-    sla = raw["sla"] + sum(line["sla_credit"] for line in credits)
-    scaled_service = raw["service"] * service_mod + sum(
-        line["service_credit"] * line["service_modifier"] for line in credits
-    )
+    sla = raw["sla"]
+    scaled_service = raw["service"] * service_mod
+    if credit is not None:
+        sla += credit["sla_credit"]
+        scaled_service += credit["service_credit"] * credit["service_modifier"]
     scaled_inject = raw["inject"] * inject_mod
     scaled_orange = raw["orange"] * orange_mod
 
@@ -205,7 +206,7 @@ def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
               + sla_violations + SLA credits + point_adjustments
               + red_deductions + incident_recovery
     """
-    return _breakdown(_raw_scores([team])[team.pk], _template(), current_credits([team.pk]).get(team.pk, []))
+    return _breakdown(_raw_scores([team])[team.pk], _template(), current_credits([team.pk]).get(team.pk))
 
 
 @dataclass
@@ -224,7 +225,7 @@ class Standing:
     is_excluded: bool
     rank: int | None = None
     scaling: dict[str, Decimal] = field(default_factory=dict)
-    service_corrections: list[CreditLine] = field(default_factory=list)
+    service_correction: CreditLine | None = None
 
     @property
     def has_scoring_activity(self) -> bool:
@@ -255,13 +256,13 @@ def compute_standings() -> list[Standing]:
 
     standings = []
     for team in teams:
-        lines = credits.get(team.pk, [])
-        breakdown = _breakdown(raw[team.pk], template, lines)
+        credit = credits.get(team.pk)
+        breakdown = _breakdown(raw[team.pk], template, credit)
         standings.append(
             Standing(
                 team=team,
                 is_excluded=team.pk in excluded_team_ids,
-                service_corrections=lines,
+                service_correction=credit,
                 total_score=breakdown["total_score"],
                 scaling={key: breakdown[key] for key in SCALING_FIELDS},  # type: ignore[literal-required]
                 **{field: breakdown[field] for field in SCORE_COMPONENT_FIELDS},  # type: ignore[literal-required]

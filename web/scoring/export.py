@@ -270,12 +270,12 @@ DATASETS: dict[str, ExportableDataset] = {
             Column(
                 "Raw Service Credit",
                 "raw_service_credit",
-                lambda sc: sum(line["service_credit"] for line in sc[0].service_corrections),
+                lambda sc: credit["service_credit"] if (credit := sc[0].service_correction) is not None else 0,
             ),
             Column(
                 "SLA Credit",
                 "sla_credit",
-                lambda sc: sum(line["sla_credit"] for line in sc[0].service_corrections),
+                lambda sc: credit["sla_credit"] if (credit := sc[0].service_correction) is not None else 0,
             ),
             Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].point_adjustments),
             Column("Calculated At", "calculated_at", lambda sc: sc[1]),

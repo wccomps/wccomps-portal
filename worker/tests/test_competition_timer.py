@@ -2,12 +2,14 @@
 
 import asyncio
 import contextlib
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from registration.models import Event, Season
+from scoring.models import ServiceCorrectionBatch
 
 from core.models import AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import CompetitionStatusChanged, LogToChannel
@@ -181,6 +183,42 @@ async def _series(
         timer_series_started=started,
         timer_series_schedule=schedule,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("retry", [False, True], ids=["first-attempt", "retry"])
+async def test_an_active_correction_terminally_refuses_a_scheduled_start(retry) -> None:
+    season = await Season.objects.acreate(name="2026", year=2026)
+    event = await Event.objects.acreate(
+        season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )
+    await ServiceCorrectionBatch.objects.acreate(event=event, service_name="Example-HTTPS", ruling="ruling")
+    await _start_due()
+    config = await CompetitionConfig.objects.aget(pk=1)
+    if retry:
+        await _series(True, 1, timezone.now(), config.competition_start_time)
+        await CompetitionConfig.objects.filter(pk=1).aupdate(competition_start_time=None)
+
+    with (
+        patch("worker.jobs.arun_competition", wraps=competition.arun_competition) as attempt,
+        patch("core.authentik_manager.AuthentikManager") as authentik,
+    ):
+        for _ in range(3):
+            await jobs.check_competition_times()
+        attempt.assert_awaited_once()
+        authentik.assert_not_called()
+
+    await config.arefresh_from_db()
+    assert config.competition_start_time is None
+    assert not config.applications_enabled
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
+    posts, status = await _queued()
+    assert status == 1
+    assert len(posts) == 1
+    assert "**Competition Auto-Start Refused:**" in posts[0]
+    assert "Revoke the active service correction" in posts[0]
+    assert "set a new start time or start manually" in posts[0]
 
 
 def _fake_runs(outcomes: list[int | None | str]):

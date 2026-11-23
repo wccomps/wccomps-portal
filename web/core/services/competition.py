@@ -12,6 +12,7 @@ from typing import ClassVar
 from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from core.authentik_utils import set_team_account_active
 from core.heartbeat import beat
@@ -55,11 +56,12 @@ PREFLIGHT_REPORT_MINUTES = (30, 10)
 COMPETITION_RUN_LOCK_ID = 7_261_640_003
 RUN_IN_PROGRESS = "A close out or another start or stop is running. Try again when it finishes."
 RUN_SUPERSEDED = "The schedule or the timer's series changed since the timer planned this attempt"
+CORRECTION_BLOCKS_START = "Revoke the active service correction before restarting the competition."
 STEPPED_ACROSS_THREADS = "run_competition must be stepped on the thread that took the run lock"
 
 
 class RunOutcome(StrEnum):
-    REFUSED = "refused"  # Another run or a close out held the run lock, or the timer's plan went stale
+    REFUSED = "refused"  # Lock contention, a stale timer plan, or an active correction blocking a start
     ERRORED = "errored"  # It stopped before changing anything it could record
     INCOMPLETE = "incomplete"  # It left an app or account unchanged
     COMPLETE = "complete"
@@ -162,7 +164,7 @@ def run_competition(
     enable: bool, actor: str, timer: Attempt | None = None
 ) -> Generator[CompetitionStep, None, CompetitionRunResult]:
     """Start (enable=True) or stop the competition under the run lock, yielding progress (see _run); step it on one
-    thread. Refused when the lock is held or the timer's plan went stale."""
+    thread."""
     with run_lock() as locked:
         if not locked:
             return CompetitionRunResult(enable=enable, error=RUN_IN_PROGRESS, refused=True)
@@ -185,6 +187,10 @@ def _locked_run(
     if timer is not None and not _plan_still_holds(timer):
         return CompetitionRunResult(enable=enable, error=RUN_SUPERSEDED, refused=True)
     planned = _current_series()
+    if enable and _active_service_correction_exists():
+        if timer is not None:
+            _refuse_scheduled_start(timer, planned)
+        return CompetitionRunResult(enable=enable, error=CORRECTION_BLOCKS_START, refused=True)
     steps = _run(enable, actor, timer, planned)
     try:
         while True:
@@ -251,15 +257,34 @@ def _current_series() -> dict[str, object]:
     return series
 
 
-def _write_series(timer: Attempt, planned: dict[str, object], series: dict[str, object]) -> None:
-    """Record series, unless the series changed since the timer planned this attempt or an admin set a new time for
-    its direction meanwhile."""
+def _write_series(timer: Attempt, planned: dict[str, object], changes: dict[str, object]) -> int:
+    """Update the attempt's state only while its schedule and the planned series still match."""
     schedule = "competition_start_time" if timer.enable else "competition_end_time"
     kept = Q(**{schedule: timer.schedule})
     if timer.number > 1:
         # Attempt 1 cleared it; until then, clearing it (a cleanup) ends the series too
         kept |= Q(**{f"{schedule}__isnull": True})
-    CompetitionConfig.objects.filter(kept, pk=CompetitionConfig.get_config().pk, **planned).update(**series)
+    return CompetitionConfig.objects.filter(kept, pk=CompetitionConfig.get_config().pk, **planned).update(**changes)
+
+
+@transaction.atomic
+def _refuse_scheduled_start(timer: Attempt, planned: dict[str, object]) -> None:
+    changes: dict[str, object] = {"competition_start_time": None}
+    if planned["timer_series_enable"] is True:
+        changes.update(no_timer_series())
+    if _write_series(timer, planned, changes):
+        QueuedTask.enqueue(CompetitionStatusChanged())
+        notify_ops(
+            f"**Competition Auto-Start Refused:** the scheduled start was cleared. {CORRECTION_BLOCKS_START} "
+            "Then set a new start time or start manually.",
+            actor=TIMER_ACTOR,
+        )
+
+
+def _active_service_correction_exists() -> bool:
+    from scoring.models import ServiceCorrectionBatch
+
+    return ServiceCorrectionBatch.objects.filter(event__is_active=True, revoked_at__isnull=True).exists()
 
 
 def no_timer_series() -> dict[str, object]:
@@ -294,7 +319,6 @@ def _run(
     every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
-    from scoring.models import ServiceCorrectionBatch
     from scoring.quotient_sync import sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
@@ -305,18 +329,6 @@ def _run(
     config = CompetitionConfig.get_config()
     began_with = config.competition_start_time
     result = CompetitionRunResult(enable=enable, controlled_apps=list(config.controlled_applications))
-    if (
-        enable
-        and ServiceCorrectionBatch.objects.filter(
-            event__is_active=True,
-            revoked_at__isnull=True,
-        ).exists()
-    ):
-        return CompetitionRunResult(
-            enable=enable,
-            error="Revoke the active service correction before restarting the competition.",
-            refused=True,
-        )
     if not result.controlled_apps:
         result.error = "No controlled applications configured"
         return result
@@ -696,6 +708,11 @@ def set_schedule(
     config = CompetitionConfig.locked()
     new_start = config.competition_start_time if isinstance(start, Keep) else start
     new_end = config.competition_end_time if isinstance(end, Keep) else end
+    creates_start = isinstance(start, datetime) or (
+        new_start is not None and (new_end is None or new_end > timezone.now()) and not config.schedule_will_start()
+    )
+    if creates_start and _active_service_correction_exists():
+        raise ConfigEditError("Revoke the active service correction before scheduling a competition start.")
     if new_start and new_end and new_end <= new_start:
         raise ConfigEditError("The end time must be after the start time")
     changes: dict[str, datetime | None] = {}

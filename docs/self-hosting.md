@@ -471,6 +471,9 @@ the service, sorted by unique positive **Quotient ID**. Only service and net may
 nine digits per integer, with no padding, leading plus, or negative zero. Use LF line endings, including
 a final LF, and no BOM. Net must equal the service delta plus the SLA credit; it is never applied separately.
 
+For `verify` and `apply`, the event must be open and unfinalized, competition applications must be disabled, and
+there must be no pending start. The live Quotient baseline must match the portal's score import and team assignments.
+
 Run `manage.py service_correction verify --event EVENT --service SERVICE --ruling SLUG --manifest PATH
 --manifest-sha256 APPROVED_SHA` with the independently approved digest. It reads the live Quotient export,
 resolves each ID using the scored team's name and the event's portal team assignment, and checks the current
@@ -481,11 +484,20 @@ Use `--full-void` on both `verify` and `apply` to require exact removal of each 
 points and restoration of its entire SLA deduction. Use `--expect-service-max MAX` on `apply` to require the
 existing denominator. Neither flag rewrites the service or its checks, or changes the denominator.
 
-One batch can be active per event; an identical application is a no-op. The raw service credit uses the multiplier
-recorded at application. A detected sync conflict rolls back the import and blocks Close Out until a matching
-sync or audited revocation. To revoke before Close Out, pass the event, service, ruling, manifest digest and
-revoking operator, without the manifest path. Frozen scorecards show the credit and unadjusted service detail;
-the close-out ZIP's final scores export carries the two credit columns.
+One batch can be active per event. Replaying the same apply with matching expectations returns `already applied`;
+conflicting applications are rejected. The raw service credit uses the multiplier recorded at application. A detected
+sync conflict rolls back the import and blocks Close Out until a matching sync or audited revocation.
+
+An active correction blocks manual starts and new start schedules. If an existing scheduled start becomes due,
+the timer clears it and notifies ops without retrying. To revoke before Close Out, clear any pending start, then
+pass the event, service, ruling, manifest digest and revoking operator, without the manifest path. After revoking,
+set a new start time or start manually if play must resume. Revoked batches remain in the audit history, and an
+event with correction history (or its season) cannot be deleted.
+
+Frozen scorecards show the credit and unadjusted service detail; the close-out ZIP's final scores export carries
+the two credit columns. No correction runs during migration or deployment. In Docker Compose, the worker and chat
+wait for the web service to be healthy, after web applies migrations. In other deployments, apply migrations before
+starting the worker and chat.
 
 ## Settings reference
 

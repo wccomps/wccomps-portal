@@ -1,6 +1,4 @@
-"""An event that is open, finalized, or holds assignments or results is season history: it can't be deleted, nor can
-its season. Only this check guards open and assigned events; for finalized ones it explains what the PROTECT on
-results and archives would refuse."""
+"""Events that are part of season history cannot be deleted, nor can their seasons."""
 
 from datetime import date
 
@@ -8,6 +6,8 @@ import pytest
 from django.contrib.messages import get_messages
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
+from scoring.models import ServiceCorrectionBatch
 
 from registration.models import Event, EventResult, EventTeamAssignment, School, Season
 from team.models import Team
@@ -46,11 +46,24 @@ def _with_result(season):
     return event
 
 
+def _with_correction(season, *, revoked):
+    event = _event(season)
+    ServiceCorrectionBatch.objects.create(
+        event=event,
+        service_name="Example-HTTPS",
+        ruling="certificate-expiry",
+        revoked_at=timezone.now() if revoked else None,
+    )
+    return event
+
+
 KEPT = {
     "open": (lambda season: _event(season, is_active=True), "is open"),
     "finalized": (lambda season: _event(season, is_finalized=True), "has finalized results"),
     "results": (_with_result, "has finalized results"),
     "assignments": (_assigned, "has schools assigned to teams"),
+    "active_correction": (lambda season: _with_correction(season, revoked=False), "has service correction history"),
+    "revoked_correction": (lambda season: _with_correction(season, revoked=True), "has service correction history"),
 }
 
 

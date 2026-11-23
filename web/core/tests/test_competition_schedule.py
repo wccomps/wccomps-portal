@@ -1,10 +1,12 @@
 """The schedule the competition timer runs from must be one it can run."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
+from scoring.models import ServiceCorrectionBatch
 
 from core.models import CompetitionConfig
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc
@@ -78,6 +80,43 @@ def test_a_valid_schedule_is_saved(admin_client):
     config = CompetitionConfig.get_config()
     assert config.competition_start_time == datetime(2026, 10, 3, 16, tzinfo=UTC)
     assert config.competition_end_time == datetime(2026, 10, 4, tzinfo=UTC)
+
+
+def test_an_active_correction_prevents_scheduling_a_start_until_revoked(admin_client, current_event):
+    batch = ServiceCorrectionBatch.objects.create(event=current_event, service_name="Example-HTTPS", ruling="ruling")
+    fields = {"start_datetime": "2099-10-03T09:00", "start_timezone": "UTC"}
+
+    response = _post(admin_client, "set_schedule", **fields)
+    assert response.status_code == 400
+    assert "Revoke the active service correction" in response.json()["error"]
+    assert CompetitionConfig.get_config().competition_start_time is None
+
+    batch.revoked_at = timezone.now()
+    batch.save(update_fields=["revoked_at"])
+    assert _post(admin_client, "set_schedule", **fields).status_code == 200
+    assert CompetitionConfig.get_config().competition_start_time == datetime(2099, 10, 3, 9, tzinfo=UTC)
+
+
+def test_an_end_edit_cannot_revive_a_start_with_an_active_correction(admin_client, current_event):
+    ServiceCorrectionBatch.objects.create(event=current_event, service_name="Example-HTTPS", ruling="ruling")
+    end = timezone.now() - timedelta(hours=1)
+    start = end - timedelta(hours=1)
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_start_time": start, "competition_end_time": end}
+    )
+
+    for action, fields in [
+        ("clear_end_time", {}),
+        ("set_schedule", {"end_datetime": "2099-10-03T09:00", "end_timezone": "UTC"}),
+    ]:
+        response = _post(admin_client, action, **fields)
+        assert response.status_code == 400
+        assert "Revoke the active service correction" in response.json()["error"]
+        config = CompetitionConfig.get_config()
+        assert (config.competition_start_time, config.competition_end_time) == (start, end)
+
+    assert _post(admin_client, "clear_start_time").status_code == 200
+    assert _post(admin_client, "clear_end_time").status_code == 200
 
 
 def test_unknown_timezone_is_a_400_not_a_500(admin_client):

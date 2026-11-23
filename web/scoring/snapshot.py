@@ -11,6 +11,7 @@ from typing import cast
 
 from .calculator import SCORE_COMPONENT_FIELDS, Standing
 from .models import OrangeTeamScore, RedTeamScore
+from .service_corrections import CreditLine
 
 SNAPSHOT_VERSION = 1
 _DECIMAL = "$d"
@@ -39,12 +40,13 @@ def _decode(value: object) -> object:
 def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
     """build_scorecard_context's result as JSON values, keeping only what the scorecard templates read."""
     score = cast(Standing, context["score"])
+    correction = score.service_correction
     plain = {
         "team": {"team_number": score.team.team_number},
         "score": {
             **{field: getattr(score, field) for field in (*SCORE_COMPONENT_FIELDS, "total_score")},
             "rank": score.rank,
-            **({"service_corrections": score.service_corrections} if score.service_corrections else {}),
+            **({"service_corrections": [correction]} if correction is not None else {}),
         },
         "stats": context["stats"],
         "red_scores": [
@@ -75,4 +77,9 @@ def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
 
 def context_from_snapshot(data: dict[str, object]) -> dict[str, object]:
     """A stored snapshot back as a template context."""
-    return cast(dict[str, object], _decode(data))
+    context = cast(dict[str, object], _decode(data))
+    score = cast(dict[str, object], context["score"])
+    corrections = cast(list[CreditLine] | None, score.pop("service_corrections", None))
+    if corrections:
+        score["service_correction"] = corrections[0]
+    return context
