@@ -163,7 +163,7 @@ def service_category(db):
     ],
     ids=["box-and-ip-from-the-service", "picked-box-kept", "typed-ip-kept"],
 )
-def test_a_picked_service_fills_its_box_and_ip_only_when_no_box_was_picked_or_ip_typed(
+def test_a_picked_service_fills_missing_fields_without_overwriting_a_box_or_ip(
     blue_team_user, team_1, service_category, picked, box, ip
 ):
     response = _client(blue_team_user).post(
