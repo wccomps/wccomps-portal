@@ -436,6 +436,24 @@ async def test_after_a_close_out_it_skips_once_another_event_opened(competition:
     assert (await Team.objects.aget(pk=competition.pk)).discord_role_id == 11
 
 
+async def test_queued_for_an_event_no_longer_open_it_skips(competition: Team) -> None:
+    from registration.models import Event, Season
+
+    season = await Season.objects.acreate(name="2026", year=2026)
+    queued_for = await Event.objects.acreate(season=season, name="Inv", event_type="invitational", date="2026-10-03")
+    await Event.objects.acreate(season=season, name="Qual", event_type="qualifier", date="2026-11-07", is_active=True)
+    guild = _guild("Team 03")
+
+    with (
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.role_sync.sync_roles", _sync_removing(0)),
+    ):
+        await reconcile_teams(MagicMock(), guild, "web:admin", queued_for.pk, _no_beat)
+
+    assert "skipped: The event it was queued for is no longer open." in ops.await_args.args[1]
+    guild.categories[0].delete.assert_not_awaited()
+
+
 async def test_opening_an_event_tears_down_what_the_last_event_left(competition: Team) -> None:
     """With the close-out's teardown skipped, the opening removes the team channels, roles and Room Judge role, keeps
     the open event's state and sets the linked teams up again."""

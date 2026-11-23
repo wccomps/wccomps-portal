@@ -18,13 +18,15 @@ from django.utils import timezone
 
 from core.authentik_utils import _record_reset, reset_team_credentials
 from core.models import CredentialsReset, UserGroups
-from core.tests import test_oauth_flow
-from core.tests.test_oauth_flow import oauth_state_session  # noqa: F401
+from core.tests.test_oauth_flow import (
+    OAUTH_CONFIG,
+    _id_token,
+    _login,
+    _start_sign_in,
+    oauth_state_session,  # noqa: F401
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-_login = test_oauth_flow.TestOAuthCallback._login
-_id_token = test_oauth_flow.TestOAuthCallback._id_token
 
 
 def test_a_reset_committing_while_the_callback_waits_refuses_the_sign_in(oauth_state_session):  # noqa: F811
@@ -120,22 +122,14 @@ def test_a_reset_whose_unlink_failed_still_refuses_an_older_sign_in(oauth_state_
 
 def test_the_retry_returns_to_the_page_the_sign_in_began_from(client):
     """A member refused while linking Discord comes back to the link confirmation."""
-    config = {
-        "client_id": "c",
-        "client_secret": "s",
-        "authorization_endpoint": "https://auth.example.com/authorize/",
-        "token_endpoint": "https://auth.example.com/token/",
-        "userinfo_endpoint": "https://auth.example.com/userinfo/",
-    }
     link_page = "/auth/link-callback?token=abc"
-    with patch("core.oauth._get_oauth_config", return_value=config):
-        state = parse_qs(urlparse(client.get("/auth/login/", {"next": link_page}).url).query)["state"][0]
+    state = _start_sign_in(client, link_page)
     CredentialsReset.objects.create(authentik_id="sub-06", reset_at=datetime.fromtimestamp(time.time(), UTC))
 
     page = _login(client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=_id_token(0))
 
     retry = html.unescape(re.search(r'href="([^"]*prompt=login[^"]*)"', page.content.decode()).group(1))
-    with patch("core.oauth._get_oauth_config", return_value=config):
+    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
         sent = parse_qs(urlparse(client.get(retry).url).query)
     assert sent["prompt"] == ["login"]
     assert signing.loads(sent["state"][0])["next"] == link_page

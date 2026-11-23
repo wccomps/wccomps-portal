@@ -97,16 +97,16 @@ _SERVING_SSL_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
 @contextmanager
-def serving(answers_: list[Answer]) -> Iterator[list[str]]:
+def serving(answers_: list[Answer]) -> Iterator[list[httpx.Request]]:
     """Every outgoing request (httpx's transport) gets the next answer (the last one repeats, so a reader that pages on
-    gets the same page again); yields the URLs requested."""
-    requested: list[str] = []
+    gets the same page again); yields the requests sent."""
+    requested: list[httpx.Request] = []
 
     def handle(self: httpx.HTTPTransport | httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
         if len(requested) >= MAX_REQUESTS:
             raise EndlessRequests(f"{MAX_REQUESTS} requests, the last {request.url}")
         answer = answers_[min(len(requested), len(answers_) - 1)]
-        requested.append(str(request.url))
+        requested.append(request)
         return httpx.Response(answer.status, content=answer.body, request=request)
 
     async def handle_async(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:

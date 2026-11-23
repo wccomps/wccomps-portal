@@ -2,13 +2,14 @@
 a school for the same event, Approve refuses one while another is approved, and only then is an approved one
 rejectable (assign_teams refusing both is in test_school)."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 
 from registration.models import (
     Event,
@@ -87,6 +88,38 @@ def test_the_review_page_does_not_flag_a_school_registered_once_for_an_event(cli
     assert _rows(client)[registration] is None
 
 
+def test_the_review_page_does_not_flag_a_school_registered_twice_for_a_closed_out_event(client, event):
+    """A closed-out event is over: its registrations are history, not a choice still to make."""
+    closed = Event.objects.create(
+        season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3), is_finalized=True
+    )
+    real = _registration(closed, "Example University", "captain@example.edu", status="approved")
+    impostor = _registration(closed, "example university", "student@example.com")
+
+    rows = _rows(client)
+
+    assert rows[real] is None
+    assert rows[impostor] is None
+
+
+def test_a_registration_for_two_events_lists_its_schools_registrations_for_both_oldest_first(client, event):
+    """Oldest by submission, not by id: a registration entered later can carry an earlier submission time."""
+    qualifier = Event.objects.create(
+        season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 11, 7)
+    )
+    both = _registration(event, "Example University", "captain@example.edu")
+    RegistrationEventEnrollment.objects.create(registration=both, event=qualifier)
+    at_invitational = _registration(event, "example university", "student@example.com")
+    at_qualifier = _registration(qualifier, "Example  University", "rival@example.com")
+    TeamRegistration.objects.filter(pk=at_qualifier.pk).update(submitted_at=timezone.now() - timedelta(days=1))
+
+    rows = _rows(client)
+
+    assert rows[both].same_school == [at_qualifier, at_invitational]
+    assert rows[at_invitational].same_school == [both]
+    assert rows[at_qualifier].same_school == [both]
+
+
 def test_the_review_page_flags_a_school_a_team_already_holds_but_not_for_the_registration_it_was_given_to(
     client, event
 ):
@@ -117,6 +150,22 @@ def test_approve_is_refused_while_another_registration_of_the_school_is_approved
     assert (
         "Registration for example university was not approved: another registration for that school, from "
         "student@example.com, is already approved for one of its events."
+    ) in response.content.decode()
+
+
+def test_approve_refused_by_an_approved_registration_with_no_contact_names_no_email(client, event):
+    """Its contacts deleted in the admin, the approved one has no email to name: the refusal still reads whole."""
+    other = _registration(event, "Example University", "student@example.com", status="approved")
+    other.contacts.all().delete()
+    real = _registration(event, "example university", "captain@example.edu")
+
+    response = client.post(reverse("registration_approve", args=[real.pk]), follow=True)
+
+    real.refresh_from_db()
+    assert real.status == "pending"
+    assert (
+        "Registration for example university was not approved: another registration for that school is already "
+        "approved for one of its events."
     ) in response.content.decode()
 
 

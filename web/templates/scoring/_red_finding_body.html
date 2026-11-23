@@ -19,7 +19,7 @@
                 {{ finding.attack_type.name|default:"Unknown" }}
             </c-detail_row>
             <c-detail_row label="Affected Boxes">
-                {{ finding.affected_boxes_display }}
+                {{ affected_box_labels }}
             </c-detail_row>
             <c-detail_row label="Affected Service">
                 {{ finding.affected_service }}

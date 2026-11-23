@@ -1,11 +1,13 @@
 from typing import Protocol
 
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count, JSONField, QuerySet
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin, PortalTabularInline
+from core.services.competition import run_lock
 from core.status_variants import score_class
 from core.utils import shorten
 
@@ -21,6 +23,7 @@ from .models import (
     RedTeamScreenshot,
     ScoringExclusion,
     ScoringTemplate,
+    ServiceCorrectionBatch,
     ServiceScore,
 )
 
@@ -253,6 +256,47 @@ class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
     list_filter = ["synced_at"]
     search_fields = ["team__team_name"]
     readonly_fields = ["synced_at"]
+
+    @staticmethod
+    def _check_import_writable(locked: bool) -> None:
+        if (
+            not locked
+            or ServiceCorrectionBatch.objects.filter(
+                event__is_active=True,
+                revoked_at__isnull=True,
+            ).exists()
+        ):
+            raise PermissionDenied("Imported service scores are locked by a competition transition or correction.")
+
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, object] | None = None,
+    ) -> HttpResponse:
+        if request.method == "POST":
+            with run_lock() as locked:
+                self._check_import_writable(locked)
+                return super().changeform_view(request, object_id, form_url, extra_context)
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def delete_view(
+        self,
+        request: HttpRequest,
+        object_id: str,
+        extra_context: dict[str, object] | None = None,
+    ) -> HttpResponse:
+        if request.method == "POST":
+            with run_lock() as locked:
+                self._check_import_writable(locked)
+                return super().delete_view(request, object_id, extra_context)
+        return super().delete_view(request, object_id, extra_context)
+
+    def delete_queryset(self, request: HttpRequest, queryset: QuerySet[ServiceScore]) -> None:
+        with run_lock() as locked:
+            self._check_import_writable(locked)
+            super().delete_queryset(request, queryset)
 
     @admin.display(description="Net")
     def net_score(self, obj: ServiceScore) -> str:

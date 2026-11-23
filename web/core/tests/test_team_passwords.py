@@ -1,6 +1,9 @@
 """Team password resets, and what unlinking a team member tells Discord."""
 
+import re
 import uuid
+from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,18 +16,22 @@ from registration.models import School
 
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager
 from core.authentik_utils import (
+    STILL_OPEN,
     Changed,
     FollowupFailed,
     Refused,
     SignedOut,
     Unlinked,
     _reset_credentials,
+    generate_blueteam_password,
     reset_team_credentials,
     reset_teams_credentials,
     sessions_failure_summary,
     set_team_account_active,
+    set_team_password,
 )
-from core.models import CredentialsReset, QueuedTask, UserGroups
+from core.models import AuditLog, CredentialsReset, QueuedTask, UserGroups
+from core.services.ops import OPS_NOTICE
 from core.utils import drain
 from team.models import DiscordLink, SchoolInfo, Team, team_username
 
@@ -125,7 +132,7 @@ def test_uncounted_sessions_are_unknown_not_zero(manager):
     reset = reset_team_credentials(7, actor="gold-admin")
 
     assert isinstance(reset, Changed)
-    assert (reset.sessions_found, reset.sessions_error) == (None, SESSIONS_HIDDEN)
+    assert (reset.sessions_found, reset.sessions_listed_after, reset.sessions_error) == (None, 0, SESSIONS_HIDDEN)
 
 
 def test_a_transient_count_error_does_not_fail_the_end_step_but_tells_ops(manager):
@@ -188,7 +195,7 @@ def test_reset_team_credentials_audits_and_tells_ops(manager):
     reset_team_credentials(7, actor="gold-admin")
 
     row = AuditLog.objects.get(action="team_password_reset")
-    assert (row.admin_user, row.target_id) == ("gold-admin", 7)
+    assert (row.admin_user, row.target_entity, row.target_id) == ("gold-admin", "team", 7)
     assert row.details == {
         "password_reset": True,
         "sessions_revoked": True,
@@ -205,6 +212,18 @@ def test_reset_team_credentials_audits_and_tells_ops(manager):
         "Credentials reset for team 7 by gold-admin: ended the team's Authentik sessions; "
         "signed the team account out of the portal"
     )
+    assert AuditLog.objects.get(action=OPS_NOTICE).admin_user == "gold-admin"
+
+
+def test_a_failed_listing_after_the_change_lists_no_sessions(manager):
+    manager.user_sessions.side_effect = [[uuid.UUID(int=1)], AuthentikAPIError("List sessions: Server error", 500)]
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert isinstance(reset, Changed)
+    assert (reset.sessions_found, reset.sessions_listed_after) == (1, 0)
+    assert reset.sessions_error == "List sessions: Server error"
+    manager.end_sessions.assert_not_called()
 
 
 def test_reset_team_credentials_failure_keeps_the_old_password(school_info, manager):
@@ -229,6 +248,17 @@ def test_reset_team_credentials_failed_password_tells_ops(school_info, manager):
         "Credentials reset for team 7 by gold-admin: the password reset failed: Set the password of team07: "
         "Server error"
     )
+    assert AuditLog.objects.get(action="team_password_reset").details == {
+        "password_reset": False,
+        "sessions_revoked": False,
+        "sessions_error": None,
+        "sessions_found": 0,
+        "sessions_listed_after": 0,
+        "store_error": None,
+        "record_error": None,
+        "discord_unlinked": 0,
+        "followup_error": None,
+    }
 
 
 def test_reset_team_credentials_names_an_unlisted_status(manager):
@@ -265,12 +295,67 @@ def test_bulk_reset_uses_one_manager(manager):
     assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
 
 
+LISTED = "(?:Apple|Zebra)"  # The test word list's words, capitalized
+
+
+@pytest.mark.parametrize(
+    ("pick", "shape"),
+    [
+        (lambda options: options[0], rf"100!-{LISTED}-{LISTED}"),
+        (lambda options: options[1], rf"{LISTED}-@101-{LISTED}"),
+        (lambda options: options[-1], rf"{LISTED}-{LISTED}-\+999"),
+    ],
+    ids=["first", "second", "last"],
+)
+def test_a_generated_password_is_two_words_and_a_number_with_a_symbol(tmp_path, monkeypatch, pick, shape):
+    """Each random pick (the number from 100 to 999, the symbol, its side of the number, the number's place among the
+    words) taken as its first, second or last option; the two words come from the word list, capitalized."""
+    from xkcdpass import xkcd_password
+
+    words = tmp_path / "words"
+    words.write_text("apple\nzebra\n")
+    monkeypatch.setattr(xkcd_password, "locate_wordfile", lambda wordfile=None: str(words))
+    picks = SimpleNamespace(randbelow=lambda n: pick(range(n)), choice=pick)
+    monkeypatch.setattr("core.authentik_utils.secrets", picks)
+
+    password = generate_blueteam_password()
+
+    assert re.fullmatch(shape, password), password
+
+
+def test_each_reason_sessions_could_not_end_reads_once_with_its_teams():
+    summary = sessions_failure_summary([("team01", "HTTP 403"), ("team02", "HTTP 502"), ("team03", "HTTP 403")])
+
+    assert summary == (
+        f"could not end sessions for team01, team03 (HTTP 403), so {STILL_OPEN}; "
+        f"could not end sessions for team02 (HTTP 502), so {STILL_OPEN}"
+    )
+
+
 def test_one_reason_shared_by_many_teams_reads_once():
     """A bulk reset where every team fails the same way reads one reason, not fifty copies of it."""
     summary = sessions_failure_summary([(f"team{n:02d}", "HTTP 403") for n in range(1, 51)])
 
     assert summary.count("HTTP 403") == 1
     assert len(summary) < 600
+
+
+WORD = "[A-Z][a-z]+"
+INSERT = r"(?:[1-9][0-9]{2}[!@#$%&*+]|[!@#$%&*+][1-9][0-9]{2})"
+PASSWORD = re.compile(f"{INSERT}-{WORD}-{WORD}|{WORD}-{INSERT}-{WORD}|{WORD}-{WORD}-{INSERT}")
+
+
+def test_a_generated_password_leaves_out_hyphenated_words(tmp_path, monkeypatch):
+    """The EFF list has yo-yo, drop-down, felt-tip and t-shirt; a password is two letters-only words and the number."""
+    from xkcdpass import xkcd_password
+
+    words = tmp_path / "words"
+    words.write_text("t-shirt\nzebra\n")
+    monkeypatch.setattr(xkcd_password, "locate_wordfile", lambda wordfile=None: str(words))
+
+    passwords = [generate_blueteam_password() for _ in range(50)]
+
+    assert [p for p in passwords if not PASSWORD.fullmatch(p)] == []
 
 
 def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
@@ -355,12 +440,13 @@ def test_bulk_reset_writes_its_own_audit_row(manager):
         drain(reset_teams_credentials([1, 2], "gold-admin"))
 
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
-    assert row.admin_user == "gold-admin"
+    assert (row.admin_user, row.target_entity, row.target_id) == ("gold-admin", "authentik_users", 0)
     assert row.details["team_numbers"] == [1, 2]
     assert (row.details["total_users"], row.details["success_count"], row.details["failed_count"]) == (2, 1, 1)
     teams = row.details["teams"]
     assert (teams["team01"]["password_reset"], teams["team01"]["sessions_found"]) == (True, 0)
     assert teams["team02"]["password_reset"] is False
+    assert AuditLog.objects.get(action=OPS_NOTICE).admin_user == "gold-admin"
 
 
 def test_bulk_audit_names_the_teams_it_could_not_count(manager):
@@ -376,6 +462,26 @@ def test_bulk_audit_names_the_teams_it_could_not_count(manager):
     assert (team01["sessions_found"], team01["sessions_listed_after"]) == (None, 1)
     note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note.endswith("; could not count the sessions of team01")
+
+
+def test_bulk_note_lists_every_team_it_could_not_count(manager):
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username, "uid": f"sub-{username}"}
+    failed = AuthentikAPIError("List sessions: Server error", 500)
+    manager.user_sessions.side_effect = [failed, [], failed, []]
+    drain(reset_teams_credentials([1, 2], "gold-admin"))
+
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert note.endswith("; could not count the sessions of team01, team02")
+
+
+def test_a_bulk_reset_out_of_room_returns_the_batches_it_did_and_names_the_rest(manager):
+    """The bot stops before a batch its reply window can't fit, then names the teams from the batches returned."""
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username, "uid": f"sub-{username}"}
+    result = drain(reset_teams_credentials(list(range(1, 13)), "gold-admin", lambda: False))
+
+    assert result.team_numbers == list(range(1, 11))
+    notes = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
+    assert notes == ["Credentials reset by gold-admin: not reached: team11, team12; Reset 10/10 passwords"]
 
 
 def test_web_bulk_reset_leaves_one_audit_row(admin_user):
@@ -446,6 +552,44 @@ def test_set_team_account_active_raises_why_it_could_not(manager):
     manager.set_user_active.assert_not_called()
 
 
+@pytest.mark.parametrize("number", [0, 51])
+def test_a_team_number_past_the_teams_is_refused_before_authentik_is_asked(manager, number):
+    assert reset_team_credentials(number, actor="gold-admin") == Refused("Team number must be between 1 and 50")
+    manager.find_user.assert_not_called()
+    manager.set_password.assert_not_called()
+
+
+def test_the_last_teams_password_is_reset(manager):
+    manager.find_user.return_value = {"pk": 50, "username": "team50", "uid": "sub-50"}
+
+    assert isinstance(reset_team_credentials(50, actor="gold-admin"), Changed)
+    manager.find_user.assert_called_once_with("team50")
+
+
+@pytest.mark.parametrize("path", ["users", "blue-users/other", None])
+def test_in_team_folder_mode_an_account_outside_the_folder_keeps_its_password(manager, settings, path):
+    """Authentik answers a username however the account is filed; only the team folder's account is the team's."""
+    settings.TEAM_ACCOUNT_PATH = "blue-users"
+    manager.find_user.return_value = {"pk": 5, "username": "team07", "uid": "sub-07", "path": path}
+    refused = "User team07 is not in the team folder"
+
+    assert reset_team_credentials(7, actor="gold-admin") == Refused(refused)
+    assert set_team_password(7, actor="packet distribution") == (None, refused)
+    manager.set_password.assert_not_called()
+    manager.end_sessions.assert_not_called()
+
+
+def test_in_team_folder_mode_the_folders_account_is_reset(manager, settings):
+    settings.TEAM_ACCOUNT_PATH = "blue-users"
+    account = {"pk": 5, "username": "team07", "uid": "sub-07", "path": "blue-users"}
+    manager.find_user.return_value = account
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert isinstance(reset, Changed)
+    manager.set_password.assert_called_once_with(account, reset.password)
+
+
 def test_bulk_reset_tells_ops_once(manager):
     manager.find_user.side_effect = lambda username: (
         {"pk": 9, "username": username, "uid": f"sub-{username}"} if username != "team02" else None
@@ -501,12 +645,20 @@ def test_a_portal_account_holding_the_username_under_another_sub_stays_signed_in
     assert get_user(stale).is_authenticated
 
 
-def test_a_failed_password_change_leaves_portal_sessions_alone(manager):
+@pytest.mark.parametrize("team_reset", [False, True])
+def test_a_failed_password_change_leaves_portal_sessions_alone(manager, team_reset):
+    """Only a changed password signs the account out of the portal; Reset Team unlinks the members either way."""
+    from core.authentik_utils import reset_team
+
+    Team.objects.create(team_number=7, team_name="Team 07")
     manager.find_user.return_value = {"pk": 5, "username": "team07", "uid": "sub-07"}
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
     team = _signed_in("team07", "sub-07")
 
-    reset_team_credentials(7, actor="gold-admin")
+    if team_reset:
+        reset_team(7, actor="gold-admin", recreate_channels=False)
+    else:
+        reset_team_credentials(7, actor="gold-admin")
 
     assert get_user(team).is_authenticated
 
@@ -566,15 +718,21 @@ def test_a_credentials_reset_ends_the_teams_discord_links(manager, bulk):
     assert list(DiscordLink.objects.filter(is_active=True).values_list("discord_id", flat=True)) == [808]
     assert AuditLog.objects.get(action="user_unlinked").details["reason"] == "credentials_reset"
     assert QueuedTask.objects.get(task_type="sync_member_roles").payload == {"discord_id": 707}
+    (note,) = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
+    assert "; unlinked 1 Discord member(s), who link again with the new password" in note
 
 
-def test_a_failed_password_change_keeps_the_discord_links(manager):
+@pytest.mark.parametrize("bulk", [False, True])
+def test_a_failed_password_change_keeps_the_discord_links(manager, bulk):
     team = Team.objects.create(team_number=7, team_name="Team 07")
     member = User.objects.create(username="member07")
     DiscordLink.objects.create(user=member, discord_id=707, discord_username="m7", team=team, is_active=True)
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
 
-    reset_team_credentials(7, actor="gold-admin")
+    if bulk:
+        drain(reset_teams_credentials([7], actor="gold-admin"))
+    else:
+        reset_team_credentials(7, actor="gold-admin")
 
     assert DiscordLink.objects.filter(discord_id=707, is_active=True).exists()
 
@@ -634,6 +792,28 @@ def test_reset_team_unlinks_even_when_the_password_change_fails(manager):
     assert QueuedTask.objects.filter(task_type="log_to_channel").count() == 1
 
 
+def test_a_team_reset_whose_unlink_failed_after_a_refused_password_says_why(manager):
+    from django.db import DatabaseError
+
+    from core.authentik_utils import reset_team
+
+    Team.objects.create(team_number=7, team_name="Team 07")
+    manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
+
+    with patch("core.authentik_utils.unlink_teams", side_effect=DatabaseError("deadlock detected")):
+        reset = reset_team(7, actor="gold-admin", recreate_channels=False).credentials
+
+    assert reset == Refused(
+        "Set the password of team07: Server error", sessions_found=0, followup=FollowupFailed("deadlock detected")
+    )
+    assert reset.describe() == (
+        "the password reset failed: Set the password of team07: Server error; "
+        "could not end the team's Discord links: deadlock detected"
+    )
+    details = AuditLog.objects.get(action="team_reset").details
+    assert (details["discord_unlinked"], details["followup_error"]) == (0, "deadlock detected")
+
+
 def test_a_database_failure_after_a_password_change_keeps_every_password_and_the_audit_row(manager):
     """Authentik already holds the new password, so the operator must get it whatever the database does next."""
     from django.db import DatabaseError
@@ -671,6 +851,16 @@ def test_a_failed_store_is_said(school_info, manager):
 
     assert "could not store the new password for packet emails: disk full" in reset.describe()
     assert reset.followup == SignedOut(0)
+
+
+def test_a_failed_store_with_no_message_is_named_by_its_error(school_info, manager):
+    from django.db import DatabaseError
+
+    with patch("core.authentik_utils._store_password", side_effect=DatabaseError()):
+        reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert isinstance(reset, Changed)
+    assert reset.store_error == "DatabaseError"
 
 
 def test_a_failed_reset_record_is_said(manager):
@@ -719,6 +909,23 @@ def test_a_reset_records_its_time_for_an_account_never_signed_in_to_the_portal(m
     assert CredentialsReset.objects.filter(authentik_id="sub-07").exists()
 
 
+def test_a_new_reset_moves_the_accounts_reset_time_forward_and_never_back(manager):
+    """core.oauth refuses a sign-in from before the reset time: an earlier time would let one back in."""
+    earlier = timezone.now() - timedelta(hours=1)
+    CredentialsReset.objects.create(authentik_id="sub-07", reset_at=earlier)
+
+    reset_team_credentials(7, actor="gold-admin")
+
+    moved = CredentialsReset.objects.get(authentik_id="sub-07").reset_at
+    assert moved > earlier
+    later = timezone.now() + timedelta(hours=1)
+    CredentialsReset.objects.filter(authentik_id="sub-07").update(reset_at=later)
+
+    reset_team_credentials(7, actor="gold-admin")
+
+    assert CredentialsReset.objects.get(authentik_id="sub-07").reset_at == later
+
+
 def test_the_reset_time_is_taken_once_the_password_has_changed(manager):
     """A sign-in with the old password while Authentik was changing it must still count as before the reset."""
     changing_at = []
@@ -755,6 +962,36 @@ def test_a_team_reset_whose_record_failed_says_the_recreation_was_not_queued(man
     assert isinstance(result.credentials, Changed)
     assert result.recreation_queued is False
     assert not QueuedTask.objects.filter(task_type="setup_team_infrastructure").exists()
+
+
+@pytest.mark.parametrize(
+    ("recreate", "channels"), [(True, "the role and channels are being recreated"), (False, "channels kept")]
+)
+def test_a_team_reset_queues_the_recreation_asked_for_and_records_it(manager, recreate, channels):
+    from core.authentik_utils import reset_team
+    from core.models import AuditLog
+
+    Team.objects.create(team_number=7, team_name="Blue Falcons")
+
+    result = reset_team(7, actor="gold-admin", recreate_channels=recreate)
+
+    assert isinstance(result.credentials, Changed)
+    assert result.recreation_queued is recreate
+    queued = [t.payload for t in QueuedTask.objects.filter(task_type="setup_team_infrastructure")]
+    assert queued == ([{"team_number": 7, "recreate": True}] if recreate else [])
+    row = AuditLog.objects.get(action="team_reset")
+    assert (row.admin_user, row.target_entity, row.target_id) == ("gold-admin", "team", 7)
+    assert row.details == {
+        "team_name": "Blue Falcons",
+        "unlinked_members": 0,
+        "recreated_channels": recreate,
+        **result.credentials.audit_details(),
+    }
+    notice = AuditLog.objects.get(action=OPS_NOTICE)
+    assert notice.admin_user == "gold-admin"
+    assert notice.details["message"] == (
+        f"Team reset of Blue Falcons by gold-admin: {result.credentials.describe()}; {channels}"
+    )
 
 
 def test_a_bulk_reset_yields_and_audits_each_batch_before_starting_the_next_and_tells_ops_at_the_end(manager):
@@ -896,7 +1133,14 @@ def test_a_batch_that_raises_partway_audits_the_resets_it_made(manager):
         drain(reset_teams_credentials([1, 2, 3], "gold-admin"))
 
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
-    assert (row.details["team_numbers"], row.details["interrupted"]) == ([1, 2], True)
+    assert (row.admin_user, row.target_entity, row.target_id) == ("gold-admin", "authentik_users", 0)
+    assert row.details == {
+        "team_numbers": [1, 2],
+        "total_users": 2,
+        "success_count": 2,
+        "failed_count": 0,
+        "interrupted": True,
+    }
 
 
 @pytest.mark.parametrize("teams", [[], [1]], ids=["no-teams", "raises-first"])
@@ -914,7 +1158,7 @@ def test_a_reset_that_changes_nothing_still_tells_ops(manager, teams):
             drain(reset_teams_credentials(teams, "gold-admin"))
 
     (note,) = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
-    assert "nothing was changed" in note
+    assert note.endswith("nothing was changed; Reset 0/0 passwords")
 
 
 def test_a_web_reset_that_raises_lists_every_earlier_batch_as_never_handed_over(admin_user):

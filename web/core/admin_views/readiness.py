@@ -265,11 +265,11 @@ def _configure_apps_link() -> dict[str, str]:
 
 
 def _check_blueteam_bindings() -> CheckResult:
-    """Verify BlueTeam group or policy bindings exist on all controlled apps (core.authentik_manager.blueteam_binding).
-    In team folder mode an app may have only one blue team binding of either kind, as a start and stop toggle only the
-    one they prefer, and also needs an enabled binding that isn't a blue team one: Authentik lets everyone into an app
-    with no enabled binding, so disabling a lone blue team binding at a stop would open it to every user, the recreated
-    team accounts included."""
+    """Verify BlueTeam group or policy bindings exist on all controlled apps (core.authentik_manager.blueteam_binding),
+    each beside an enabled binding that isn't a blue team one: Authentik lets everyone into an app with no enabled
+    binding, and team accounts can be on while the blue team bindings are off (a packet send turns a single-account
+    team's on before the start, and team folder accounts are recreated enabled). In team folder mode an app may also
+    have only one blue team binding of either kind, as a start and stop toggle only the one they prefer."""
     config = CompetitionConfig.get_config()
     apps = config.controlled_applications
     if not apps:
@@ -289,9 +289,9 @@ def _check_blueteam_bindings() -> CheckResult:
             toggled = blueteam_binding(bindings, kinds)
             if not toggled:
                 missing.append(slug)
-            elif team_folder():
+            else:
                 blue = [b for b in bindings if any(is_blueteam_binding(b, kind) for kind in kinds)]
-                if others := [b["pk"] for b in blue if b is not toggled]:
+                if team_folder() and (others := [b["pk"] for b in blue if b is not toggled]):
                     several.append(f"{slug} (extra {', '.join(others)})")
                 if not any(b.get("enabled") is True for b in bindings if all(b is not x for x in blue)):
                     lone.append(slug)
@@ -312,8 +312,9 @@ def _check_blueteam_bindings() -> CheckResult:
     if lone:
         return (
             "fail",
-            f"Only a blue team binding: {', '.join(lone)}. A stop disables it, and Authentik lets every user into an "
-            "app with no enabled binding; add a second binding, such as to the staff group.",
+            f"Only a blue team binding: {', '.join(lone)}. It is off until the start and after a stop, while team "
+            "accounts can be on, and Authentik lets every user into an app with no enabled binding; add a second "
+            "binding, such as to the staff group.",
             _configure_apps_link(),
         )
     return ("pass", f"Bindings exist for all {len(apps)} apps", None)
