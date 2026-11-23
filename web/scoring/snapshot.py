@@ -44,6 +44,7 @@ def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
         "score": {
             **{field: getattr(score, field) for field in (*SCORE_COMPONENT_FIELDS, "total_score")},
             "rank": score.rank,
+            **({"service_corrections": score.service_corrections} if score.service_corrections else {}),
         },
         "stats": context["stats"],
         "red_scores": [

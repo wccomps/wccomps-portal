@@ -16,7 +16,7 @@ from team.models import Team
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
 from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import INCIDENT_STAFF, IncidentReport, IncidentScreenshot
-from ..quotient_sync import get_box_metadata
+from ..quotient_sync import affected_box_labels, get_box_metadata
 
 
 @transaction.atomic
@@ -125,6 +125,7 @@ def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse
 
     context = {
         "incident": incident,
+        "affected_box_labels": affected_box_labels(incident.affected_boxes),
         "can_delete": can_delete,
     }
     return render(request, "scoring/view_incident.html", context)

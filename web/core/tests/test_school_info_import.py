@@ -448,7 +448,8 @@ def test_with_an_active_season_a_new_event_without_a_new_season_goes_in_it(clien
     Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     fields = {k: v for k, v in SEASON_FIELDS.items() if not k.startswith("new_season")}
 
-    _upload(client, **fields, current_season=str(old.pk))
+    preview = _upload(client, **fields, current_season=str(old.pk))
+    assert "For event: <strong>New: Invitational 1</strong>" in preview.content.decode()
     _confirm(client)
 
     assert Event.objects.open().season == old

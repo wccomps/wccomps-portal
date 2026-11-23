@@ -22,22 +22,22 @@
                             <strong>{{ active_packet.title }}</strong>
                             <span class="text-muted">{{ active_packet.filename }} ({{ active_packet.file_size|filesizeformat }})</span>
                             <span class="text-muted">|</span>
-                            <span>{{ active_stats.total }} teams</span>
-                            {% if active_stats.sent %}
+                            <span>{{ active_packet.total_distributions }} teams</span>
+                            {% if active_packet.sent_count %}
                                 <span class="text-muted">|</span>
-                                <span>{{ active_stats.sent }} sent</span>
+                                <span>{{ active_packet.sent_count }} sent</span>
                             {% endif %}
-                            {% if active_stats.pending and active_packet.status == "distributing" %}
+                            {% if active_packet.pending_count and active_packet.status == "distributing" %}
                                 <span class="text-muted">|</span>
-                                <span class="text-warning">{{ active_stats.pending }} pending</span>
+                                <span class="text-warning">{{ active_packet.pending_count }} pending</span>
                             {% endif %}
-                            {% if active_stats.failed > 0 %}
+                            {% if active_packet.failed_count > 0 %}
                                 <span class="text-muted">|</span>
-                                <span class="text-danger">{{ active_stats.failed }} failed</span>
+                                <span class="text-danger">{{ active_packet.failed_count }} failed</span>
                             {% endif %}
-                            {% if active_stats.downloaded %}
+                            {% if active_packet.downloaded_count %}
                                 <span class="text-muted">|</span>
-                                <span>{{ active_stats.downloaded }} downloaded</span>
+                                <span>{{ active_packet.downloaded_count }} downloaded</span>
                             {% endif %}
                         </div>
                         <div class="d-flex gap-10">
@@ -50,7 +50,7 @@
                                     Distribute
                                 </c-button>
                             {% endif %}
-                            {% if active_stats.pending > 0 and active_packet.status == "distributing" %}
+                            {% if active_packet.pending_count > 0 and active_packet.status == "distributing" %}
                                 <c-button variant="warning"
                                           @click="runStreamAction"
                                           data-action="resend_pending"
@@ -59,7 +59,7 @@
                                     Retry Pending
                                 </c-button>
                             {% endif %}
-                            {% if active_stats.failed > 0 %}
+                            {% if active_packet.failed_count > 0 %}
                                 <c-button variant="warning"
                                           @click="runStreamAction"
                                           data-action="resend_failed"

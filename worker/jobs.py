@@ -1,5 +1,5 @@
-"""The worker's periodic jobs: the competition timer, the Authentik group refresh, the Quotient sync and the expired
-session cleanup.
+"""The worker's periodic jobs: the competition timer (with the countdown and the preflight report), the Authentik group
+refresh, the Quotient sync and the expired session cleanup.
 
 None of them talks to a chat system: what they announce is queued (notify_ops, the competition service's status
 refreshes). Each loop runs a pass at once, then one each interval from the start of the last, and advances its
@@ -10,10 +10,12 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.utils import timezone
+from scoring.preflight import read_preflight_report
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.authentik_manager import AuthentikManager
@@ -29,8 +31,10 @@ from core.services.competition import (
     arun_competition,
     clear_missed_window,
     current_timer_plan,
+    due_preflight_report,
     give_up_timer_series,
     queue_due_countdown,
+    queue_preflight_report,
 )
 from core.services.ops import notify_ops
 from core.services.user_groups import (
@@ -100,6 +104,8 @@ async def check_competition_times() -> None:
                 await notify(
                     f"**Competition Countdown:** queued the {label} remaining announcement for all active teams."
                 )
+            else:
+                await _queue_preflight_report(now)
         case GiveUp() as plan:
             await _give_up(plan)
         case Attempt() as attempt:
@@ -120,6 +126,17 @@ async def _clear_missed_window() -> None:
             "**Schedule cleared:** its end passed while the competition was stopped and would have refused "
             "a new start time. Set a new schedule on the Competition setup page."
         )
+
+
+async def _queue_preflight_report(now: datetime) -> None:
+    # Quotient is read off the shared thread and outside the config lock; caught, so the heartbeat keeps beating
+    try:
+        mark = await sync_to_async(due_preflight_report)(now)
+        if mark is not None:
+            report = await run_blocking(read_preflight_report, now)
+            await sync_to_async(queue_preflight_report)(mark, report, now)
+    except Exception:
+        logger.exception("Could not queue the preflight report")
 
 
 async def _give_up(plan: GiveUp) -> None:

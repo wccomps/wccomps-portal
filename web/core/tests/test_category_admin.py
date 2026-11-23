@@ -136,6 +136,18 @@ class TestAdminCategoryCreate:
         assert cat.max_points == 200
         assert cat.user_creatable is True
 
+    def test_post_saves_a_blank_minimum_maximum_and_sort_order_as_zero(self, gold_team_user):
+        client = Client()
+        client.force_login(gold_team_user)
+        response = client.post(
+            reverse("admin_category_create"),
+            {"display_name": "Blanks", "points": "100", "sort_order": "", "min_points": "", "max_points": ""},
+        )
+
+        assert response.status_code == 302
+        cat = TicketCategory.objects.get(display_name="Blanks")
+        assert (cat.min_points, cat.max_points, cat.sort_order) == (0, 0, 0)
+
     def test_post_requires_display_name(self, gold_team_user):
         """POST without display_name shows error."""
         client = Client()
@@ -182,6 +194,16 @@ class TestAdminCategoryEdit:
         response = client.get(reverse("admin_category_edit", kwargs={"category_id": category.pk}))
         assert response.status_code == 200
         assert b"Test Category" in response.content
+
+    def test_get_ticks_the_saved_required_and_optional_fields(self, gold_team_user, category):
+        client = Client()
+        client.force_login(gold_team_user)
+        html = client.get(reverse("admin_category_edit", kwargs={"category_id": category.pk})).content.decode()
+
+        assert 'value="hostname" id="id_required_fields_0" checked' in html
+        assert 'value="ip_address" id="id_required_fields_1" checked' in html
+        assert 'value="service_name" id="id_required_fields_2" checked' not in html
+        assert 'value="service_name" id="id_optional_fields_2" checked' in html
 
     def test_post_updates_category(self, gold_team_user, category):
         """POST updates the category and redirects."""
@@ -401,3 +423,37 @@ def test_a_ticket_field_cannot_be_both_required_and_optional(gold_team_user):
     assert field_error(response.content.decode(), "id_optional_fields") == (
         "Hostname is already required; a field is either required or optional."
     )
+
+
+def test_fields_both_required_and_optional_are_named_together(gold_team_user):
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(
+        reverse("admin_category_create"),
+        {
+            "display_name": "Both",
+            "required_fields": ["hostname", "ip_address"],
+            "optional_fields": ["hostname", "ip_address"],
+        },
+    )
+
+    assert field_error(response.content.decode(), "id_optional_fields") == (
+        "Hostname, IP Address are already required; a field is either required or optional."
+    )
+
+
+def test_an_unknown_required_field_is_refused_beside_it_with_an_optional_field_picked(gold_team_user):
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(
+        reverse("admin_category_create"),
+        {"display_name": "Odd", "required_fields": ["bogus"], "optional_fields": ["hostname"]},
+    )
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert not TicketCategory.objects.filter(display_name="Odd").exists()
+    assert (
+        field_error(html, "id_required_fields") == "Select a valid choice. bogus is not one of the available choices."
+    )
+    assert field_error(html, "id_optional_fields") is None

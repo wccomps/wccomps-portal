@@ -81,7 +81,6 @@ def packets_list(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
         .first()
     )
-    active_stats: dict[str, int] = active_packet.get_distribution_stats() if active_packet else {}
 
     history_qs = Packet.objects.with_distribution_stats()
     if active_packet is not None:
@@ -98,7 +97,6 @@ def packets_list(request: HttpRequest) -> HttpResponse:
 
     context: dict[str, object] = {
         "active_packet": active_packet,
-        "active_stats": active_stats,
         "history": stable_order(history_qs, sort_by),
         "filters": filters,
         "filtered": filtered,
@@ -149,7 +147,6 @@ def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
     context = {
         "packet": packet,
         "distributions": distributions,
-        "stats": packet.get_distribution_stats(),
         "teams": teams,
     }
 

@@ -81,7 +81,7 @@ class TestLinkInitiate:
         assert f"token={token.token}" in unquote(response.url)
         assert "prompt" not in parse_qs(urlsplit(response.url).query)
 
-    def test_relink_after_unlink_forces_authentik_relogin(self, blue_team_user, blue_team):
+    def test_relink_after_unlink_redirects_to_login_without_prompt(self, blue_team_user, blue_team):
         from urllib.parse import parse_qs, urlsplit
 
         DiscordLink.objects.create(
@@ -103,7 +103,7 @@ class TestLinkInitiate:
         response = client.get(f"/auth/link?token={token.token}")
         assert response.status_code == 302
         query = parse_qs(urlsplit(response.url).query)
-        assert query.get("prompt") == ["login"]
+        assert "prompt" not in query
         assert query.get("next") == [f"/auth/link-callback?token={token.token}"]
 
     def test_valid_token_stores_in_session(self):
@@ -353,7 +353,7 @@ class TestLinkCallback:
             login_resp = client.get(init_resp.url)
         assert login_resp.status_code == 302
         auth_query = parse_qs(urlsplit(login_resp.url).query)
-        assert auth_query.get("prompt") == ["login"]
+        assert "prompt" not in auth_query
         state = auth_query["state"][0]
 
         mock_token_response = MagicMock()

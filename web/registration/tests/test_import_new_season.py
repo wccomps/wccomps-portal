@@ -121,3 +121,22 @@ def test_the_active_seasons_own_year_says_to_leave_the_new_season_empty():
     problem = new_event_problem(new_event("Inv", date(2026, 10, 3), "invitational", NewSeason("2026-27", 2026)))
 
     assert problem == "2026 is the year of the active season, 2026: leave the new season empty to put the event in it."
+
+
+def test_an_inactive_seasons_year_says_to_pick_another_year_or_activate_it():
+    Season.objects.create(name="Old", year=2026)
+
+    problem = new_event_problem(_in_new_season())
+
+    assert problem == "The Old season already has the year 2026. Pick another year, or activate that season."
+
+
+def test_a_name_used_by_an_event_of_another_season_is_free_in_the_active_one():
+    old = Season.objects.create(name="2025", year=2025)
+    Event.objects.create(season=old, name="Invitational 1", event_type="invitational", date=date(2025, 10, 4))
+    active = Season.objects.create(name="2026", year=2026, is_active=True)
+    Team.objects.create(team_number=1, team_name="Team 01")
+
+    import_school_list(new_event("Invitational 1", date(2026, 10, 3), "invitational"), ROWS, "gold")
+
+    assert Event.objects.open().season == active
