@@ -127,6 +127,10 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
     return raw
 
 
+def _template() -> ScoringTemplate:
+    return ScoringTemplate.objects.first() or ScoringTemplate()
+
+
 @dataclass
 class Standing:
     """A team's current score, computed from the scoring inputs on every read."""
@@ -212,11 +216,12 @@ def compute_standings() -> list[Standing]:
     teams = list(Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number"))
     raw = _raw_scores(teams)
     credits = current_credits([team.pk for team in teams])
-    template = ScoringTemplate.objects.first() or ScoringTemplate()
+    template = _template()
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
 
     standings = [
-        _standing(team, raw[team.pk], template, team.pk in excluded_team_ids, credits.get(team.pk, [])) for team in teams
+        _standing(team, raw[team.pk], template, team.pk in excluded_team_ids, credits.get(team.pk, []))
+        for team in teams
     ]
     standings.sort(key=lambda standing: standing.total_score, reverse=True)
 
