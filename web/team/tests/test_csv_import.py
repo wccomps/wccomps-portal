@@ -285,6 +285,68 @@ Example U,captain@example.edu,coach@example.edu
         assert result["rows"][0]["contact_email"] == "captain@example.edu"
         assert result["warnings"] == ["Unknown columns will be ignored: Contact Email"]
 
+    @pytest.mark.parametrize("header", ["Contact Email", "Contact_Email", " contact email ", "contact_email"])
+    def test_identical_headers_share_one_mapping_and_use_the_last_cell(self, header: str) -> None:
+        content = f"school_name,{header},{header},Team No\nExample U,first@example.edu,last@example.edu,7\n"
+
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content.encode()))
+
+        assert result["errors"] == []
+        assert result["rows"][0]["contact_email"] == "last@example.edu"
+        detections = ["Team No as team_no"]
+        if header != "contact_email":
+            detections.insert(0, f"{header} as contact_email")
+        assert result["warnings"] == [
+            "Columns auto-detected: " + ", ".join(detections),
+            "Unknown columns will be ignored: team_no",
+        ]
+
+    @pytest.mark.parametrize(
+        ("headers", "cells", "detected", "ignored"),
+        [
+            ("Contact Email,CONTACT_EMAIL,Contact Email", "first,ignored,last", "Contact Email", "CONTACT_EMAIL"),
+            ("Contact Email,contact_email,Contact Email", "ignored,last,ignored", None, "Contact Email"),
+        ],
+    )
+    def test_exact_then_first_distinct_spelling_wins_over_equivalent_aliases(
+        self, headers: str, cells: str, detected: str | None, ignored: str
+    ) -> None:
+        emails = ",".join(f"{cell}@example.edu" for cell in cells.split(","))
+        content = f"school_name,{headers},notes\nExample U,{emails},Example note\n"
+
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content.encode()))
+
+        assert result["errors"] == []
+        assert result["rows"][0]["contact_email"] == "last@example.edu"
+        warnings = [f"Columns auto-detected: {detected} as contact_email"] if detected else []
+        assert result["warnings"] == [*warnings, f"Unknown columns will be ignored: {ignored}"]
+
+    def test_identical_inferred_headings_count_once(self) -> None:
+        content = (
+            b"School,Email,Email,School,Coach Email\n"
+            b"First School,first@example.edu,last@example.edu,Last School,coach@example.edu\n"
+        )
+
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content))
+
+        assert result["errors"] == []
+        assert result["rows"] == [
+            {
+                "school_name": "Last School",
+                "contact_email": "last@example.edu",
+                "secondary_email": "coach@example.edu",
+                "notes": "",
+            }
+        ]
+
+    def test_a_missing_later_identical_alias_cell_does_not_use_the_earlier_cell(self) -> None:
+        content = b"school_name,Contact Email,Contact Email\nExample U,earlier@example.edu\n"
+
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content))
+
+        assert result["rows"] == []
+        assert result["errors"] == ["Row 2: contact_email: This field is required."]
+
 
 class TestCSVValidation:
     """Test CSV data validation against database."""

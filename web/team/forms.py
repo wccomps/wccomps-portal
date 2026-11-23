@@ -59,10 +59,10 @@ def school_info_csv_response(records: Iterable[SchoolInfo]) -> HttpResponse:
 def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
     """Map each header to the column name the parser reads it as.
 
-    A header naming a canonical column in any case or spacing reads as that column, unless a header spelled exactly
-    that way or an earlier one already does; it then keeps its own name, which the parser ignores as unknown. Maps
-    other email columns (contain 'email'), in order, to whichever of contact_email and secondary_email is still free;
-    any beyond those are ignored. Assigns the remaining unmapped column as school_name.
+    Match canonical names after stripping edge whitespace, lowercasing, and replacing each literal space with an
+    underscore. Exact names win; otherwise the first distinct spelling claims the name. Repeated identical headers
+    share one mapping; the CSV reader supplies the last cell, even if missing. Other headers containing 'email' take
+    the remaining email slots in order. A lone unmatched, non-team heading can supply school_name.
     """
     canonical = set(SCHOOL_COLUMNS)
     normalized = {f: f.strip().lower().replace(" ", "_") for f in fieldnames}
@@ -73,8 +73,8 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
     skipped: list[str] = []
     # Email slots no column's normalized name already takes
     email_columns = iter(c for c in ("contact_email", "secondary_email") if c not in normalized.values())
-    for raw in fieldnames:
-        norm, name = raw.strip().lower(), normalized[raw]
+    for raw, name in normalized.items():
+        norm = raw.strip().lower()
         if name in canonical:
             mapping[raw] = raw if name in claimed else name
             claimed.add(name)
