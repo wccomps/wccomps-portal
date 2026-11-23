@@ -106,6 +106,9 @@ flowchart LR
     Z -- "12 event queue long poll" --> C
     C -- "13 API key: posts, upload fetches" --> Z
     O[Operator] -- "14 runs the archive script" --> H
+    O -- "15 deployment shell, independently approved ruling" --> J[Service correction command]
+    J -- "15 service login, read export and uptimes" --> S
+    J -- "15 check portal baseline, write ruling and audit" --> Q
 ```
 
 The worker (`worker/__main__.py`) runs the competition timer (which also reads Quotient's admin-only engine status
@@ -185,6 +188,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 | 13 | Chat to Zulip | I: the API key sent in clear | The client refuses a `ZULIP_SITE` that isn't https, and fetches uploads only from that site (`chat/zulip/client.py` `ZulipClient`, `ZulipClient.fetch_upload`) |
 | 13 | Chat to Zulip | I: one team's broadcasts reach another team | A broadcast to teams goes to each team's own `ZULIP_TEAM_BROADCAST_STREAM` (by default its ticket stream); the settings refuse to load a pattern that gives two teams from 1 to `MAX_TEAMS` one stream, or a team another team's `ZULIP_TEAM_STREAM` (`web/portal/settings.py` `ZULIP_TEAM_BROADCAST_STREAM`; `chat/zulip/naming.py` `team_broadcast_stream`). Who may read each stream is the realm's to set |
 | 14 | Operator on the scoring host | I, T: a local user reads the archived team uploads and runner addresses, slips a host file into an archive through a symlink or hard link in `submissions/` (including a file swapped for a symlink while the archive runs), or replaces an archive | The operator runs the script with docker access (as good as root on that host). It walks `submissions/` by directory descriptor and opens each file through its parent's descriptor without following a symlink, stores only regular files and takes each one's size, contents and SHA-256 from that one open file, lists the symlinks it finds while listing each directory instead of following them (a directory swapped for a symlink after its listing is skipped, unlisted), and names every member by its path relative to `submissions/` (`web/quotient/archive_scoring_host.py` `_add_submissions`, `_add`); a hard link is a regular file, so keeping a hard link to a file its writer can't read out of `submissions/` rests on the kernel's `fs.protected_hardlinks=1` (Debian's default), which the script doesn't check; it writes the tarball and its `.sha256` mode 0600 and names them by hard link, which never replaces a file (`_name_without_replacing`); `verify` reads a copy's members without extracting them (`verify`). Who else can reach the archive directory is the operator's to set |
+| 15 | Deployment shell to Quotient and Postgres | T, R: apply a different mode or manifest from the ruling, or change scores without a trace | The operator supplies the independently approved manifest digest. The command uses the Quotient service credential, not a user credential; it verifies the event, complete cohort and imported baseline. A full-void receipt binds its mode and ruling to the manifest and baseline. Apply records the mode and audits the actor and both digests (`web/scoring/management/commands/service_correction.py` `Command.handle`, `Command._checked_teams`, `Command._apply`). |
 | all | Logs and errors | I: tokens or OAuth codes in logs | The access log drops query strings and referers (`web/gunicorn.conf.py` `access_log_format`); httpx URL logging is off (`web/core/tests/test_httpx_logging.py`); error answers come from `web/core/errors.py`: a fixed message for 404, 405 and 500, and only the view's own stated reason for 400 and 403 |
 | all | Logs and errors | T: request text forges a log line or an alert | Request text is escaped where the app logs it (`web/core/middleware.py` `_field`; `web/core/log_safety.py`), the console formatter keeps every message on one line, gunicorn escapes its access and error lines (`web/gunicorn.conf.py` `EscapingLogger`), and the Discord alert shows request text in code spans (`web/core/discord_logging.py` `_code`); property tests cover each line (`web/core/tests/test_properties_log_lines.py`) |
 | all | Secrets | S: forged sessions | The web server, the worker and the chat process refuse to start without a fixed `DJANGO_SECRET_KEY` of at least 50 characters and 5 distinct ones, the `.env.example` placeholder counting as none (`web/portal/required.py` `secret_key_problem`); the session cookie is HttpOnly and SameSite=Lax, and outside `DEBUG` the session and CSRF cookies are Secure with HSTS (`web/portal/settings.py` `SESSION_COOKIE_HTTPONLY`, `SESSION_COOKIE_SAMESITE`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`) |
@@ -221,6 +225,10 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
   (`web/scoring/management/commands/service_correction.py`). Apply and revoke audit the operator and manifest
   digest; apply also records the baseline digest and full-void mode. Scorecards and exports carry the credits,
   never the manifest, Quotient IDs, or per-team baseline.
+  Approved full-void offsets apply before live scaling; legacy batches keep their recorded multiplier. During
+  rollout or rollback, only a scorer that understands full-void mode may finalize an event with an active full
+  void: an older scorer can freeze incorrect results and exports (`web/scoring/calculator.py` `_breakdown`;
+  `web/registration/services.py` `_freeze_results`).
 - **The proxy's client address is trusted only when configured.** A deployment behind Cloudflare, or behind a proxy
   that overwrites `CF-Connecting-IP` with the client address and is the origin's only way in, sets
   `TRUST_CF_CONNECTING_IP=true`; the self-hosting `docker-compose.yml` leaves it off, so its limits key on the
@@ -284,7 +292,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 The repository maintainers own this file. Update it in the same pull request when a change:
 
 - adds or changes an entry point: a URL, a bot command, component or listener, a QueuedTask payload, an inbound
-  callback;
+  callback, or deployment-shell command; or changes how approved scoring rulings are interpreted;
 - adds a role, changes `PERMISSION_MAP`, or changes who may reach a service-token action;
 - adds an outside service, credential or secret, or changes where one is stored, logged or shown;
 - changes how files, uploads or user text are stored or rendered;

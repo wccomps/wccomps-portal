@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
@@ -19,7 +20,7 @@ from .models import (
     ScoringTemplate,
     ServiceScore,
 )
-from .service_corrections import CreditLine, current_credits
+from .service_corrections import ServiceCorrectionLine, current_corrections
 
 
 class ScoreBreakdown(TypedDict):
@@ -111,10 +112,9 @@ class _RawScores(TypedDict):
     recovery: Decimal
 
 
-def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
+def _raw_scores(team_ids: list[int]) -> dict[int, _RawScores]:
     """Unscaled inputs per team: synced service scores plus approved submissions."""
     zero = Decimal("0")
-    team_ids = [team.pk for team in teams]
     raw: dict[int, _RawScores] = {
         team_id: {
             "service": zero,
@@ -156,19 +156,19 @@ def _breakdown(
     raw: _RawScores,
     template: ScoringTemplate,
     modifiers: tuple[Decimal, Decimal, Decimal],
-    credits: list[CreditLine],
+    correction: ServiceCorrectionLine | None,
 ) -> DetailedScoreBreakdown:
     service_mod, inject_mod, orange_mod = modifiers
     service = raw["service"]
     sla = raw["sla"]
-    pinned_service = Decimal(0)
-    for line in credits:
-        sla += line["sla_credit"]
-        if line["full_void"]:
-            service += line["service_credit"]
+    if correction is None:
+        scaled_service = service * service_mod
+    else:
+        sla += correction.sla_credit
+        if correction.full_void:
+            scaled_service = (service + correction.service_delta) * service_mod
         else:
-            pinned_service += line["service_credit"] * line["service_modifier"]
-    scaled_service = service * service_mod + pinned_service
+            scaled_service = service * service_mod + correction.service_delta * correction.service_modifier
     scaled_inject = raw["inject"] * inject_mod
     scaled_orange = raw["orange"] * orange_mod
 
@@ -202,20 +202,20 @@ def _template() -> ScoringTemplate:
     return ScoringTemplate.objects.first() or ScoringTemplate()
 
 
-def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
-    """A team's score with its raw scores, modifiers and weights.
-
-    Formula:
-        total = ((raw service + raw full-void offsets) × service_modifier) + pinned credits
-              + (inject × inject_modifier)
-              + (orange × orange_modifier)
-              + sla_violations + SLA credits + point_adjustments
-              + red_deductions + incident_recovery
-    """
+def _team_breakdowns(team_ids: list[int]) -> Iterator[tuple[DetailedScoreBreakdown, ServiceCorrectionLine | None]]:
+    raw = _raw_scores(team_ids)
     template = _template()
     modifiers = _get_modifiers(template)
-    credits = current_credits([team.pk], modifiers[0])
-    return _breakdown(_raw_scores([team])[team.pk], template, modifiers, credits.get(team.pk, []))
+    corrections = current_corrections(team_ids)
+    for team_id in team_ids:
+        correction = corrections.get(team_id)
+        yield _breakdown(raw[team_id], template, modifiers, correction), correction
+
+
+def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
+    """Full-void offsets apply before scaling; ordinary service deltas use their application-time multiplier."""
+    breakdown, _ = next(_team_breakdowns([team.pk]))
+    return breakdown
 
 
 @dataclass
@@ -234,7 +234,7 @@ class Standing:
     is_excluded: bool
     rank: int | None = None
     scaling: dict[str, Decimal] = field(default_factory=dict)
-    service_corrections: list[CreditLine] = field(default_factory=list)
+    service_correction: ServiceCorrectionLine | None = None
 
     @property
     def has_scoring_activity(self) -> bool:
@@ -258,21 +258,16 @@ def compute_standings() -> list[Standing]:
     Teams with scoring activity that are not excluded are ranked 1..n; the rest have rank None.
     """
     teams = list(Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number"))
-    raw = _raw_scores(teams)
-    template = _template()
-    modifiers = _get_modifiers(template)
-    credits = current_credits([team.pk for team in teams], modifiers[0])
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
 
     standings = []
-    for team in teams:
-        lines = credits.get(team.pk, [])
-        breakdown = _breakdown(raw[team.pk], template, modifiers, lines)
+    breakdowns = _team_breakdowns([team.pk for team in teams])
+    for team, (breakdown, correction) in zip(teams, breakdowns, strict=True):
         standings.append(
             Standing(
                 team=team,
                 is_excluded=team.pk in excluded_team_ids,
-                service_corrections=lines,
+                service_correction=correction,
                 total_score=breakdown["total_score"],
                 scaling={key: breakdown[key] for key in SCALING_FIELDS},  # type: ignore[literal-required]
                 **{field: breakdown[field] for field in SCORE_COMPONENT_FIELDS},  # type: ignore[literal-required]

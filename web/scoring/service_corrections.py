@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TypedDict
 
 from django.db import transaction
 from quotient.client import TeamServiceExport, TeamUptime
@@ -24,44 +23,32 @@ class Credit:
     sla_credit: int
 
 
-class CreditLine(TypedDict):
+@dataclass(frozen=True)
+class ServiceCorrectionLine:
     service_name: str
     ruling: str
-    service_credit: int
+    service_delta: int
     sla_credit: int
     service_modifier: Decimal
     full_void: bool
 
 
-def current_credits(team_ids: list[int], live_service_modifier: Decimal) -> dict[int, list[CreditLine]]:
-    credits: dict[int, list[CreditLine]] = {}
-    rows = (
-        ServiceCorrection.objects.filter(
-            batch__event__is_active=True, batch__revoked_at__isnull=True, team_id__in=team_ids
-        )
-        .order_by("batch__service_name", "batch__ruling")
-        .values_list(
-            "team_id",
-            "batch__service_name",
-            "batch__ruling",
-            "service_credit",
-            "sla_credit",
-            "batch__service_modifier",
-            "batch__full_void",
-        )
+def current_corrections(team_ids: list[int]) -> dict[int, ServiceCorrectionLine]:
+    rows = ServiceCorrection.objects.filter(
+        batch__event__is_active=True, batch__revoked_at__isnull=True, team_id__in=team_ids
+    ).values_list(
+        "team_id",
+        "batch__service_name",
+        "batch__ruling",
+        "service_credit",
+        "sla_credit",
+        "batch__service_modifier",
+        "batch__full_void",
     )
-    for team_id, service, ruling, service_credit, sla_credit, modifier, full_void in rows:
-        credits.setdefault(team_id, []).append(
-            CreditLine(
-                service_name=service,
-                ruling=ruling,
-                service_credit=service_credit,
-                sla_credit=sla_credit,
-                service_modifier=live_service_modifier if full_void else Decimal(modifier),
-                full_void=full_void,
-            )
-        )
-    return credits
+    return {
+        team_id: ServiceCorrectionLine(service, ruling, service_delta, sla_credit, Decimal(modifier), full_void)
+        for team_id, service, ruling, service_delta, sla_credit, modifier, full_void in rows
+    }
 
 
 def parse_manifest(data: bytes, approved_sha256: str) -> list[Credit]:

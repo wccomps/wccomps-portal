@@ -1,10 +1,12 @@
+import hashlib
+import json
 from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.core.validators import validate_slug
-from django.db import connection, transaction
+from django.db import OperationalError, connection, transaction
 from django.utils import timezone
 from portal.required import plain_http_settings
 from quotient.client import QuotientClient
@@ -26,6 +28,16 @@ from scoring.service_corrections import (
     source_digest,
     source_rows,
 )
+
+
+def _verified_baseline(
+    event: int, service: str, ruling: str, manifest_sha: str, source_sha: str, *, full_void: bool
+) -> str:
+    if not full_void:
+        return source_sha
+    # Preserve the ordinary receipt; a full void requires verification of this specific ruling and manifest.
+    approval = json.dumps(["full-void-v1", event, service, ruling, manifest_sha, source_sha], separators=(",", ":"))
+    return hashlib.sha256(approval.encode()).hexdigest()
 
 
 class Command(BaseCommand):
@@ -102,31 +114,37 @@ class Command(BaseCommand):
             ):
                 raise ValueError("A full void must remove all service points and restore all service SLA deductions.")
             source_sha = source_digest(sources)
-            if operation == "apply" and baseline_sha256 != source_sha:
-                raise ValueError("Quotient baseline does not match the verified SHA256.")
+            verified_sha = _verified_baseline(event, service, ruling, manifest_sha256, source_sha, full_void=full_void)
+            if operation == "apply" and baseline_sha256 != verified_sha:
+                raise ValueError("Quotient baseline or correction mode does not match the verified SHA256.")
             if operation == "verify":
                 with transaction.atomic():
                     with connection.cursor() as cursor:
                         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                     self._checked_teams(event, service, sources)
-                self.stdout.write(self._receipt("verified", credits, manifest_sha256, source_sha, full_void=full_void))
-                return
-            self.stdout.write(
-                self._apply(
-                    event,
-                    service,
-                    ruling,
-                    manifest_sha256,
-                    actor,
-                    credits,
-                    sources,
-                    source_sha,
-                    expect_composite,
-                    require_unchanged_ranks,
-                    expect_service_max,
-                    full_void=full_void,
+                self.stdout.write(
+                    self._receipt("verified", credits, manifest_sha256, verified_sha, full_void=full_void)
                 )
+                return
+            status = self._apply(
+                event,
+                service,
+                ruling,
+                manifest_sha256,
+                actor,
+                credits,
+                sources,
+                source_sha,
+                expect_composite,
+                require_unchanged_ranks,
+                expect_service_max,
+                full_void=full_void,
             )
+            self.stdout.write(self._receipt(status, credits, manifest_sha256, verified_sha, full_void=full_void))
+        except OperationalError as exc:
+            if getattr(exc.__cause__, "pgcode", None) == "55P03":
+                raise CommandError("Scoring configuration is being changed. Apply again when it finishes.") from exc
+            raise
         except (OSError, ValueError, ValidationError) as exc:
             raise CommandError(str(exc)) from exc
 
@@ -143,12 +161,12 @@ class Command(BaseCommand):
         return teams
 
     @staticmethod
-    def _receipt(status: str, credits: list[Credit], manifest_sha: str, source_sha: str, *, full_void: bool) -> str:
+    def _receipt(status: str, credits: list[Credit], manifest_sha: str, verified_sha: str, *, full_void: bool) -> str:
         return (
             f"{status}: teams={len(credits)} raw_service={sum(c.service_credit for c in credits)} "
             f"sla_credit={sum(c.sla_credit for c in credits)} "
             f"full_void={str(full_void).lower()} "
-            f"manifest_sha256={manifest_sha} baseline_sha256={source_sha}"
+            f"manifest_sha256={manifest_sha} baseline_sha256={verified_sha}"
         )
 
     def _apply(  # noqa: PLR0913
@@ -172,6 +190,8 @@ class Command(BaseCommand):
                 raise ValueError("A competition transition is in progress.")
             with connection.cursor() as cursor:
                 cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                # Lock every scaling input before the snapshot, including a first template or rubric insert.
+                cursor.execute("LOCK TABLE scoring_template, orange_check, orange_check_criterion IN SHARE MODE NOWAIT")
             CompetitionConfig.locked()
             teams = self._checked_teams(event_id, service, sources)
             if expect_service_max is not None and _template().service_max != expect_service_max:
@@ -194,9 +214,7 @@ class Command(BaseCommand):
                 composite, moves = Decimal(receipt["composite"]), receipt["rank_changes"]
                 if composite != expect_composite or (unchanged_ranks and moves):
                     raise ValueError("Application expectations do not match the recorded batch outcome.")
-                return self._receipt(
-                    f"already applied batch={batch.pk}", credits, manifest_sha, source_sha, full_void=full_void
-                )
+                return f"already applied batch={batch.pk}"
             if batches.filter(revoked_at__isnull=True).exists():
                 raise ValueError("An active service correction already exists for this event.")
             before = {s.team.pk: s for s in compute_standings()}
@@ -247,8 +265,7 @@ class Command(BaseCommand):
                     "rank_changes": moves,
                 },
             )
-            status = f"applied batch={batch.pk} event={event_id} composite={composite} rank_changes={moves}"
-            return self._receipt(status, credits, manifest_sha, source_sha, full_void=full_void)
+            return f"applied batch={batch.pk} event={event_id} composite={composite} rank_changes={moves}"
 
     @staticmethod
     def _revoke(event_id: int, service: str, ruling: str, manifest_sha: str, actor: str) -> str:

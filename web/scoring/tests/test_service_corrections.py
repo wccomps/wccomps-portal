@@ -8,11 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 from zipfile import ZipFile
 
+import psycopg2
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.template.loader import render_to_string
 from django.utils import timezone
 from quotient.client import TeamUptime, _service_export
 from registration.services import close_out_event, close_out_problem, set_team_school
@@ -23,7 +25,7 @@ from core.services.competition import run_competition
 from scoring.calculator import calculate_team_score_detailed, compute_standings
 from scoring.models import ScoringTemplate, ServiceCorrection, ServiceCorrectionBatch, ServiceDetail
 from scoring.quotient_sync import sync_service_scores
-from scoring.service_corrections import MANIFEST_HEADER
+from scoring.service_corrections import MANIFEST_HEADER, ServiceCorrectionLine, source_digest, source_rows
 from scoring.snapshot import context_from_snapshot
 from team.models import Team
 
@@ -37,7 +39,7 @@ def correction(current_event, tmp_path, request):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     team, _ = Team.objects.update_or_create(team_number=7, defaults={"team_name": "Team 07", "is_active": True})
     set_team_school(team, "Example University", contact_email="coach@example.edu")
-    service_points, manifest_row = getattr(request, "param", (100, b"742,4,5,9\n"))
+    service_points, manifest_row, full_void = getattr(request, "param", (100, b"742,4,5,9\n", False))
     exports = _service_export(
         [
             {
@@ -74,9 +76,14 @@ def correction(current_event, tmp_path, request):
             hashlib.sha256(content).hexdigest(),
         ]
         supplied = [*common, "--manifest", str(manifest)]
+        if full_void:
+            supplied.append("--full-void")
         output = StringIO()
         call_command("service_correction", "verify", *supplied, stdout=output)
-        baseline = output.getvalue().strip().rsplit("=", 1)[-1]
+        receipt = dict(part.split("=", 1) for part in output.getvalue().split()[1:])
+        assert receipt["full_void"] == str(full_void).lower()
+        baseline = receipt["baseline_sha256"]
+        assert (baseline != source_digest(source_rows(SERVICE, exports, uptimes))) == full_void
         apply = [*supplied, "--baseline-sha256", baseline, "--actor", "operator"]
         yield team, current_event, common, apply, importer.return_value, exports
 
@@ -168,37 +175,39 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
     close_out_event(event, "operator")
     result = event.results.get(team_number=team.team_number)
     assert result.total_score == Decimal(104)
-    frozen = context_from_snapshot(result.scorecard)
-    assert frozen["score"]["service_corrections"] == [
+    assert result.scorecard["score"]["service_corrections"] == [
         {
             "service_name": SERVICE,
             "ruling": RULING,
             "service_credit": 4,
             "sla_credit": 5,
-            "service_modifier": Decimal(1),
-            "full_void": False,
+            "service_modifier": {"$d": "1.0"},
         },
     ]
+    frozen = context_from_snapshot(result.scorecard)
+    assert frozen["score"]["service_correction"] == ServiceCorrectionLine(SERVICE, RULING, 4, 5, Decimal(1), False)
+    rendered = render_to_string("scoring/_service_correction_lines.html", frozen)
+    assert RULING in rendered
+    assert "1.00" in rendered
+    assert "full void," not in rendered
     service_detail = frozen["stats"]["service_stats"][0]
     assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)
     with ZipFile(BytesIO(event.archive.data)) as archive:
         rows = csv.DictReader(StringIO(archive.read("final_scores.csv").decode()))
         row = next(row for row in rows if int(row["Team Number"]) == team.team_number)
         assert (row["Raw Service Credit"], row["SLA Credit"]) == ("4", "5")
-    assert not next(s for s in compute_standings() if s.team.pk == team.pk).service_corrections
+    assert next(s for s in compute_standings() if s.team.pk == team.pk).service_correction is None
 
 
-@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n")], indirect=True)
+@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n", True)], indirect=True)
 def test_full_void_preserves_import_and_can_be_revoked(correction):
     team, event, common, apply, _, _ = correction
     ScoringTemplate.objects.create(service_max=3388)
-    args = [*apply, "--full-void", "--expect-composite", "-95"]
+    args = [*apply, "--expect-composite", "-95"]
     with pytest.raises(CommandError, match="expected denominator"):
         call_command("service_correction", "apply", *args, "--expect-service-max", "3389")
     assert not ServiceCorrectionBatch.objects.exists()
     call_command("service_correction", "apply", *args, "--expect-service-max", "3388")
-    with pytest.raises(CommandError, match="conflicting or revoked batch"):
-        call_command("service_correction", "apply", *apply, "--expect-composite", "-95")
     adjusted = next(s for s in compute_standings() if s.team.pk == team.pk)
     assert adjusted.service_points == adjusted.sla_penalties == adjusted.total_score == 0
     assert ScoringTemplate.objects.get().service_max == 3388
@@ -218,21 +227,17 @@ def test_full_void_rejects_credit_that_does_not_zero_both_source_components(corr
 
 
 @pytest.mark.parametrize(
-    ("correction", "delta", "composite", "full_void"),
+    ("correction", "delta", "composite"),
     [
-        pytest.param((-10, b"742,0,5,5\n"), 0, "5", False, id="sla-only"),
-        pytest.param((-10, b"742,4,5,9\n"), 4, "9", False, id="small-credit"),
-        pytest.param((-10, b"742,10,5,15\n"), 10, "15", True, id="full-void"),
+        pytest.param((-10, b"742,0,5,5\n", False), 0, "5", id="sla-only"),
+        pytest.param((-10, b"742,4,5,9\n", False), 4, "9", id="small-credit"),
+        pytest.param((-10, b"742,10,5,15\n", True), 10, "15", id="full-void"),
     ],
     indirect=["correction"],
 )
-def test_correction_accepts_zero_and_positive_deltas_on_negative_earned_points(correction, delta, composite, full_void):
+def test_correction_accepts_zero_and_positive_deltas_on_negative_earned_points(correction, delta, composite):
     team, _, _, apply, _, _ = correction
-    mode = ["--full-void"] if full_void else []
-    output = StringIO()
-    call_command("service_correction", "verify", *apply[: apply.index("--baseline-sha256")], *mode, stdout=output)
-    assert f"full_void={str(full_void).lower()}" in output.getvalue()
-    call_command("service_correction", "apply", *apply, *mode, "--expect-composite", composite)
+    call_command("service_correction", "apply", *apply, "--expect-composite", composite)
     score = next(s for s in compute_standings() if s.team.pk == team.pk)
     assert score.service_points == -10 + delta
     assert score.sla_penalties == 0
@@ -250,11 +255,11 @@ def test_correction_still_rejects_debits_over_earned_points(correction):
     assert not ServiceCorrectionBatch.objects.exists()
 
 
-@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n")], indirect=True)
+@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n", True)], indirect=True)
 def test_full_void_stays_zero_after_sync_and_weight_changes_in_final_scores(correction):
     team, event, _, apply, importer, exports = correction
     template = ScoringTemplate.objects.create(service_max=400, inject_max=800)
-    args = [*apply, "--full-void", "--expect-composite", "-195"]
+    args = [*apply, "--expect-composite", "-195"]
     call_command("service_correction", "apply", *args)
 
     other_team, _ = Team.objects.update_or_create(team_number=8, defaults={"team_name": "Team 08", "is_active": True})
@@ -299,16 +304,12 @@ def test_full_void_stays_zero_after_sync_and_weight_changes_in_final_scores(corr
     result = event.results.get(team_number=team.team_number)
     assert result.total_score == 0
     frozen = context_from_snapshot(result.scorecard)
-    assert frozen["score"]["service_corrections"] == [
-        {
-            "service_name": SERVICE,
-            "ruling": RULING,
-            "service_credit": -100,
-            "sla_credit": 5,
-            "service_modifier": Decimal(4),
-            "full_void": True,
-        },
-    ]
+    assert frozen["score"]["service_correction"] == ServiceCorrectionLine(SERVICE, RULING, -100, 5, Decimal(2), True)
+    assert frozen["scaling"]["service_modifier"] == Decimal(4)
+    rendered = render_to_string("scoring/_service_correction_lines.html", frozen)
+    assert "full void," in rendered
+    assert "4.00" in rendered
+    assert "2.00" not in rendered
     service_detail = frozen["stats"]["service_stats"][0]
     assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)
     with ZipFile(BytesIO(event.archive.data)) as archive:
@@ -350,3 +351,41 @@ def test_full_void_migration_preserves_legacy_exact_offsets_as_pinned(correction
         assert score.sla_penalties == 0
     finally:
         MigrationExecutor(connection).migrate(latest)
+
+
+@pytest.mark.parametrize(
+    "correction",
+    [
+        pytest.param((100, b"742,-100,5,-95\n", False), id="verified-ordinary"),
+        pytest.param((100, b"742,-100,5,-95\n", True), id="verified-full-void"),
+    ],
+    indirect=True,
+)
+def test_apply_rejects_verification_in_the_other_mode(correction):
+    _, _, _, apply, _, _ = correction
+    toggled = [arg for arg in apply if arg != "--full-void"] if "--full-void" in apply else [*apply, "--full-void"]
+    with pytest.raises(CommandError, match="correction mode does not match the verified SHA256"):
+        call_command("service_correction", "apply", *toggled, "--expect-composite", "-95")
+    assert not ServiceCorrectionBatch.objects.exists()
+
+
+@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n", True)], indirect=True)
+def test_apply_refuses_a_concurrent_scaling_change(correction):
+    _, _, _, apply, _, _ = correction
+    ScoringTemplate.objects.create(service_max=400, inject_max=800)
+    db = connection.settings_dict
+    writer = psycopg2.connect(
+        host=db["HOST"], port=db["PORT"], user=db["USER"], password=db["PASSWORD"], dbname=db["NAME"]
+    )
+    try:
+        with writer, writer.cursor() as cursor:
+            cursor.execute("UPDATE scoring_template SET service_weight = 60, inject_weight = 20")
+            with pytest.raises(CommandError, match="Scoring configuration is being changed"):
+                call_command("service_correction", "apply", *apply, "--expect-composite", "-195")
+            assert not ServiceCorrectionBatch.objects.exists()
+            assert not AuditLog.objects.filter(action="service_correction_applied").exists()
+    finally:
+        writer.close()
+    with pytest.raises(CommandError, match="Expected score or rank check failed"):
+        call_command("service_correction", "apply", *apply, "--expect-composite", "-195")
+    call_command("service_correction", "apply", *apply, "--expect-composite", "-595")

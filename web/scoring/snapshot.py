@@ -11,6 +11,7 @@ from typing import cast
 
 from .calculator import SCORE_COMPONENT_FIELDS, Standing
 from .models import OrangeTeamScore, RedTeamScore
+from .service_corrections import ServiceCorrectionLine
 
 SNAPSHOT_VERSION = 1
 _DECIMAL = "$d"
@@ -39,12 +40,28 @@ def _decode(value: object) -> object:
 def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
     """build_scorecard_context's result as JSON values, keeping only what the scorecard templates read."""
     score = cast(Standing, context["score"])
+    correction = score.service_correction
     plain = {
         "team": {"team_number": score.team.team_number},
         "score": {
             **{field: getattr(score, field) for field in (*SCORE_COMPONENT_FIELDS, "total_score")},
             "rank": score.rank,
-            **({"service_corrections": score.service_corrections} if score.service_corrections else {}),
+            **(
+                {
+                    "service_corrections": [
+                        {
+                            "service_name": correction.service_name,
+                            "ruling": correction.ruling,
+                            "service_credit": correction.service_delta,
+                            "sla_credit": correction.sla_credit,
+                            "service_modifier": correction.service_modifier,
+                            **({"full_void": True} if correction.full_void else {}),
+                        }
+                    ]
+                }
+                if correction
+                else {}
+            ),
         },
         "stats": context["stats"],
         "red_scores": [
@@ -75,4 +92,16 @@ def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
 
 def context_from_snapshot(data: dict[str, object]) -> dict[str, object]:
     """A stored snapshot back as a template context."""
-    return cast(dict[str, object], _decode(data))
+    context = cast(dict[str, object], _decode(data))
+    score = cast(dict[str, object], context["score"])
+    if lines := cast(list[dict[str, object]] | None, score.pop("service_corrections", None)):
+        line = lines[0]
+        score["service_correction"] = ServiceCorrectionLine(
+            service_name=cast(str, line["service_name"]),
+            ruling=cast(str, line["ruling"]),
+            service_delta=cast(int, line["service_credit"]),
+            sla_credit=cast(int, line["sla_credit"]),
+            service_modifier=cast(Decimal, line["service_modifier"]),
+            full_void=line.get("full_void") is True,
+        )
+    return context

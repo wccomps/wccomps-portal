@@ -1,14 +1,17 @@
-{% if score.service_corrections %}
-    <h3>Service scoring corrections</h3>
-    <ul>
-        {% for correction in score.service_corrections %}
-            <li>
-                {{ correction.service_name }} ({{ correction.ruling }}):
-                {% if correction.full_void %}full void,{% endif %}
-                {{ correction.service_credit }} raw service points at a multiplier of {{ correction.service_modifier|floatformat:2 }},
-                +{{ correction.sla_credit }} SLA points restored.
-            </li>
-        {% endfor %}
-    </ul>
-    <p>The score includes these corrections. Service Uptime Detail shows the unadjusted per-service totals.</p>
-{% endif %}
+{% with correction=score.service_correction %}
+    {% if correction %}
+        <h3>Service scoring corrections</h3>
+        <p>
+            {{ correction.service_name }} ({{ correction.ruling }}):
+            {% if correction.full_void %}full void,{% endif %}
+            {{ correction.service_delta }} raw service points at a multiplier of
+            {% if correction.full_void %}
+                {{ scaling.service_modifier|floatformat:2 }},
+            {% else %}
+                {{ correction.service_modifier|floatformat:2 }},
+            {% endif %}
+            +{{ correction.sla_credit }} SLA points restored.
+        </p>
+        <p>The score includes this correction. Service Uptime Detail shows the unadjusted per-service totals.</p>
+    {% endif %}
+{% endwith %}

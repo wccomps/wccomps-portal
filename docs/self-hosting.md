@@ -474,17 +474,22 @@ a final LF, and no BOM. Net must equal the service delta plus the SLA credit; it
 Run `manage.py service_correction verify --event EVENT --service SERVICE --ruling SLUG --manifest PATH
 --manifest-sha256 APPROVED_SHA` with the independently approved digest. It reads the live Quotient export,
 resolves each ID using the scored team's name and the event's portal team assignment, and checks the current
-portal import. Keep its baseline digest with the decision record. Run `apply` with the same arguments plus
-`--baseline-sha256 BASELINE_SHA --actor OPERATOR --expect-composite POINTS`; add `--require-unchanged-ranks`
-when the ruling calls for it. A failed score or rank check rolls back the entire application.
-Use `--full-void` on both `verify` and `apply` when the approved ruling voids a service. Verification checks that
-each team's signed delta exactly offsets its raw service points and restores the entire SLA deduction. Apply
-records that mode: the offset is applied before scaling, so the cancelled points stay cancelled if the multiplier
-changes. Use `--expect-service-max MAX` on `apply` to check the current denominator. Applying a correction
-does not itself change the denominator, imported scores, or check history.
+portal import. Keep the receipt's `baseline_sha256` with the decision record. Run `apply` with the same
+arguments plus `--baseline-sha256 BASELINE_SHA --actor OPERATOR --expect-composite POINTS`; add
+`--require-unchanged-ranks` when the ruling calls for it. A failed score or rank check rolls back the application.
+If a scoring configuration write is in progress, apply refuses without writing.
 
-One batch can be active per event. An identical application, including its mode, is a no-op. Ordinary service
-credits and debits use the multiplier recorded at application. Upgrading keeps existing batches on their
+Use `--full-void` on both `verify` and `apply` when the approved ruling voids a service. Verification checks that
+each team's signed delta exactly offsets its raw service points and restores the entire SLA deduction. Its
+`baseline_sha256` binds the full-void mode, event, service, ruling, manifest and source baseline; copy it as shown.
+Ordinary corrections keep the original baseline digest format. Apply records the mode and applies the void offset
+before scaling, so the cancelled points stay cancelled when the multiplier changes. Use `--expect-service-max MAX`
+on `apply` to check the current denominator. Applying a correction does not itself change the denominator,
+imported scores, or check history.
+
+One batch can be active per event. An identical replay leaves the batch unchanged if the current baseline and any
+denominator check still pass and the supplied score or rank expectations match the recorded outcome. Ordinary
+service credits and debits use the multiplier recorded at application. Upgrading keeps existing batches on their
 recorded multiplier: older batches and receipts did not record `--full-void`, and an exact raw offset alone
 does not identify the approved mode. Already frozen results and archives are unchanged. Use the original
 decision record to resolve historical intent; do not infer it from a signed delta.
