@@ -351,8 +351,10 @@ class QuotientClient:
         """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
         return self._fetch("/api/graphs/uptimes", _uptimes, "uptimes")
 
-    def resolve_history_team_id(self, team_number: int) -> int | None:
-        """Resolve a portal team against Quotient's current roster, never by assuming its DB ID."""
+    def resolve_history_team_id(self, team_number: int, team_group: str) -> int | None:
+        """Resolve only when the stored team group and the unique scorer roster ordinal agree."""
+        if _history_team_ordinal(team_group) != team_number:
+            return None
         roster = self._fetch("/api/teams", _history_team_roster, "the team roster")
         return roster.get(team_number) if roster is not None else None
 
@@ -460,6 +462,16 @@ def _team_service_names(data: object) -> set[str]:
         raise ValueError("Invalid team service summary.") from None
 
 
+def _history_team_ordinal(name: str) -> int | None:
+    # Quotient's OIDC fallback considers the trailing ASCII digits of every trimmed name.
+    match = re.search(r"(?<![0-9])[0-9]+$", name.strip())
+    digits = match[0].lstrip("0") if match else ""
+    if not digits or len(digits) > 10:
+        return None
+    number = int(digits)
+    return number if number < 2**32 else None
+
+
 def _history_team_roster(data: object) -> dict[int, int | None]:
     roster: dict[int, int | None] = {}
     ids: set[int] = set()
@@ -470,9 +482,8 @@ def _history_team_roster(data: object) -> dict[int, int | None]:
         if type(team_id) is not int or not 0 < team_id < 2**32 or team_id in ids or not isinstance(name, str):
             raise ValueError("The team roster has an invalid or duplicate identity.")
         ids.add(team_id)
-        match = re.fullmatch(r"team ?0*([1-9][0-9]{0,8})", name, re.IGNORECASE | re.ASCII)
-        if match:
-            number = int(match[1])
+        number = _history_team_ordinal(name)
+        if number is not None:
             roster[number] = None if number in roster else team_id
     return roster
 

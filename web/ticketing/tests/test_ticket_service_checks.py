@@ -149,7 +149,7 @@ def test_team_roster_redirect_keeps_location_out_of_logs(caplog):
         request=httpx.Request("GET", "https://quotient.test/api/teams"),
     )
     with patch.object(client, "_request", return_value=response):
-        assert client.resolve_history_team_id(1) is None
+        assert client.resolve_history_team_id(1, "Portal_BlueTeam01") is None
     assert "HTTP 302" in caplog.text
     assert secret not in caplog.text
 

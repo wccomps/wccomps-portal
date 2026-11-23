@@ -159,7 +159,7 @@ def ticket_service_checks(request: HttpRequest, ticket_number: str) -> HttpRespo
     if quotient_service:
         client = get_quotient_client()
         raw_checks = None
-        team_id = client.resolve_history_team_id(ticket.team.team_number)
+        team_id = client.resolve_history_team_id(ticket.team.team_number, ticket.team.authentik_group)
         if team_id is not None:
             raw_checks = client.get_service_checks(team_id, quotient_service)
             if raw_checks == []:

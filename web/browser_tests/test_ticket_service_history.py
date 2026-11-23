@@ -14,7 +14,10 @@ from .conftest import create_session_context
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
-@pytest.mark.parametrize("scenario", ["unique", "ambiguous", "summary unavailable", "team ambiguous", "team absent"])
+@pytest.mark.parametrize(
+    "scenario",
+    ["unique", "ambiguous", "summary unavailable", "team ambiguous", "team OIDC conflict", "team absent"],
+)
 def test_staff_history_loads_only_an_unambiguous_stored_name(
     live_server, pw_browser, ticketing_support_user, blue_team, settings, scenario
 ):
@@ -37,6 +40,8 @@ def test_staff_history_loads_only_an_unambiguous_stored_name(
         roster.append({"ID": 42, "Name": "team01"})
     if scenario == "team ambiguous":
         roster.append({"ID": 43, "Name": "Team 1"})
+    if scenario == "team OIDC conflict":
+        roster.append({"ID": 43, "Name": blue_team.authentik_group})
     answers = [Answer(200, b"{}"), Answer(200, json.dumps(roster).encode())]
     expected = ["/api/login", "/api/teams"]
     if not scenario.startswith("team"):

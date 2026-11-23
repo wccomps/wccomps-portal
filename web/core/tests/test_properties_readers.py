@@ -735,7 +735,7 @@ READERS = [
     ),
     Reader(
         "resolve_history_team_id",
-        lambda: quotient().resolve_history_team_id(1),
+        lambda: quotient().resolve_history_team_id(1, "Portal_BlueTeam01"),
         (DONE, [{"ID": 42, "Name": "team01"}]),
         lambda r: outcome(r, lambda x: x is None or type(x) is int and 0 < x < 2**32, "Quotient team ID"),
         (f"{QC}.resolve_history_team_id", f"{QC}._fetch", QJ),

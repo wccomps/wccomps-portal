@@ -310,12 +310,14 @@ Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 - Score imports take the team number from the digits in its name. Preflight still takes the Quotient ID as the
   team number, so create Quotient's teams in order for that report.
 - An inject's point value comes from its title: `(10 pts)`, `(1,000 points)`.
-- Staff ticket history resolves the ticket's portal team from Quotient's current `/api/teams` roster. Name the
-  team `team09` or `Team 9` for portal team 9. History is unavailable unless that number has a unique roster
-  entry with a valid DB ID. It first looks up the exact service name. After an empty response it retries only
-  a unique case-insensitive match across all names in the team's current history summary, and only if the
-  exact spelling is a safe URL segment. Request or parse errors show history as unavailable; a valid summary
-  without an eligible match leaves history empty.
+- Staff ticket history requires the stored Authentik team group to be configured as that team's Quotient OIDC
+  group and to end in the portal team number. The live `/api/teams` roster must contain exactly one name ending
+  in that number (after trimming whitespace), with a valid DB ID. For example, `team09` and `Portal_BlueTeam09`
+  together are ambiguous, even if Quotient OIDC would prefer the exact group name. History tries the exact
+  service name first. After an empty response it retries only a unique case-insensitive match in the current
+  history summary, and only if the stored spelling is a safe URL segment. A valid summary without an eligible
+  match leaves history empty; request and parse errors show it as unavailable. Quotient builds that cannot
+  serialize a summary before uptime is populated can temporarily show history as unavailable on case misses.
 
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
