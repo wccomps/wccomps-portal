@@ -1,6 +1,5 @@
 """Team password resets, and what unlinking a team member tells Discord."""
 
-import re
 import uuid
 from datetime import timedelta
 from types import SimpleNamespace
@@ -295,32 +294,34 @@ def test_bulk_reset_uses_one_manager(manager):
     assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
 
 
-LISTED = "(?:Apple|Zebra)"  # The test word list's words, capitalized
-
-
 @pytest.mark.parametrize(
-    ("pick", "shape"),
+    ("pick", "word_indices", "expected"),
     [
-        (lambda options: options[0], rf"100!-{LISTED}-{LISTED}"),
-        (lambda options: options[1], rf"{LISTED}-@101-{LISTED}"),
-        (lambda options: options[-1], rf"{LISTED}-{LISTED}-\+999"),
+        (0, (0, 1), "100!-Apple-Zebra"),
+        (1, (0, 1), "Apple-@101-Zebra"),
+        (-1, (1, 0), "Zebra-Apple-+999"),
+        (0, (0, 0), "100!-Apple-Apple"),
     ],
-    ids=["first", "second", "last"],
+    ids=["first", "second", "last", "repeated word"],
 )
-def test_a_generated_password_is_two_words_and_a_number_with_a_symbol(tmp_path, monkeypatch, pick, shape):
-    """Each random pick (the number from 100 to 999, the symbol, its side of the number, the number's place among the
-    words) taken as its first, second or last option; the two words come from the word list, capitalized."""
+def test_a_generated_password_uses_the_drawn_words_number_and_symbol(tmp_path, monkeypatch, pick, word_indices, expected):
     from xkcdpass import xkcd_password
 
     words = tmp_path / "words"
-    words.write_text("apple\nzebra\n")
+    words.write_text("apple\nt-shirt\nzebra\n")
     monkeypatch.setattr(xkcd_password, "locate_wordfile", lambda wordfile=None: str(words))
-    picks = SimpleNamespace(randbelow=lambda n: pick(range(n)), choice=pick)
+    draws = iter(word_indices)
+
+    def choose(options):
+        if not isinstance(options, str) and isinstance(options[0], str):
+            assert "t-shirt" not in options
+            return sorted(options)[next(draws)]
+        return options[pick]
+
+    picks = SimpleNamespace(randbelow=lambda n: range(n)[pick], choice=choose)
     monkeypatch.setattr("core.authentik_utils.secrets", picks)
 
-    password = generate_blueteam_password()
-
-    assert re.fullmatch(shape, password), password
+    assert generate_blueteam_password() == expected
 
 
 def test_each_reason_sessions_could_not_end_reads_once_with_its_teams():
@@ -338,29 +339,6 @@ def test_one_reason_shared_by_many_teams_reads_once():
 
     assert summary.count("HTTP 403") == 1
     assert len(summary) < 600
-
-
-WORD = "[A-Z][a-z]+"
-INSERT = r"(?:[1-9][0-9]{2}[!@#$%&*+]|[!@#$%&*+][1-9][0-9]{2})"
-PASSWORD = re.compile(f"{INSERT}-{WORD}-{WORD}|{WORD}-{INSERT}-{WORD}|{WORD}-{WORD}-{INSERT}")
-
-
-def test_a_generated_password_keeps_both_word_draws_and_leaves_out_hyphenated_words(tmp_path, monkeypatch):
-    from xkcdpass import xkcd_password
-
-    words = tmp_path / "words"
-    words.write_text("apple\nt-shirt\nzebra\n")
-    monkeypatch.setattr(xkcd_password, "locate_wordfile", lambda wordfile=None: str(words))
-
-    word_indices = iter((0, 1))
-
-    def choose(options):
-        index = next(word_indices, None)
-        return sorted(options)[index] if index is not None else options[0]
-
-    monkeypatch.setattr("core.authentik_utils.secrets", SimpleNamespace(randbelow=lambda n: 0, choice=choose))
-
-    assert generate_blueteam_password() == "100!-Apple-Zebra"
 
 
 def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
