@@ -310,11 +310,12 @@ Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 - Score imports take the team number from the digits in its name. Preflight still takes the Quotient ID as the
   team number, so create Quotient's teams in order for that report.
 - An inject's point value comes from its title: `(10 pts)`, `(1,000 points)`.
-- Staff ticket history requires the stored Authentik team group to be configured as that team's Quotient OIDC
-  group and to end in the portal team number. The live `/api/teams` roster must contain exactly one name ending
-  in that number (after trimming whitespace), with a valid DB ID. For example, `team09` and `Portal_BlueTeam09`
-  together are ambiguous, even if Quotient OIDC would prefer the exact group name. History tries the exact
-  service name first. After an empty response it retries only a unique case-insensitive match in the current
+- For staff ticket history, operators must configure the same Authentik team group in both systems. The portal
+  checks that the ticket team's stored group ends in the portal team number, but does not read Quotient's OIDC
+  configuration. The live `/api/teams` roster must contain exactly one name with that trailing number after
+  trimming whitespace, with a valid DB ID. For example, `team09` and `Portal_BlueTeam09` together are ambiguous
+  even if Quotient OIDC would prefer the exact group name. History tries the normalized check name with its
+  original casing first. After an empty response it retries only a unique case-insensitive match in the current
   history summary, and only if the stored spelling is a safe URL segment. A valid summary without an eligible
   match leaves history empty; request and parse errors show it as unavailable. Quotient builds that cannot
   serialize a summary before uptime is populated can temporarily show history as unavailable on case misses.
