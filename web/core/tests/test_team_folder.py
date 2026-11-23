@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterator
 from datetime import timedelta
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -29,12 +29,12 @@ from core.models import CompetitionConfig, UserGroups
 from core.services.competition import NO_FOLDER_ACCOUNT, run_competition
 from core.services.user_groups import refresh_user_groups
 from core.team_accounts import FOLDER_CACHE_SECONDS, _FolderCache, accounts_by_team, blueteam_kinds
+from core.tests.test_oauth_flow import _login, _shown, _start_sign_in
 from core.utils import drain
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
 
-REAL_CLIENT = httpx.Client  # the OAuth tests' way of faking the token exchange replaces httpx.Client
 FOLDER = "blue-users"
 
 
@@ -109,7 +109,7 @@ class FakeAuthentik:
         return httpx.Response(404, json={"detail": "Not found"})
 
     def manager(self) -> AuthentikManager:
-        client = REAL_CLIENT(transport=httpx.MockTransport(self.handle))
+        client = httpx.Client(transport=httpx.MockTransport(self.handle))
         return AuthentikManager(base_url="https://auth.test", api_token="token", client=client)
 
     def toggled(self, is_active: bool) -> list[str]:
@@ -177,6 +177,25 @@ def test_an_account_matching_no_team_in_the_folder_gets_none(team_folder, userna
     refresh_user_groups(FakeAuthentik(USERS).manager())
 
     assert _groups(f"uid-{username}") == []
+
+
+@pytest.mark.parametrize("username", ["team00a", "team51a"])
+def test_a_folder_account_named_for_a_number_past_the_teams_gets_none(team_folder, username):
+    """Team numbers run from 1 to MAX_TEAMS (50), so a folder account fully matching the pattern for 00 or 51 is on
+    no team."""
+    _stored(f"uid-{username}", ["Team-Blue-01"])
+
+    refresh_user_groups(FakeAuthentik([*USERS, _user(101, username)]).manager())
+
+    assert _groups(f"uid-{username}") == []
+
+
+def test_the_last_teams_folder_account_holds_its_group(team_folder):
+    _stored("uid-team50a", [])
+
+    refresh_user_groups(FakeAuthentik([*USERS, _user(150, "team50a")]).manager())
+
+    assert _groups("uid-team50a") == ["Team-Blue-50"]
 
 
 def test_with_the_folder_unset_the_refresh_gives_no_team_group(team_folder, settings):
@@ -383,42 +402,25 @@ def test_readiness_fails_more_than_one_blue_team_binding_in_the_folder_mode(team
     assert severity == "fail" and "vpn (extra b-2)" in detail and "remove the extra ones" in detail
 
 
-def test_a_lone_blue_team_group_binding_passes_without_the_folder(controlled_vpn):
+def test_a_lone_blue_team_group_binding_fails_without_the_folder_too(controlled_vpn):
+    """Team accounts are on from the packet send, so an app whose only binding is the closed blue team one would let
+    them in before the start."""
     with _readiness(FakeAuthentik([], [dict(GROUP_BINDING)])):
-        assert _check_blueteam_bindings()[0] == "pass"
+        severity, detail, _ = _check_blueteam_bindings()
+    assert severity == "fail" and "vpn" in detail
 
 
 # ---------------------------------------------------------------------------------------------------------------
 # Sign-in
 # ---------------------------------------------------------------------------------------------------------------
 
-OAUTH_CONFIG = {
-    "client_id": "test-client-id",
-    "client_secret": "test-secret",
-    "authorization_endpoint": "https://auth.example.com/authorize/",
-    "token_endpoint": "https://auth.example.com/token/",
-    "userinfo_endpoint": "https://auth.example.com/userinfo/",
-    "end_session_endpoint": "https://auth.example.com/end-session/",
-}
-
 
 def _sign_in(fake: FakeAuthentik, userinfo: dict[str, object], *, expect: int = 302) -> HttpResponse:
     """A full sign-in in a fresh browser, with the region's scope mapping's userinfo."""
     client = Client()
-    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-        state = parse_qs(urlparse(client.get("/auth/login/").url).query)["state"][0]
-    token = httpx.Response(
-        200, json={"access_token": "token"}, request=httpx.Request("POST", OAUTH_CONFIG["token_endpoint"])
-    )
-    info = httpx.Response(200, json=userinfo, request=httpx.Request("GET", OAUTH_CONFIG["userinfo_endpoint"]))
-    with (
-        patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-        patch("core.oauth.AuthentikManager", side_effect=lambda: fake.manager()),
-        patch("core.oauth.httpx.Client") as http,
-    ):
-        http.return_value.__enter__.return_value.post.return_value = token
-        http.return_value.__enter__.return_value.get.return_value = info
-        response = client.get("/auth/callback/?" + urlencode({"code": "code", "state": state}))
+    state = _start_sign_in(client)
+    with patch("core.oauth.AuthentikManager", side_effect=lambda: fake.manager()):
+        response = _login(client, state, userinfo)
     assert response.status_code == expect
     return response
 
@@ -454,6 +456,17 @@ def test_an_account_outside_the_folder_signs_in_as_claimed(teams):
     assert _groups("uid-team01c") == []
 
 
+@pytest.mark.parametrize("authentik_username", ["team01" + "d" * 200, "team01\x00d"], ids=["too long", "NUL"])
+def test_a_folder_account_whose_authentik_username_cant_be_one_signs_in_as_claimed(teams, caplog, authentik_username):
+    """A folder account named past the username column, or with a NUL, keeps the claimed name, and it is logged."""
+    fake = FakeAuthentik([*USERS, _user(41, authentik_username, uid="uid-odd")])
+
+    _sign_in(fake, {"sub": "uid-odd", "preferred_username": "team01"})
+
+    assert User.objects.get(usergroups__authentik_id="uid-odd").username == "team01"
+    assert "unusable Authentik username" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("username", "held"),
     [
@@ -478,7 +491,7 @@ def test_when_authentik_cant_be_asked_the_sign_in_is_refused(teams, caplog):
 
     response = _sign_in(fake, _claimed("team01a"), expect=503)
 
-    assert b"Try again in a moment" in response.content
+    assert _shown(response) == (503, "Sign-in Unavailable", "Try again in a moment.")
     assert not UserGroups.objects.exists()
     assert "team folder lookup failed" in caplog.text
 
@@ -523,6 +536,25 @@ def test_sign_ins_share_the_folder_read_for_a_minute(teams):
     cache.accounts = {u: (user, at - FOLDER_CACHE_SECONDS) for u, (user, at) in cache.accounts.items()}
     _sign_in(fake, _claimed("team01a"))
     assert fake.listed_pages == [1, 1, 2, 1]
+
+
+def test_rereading_for_a_stale_account_keeps_the_other_recent_reads(teams):
+    """A sign-in whose account was read over a minute ago reads the folder up to that account again. Accounts read
+    within the minute, and a staff account the folder lacked within the minute, still sign in from the earlier read."""
+    fake = FakeAuthentik(USERS)
+    fake.page_size = 2
+    staff = {"sub": "uid-staff", "preferred_username": "gold-admin", "groups": ["Portal_GoldTeam"]}
+    _sign_in(fake, staff)
+    assert fake.listed_pages == [1, 2, 3, 4]
+
+    cache = team_accounts._folder_cache
+    user, read_at = cache.accounts["uid-team01a"]
+    cache.accounts["uid-team01a"] = (user, read_at - FOLDER_CACHE_SECONDS)
+    _sign_in(fake, _claimed("team01a"))
+    _sign_in(fake, _claimed("team02a"))
+    _sign_in(fake, staff)
+
+    assert fake.listed_pages == [1, 2, 3, 4, 1]
 
 
 def test_a_sign_in_outside_the_folder_lists_it_once_a_minute(teams):

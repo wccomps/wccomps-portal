@@ -210,6 +210,42 @@ def test_two_hand_overs_queue_one_removal_and_one_reset(event, teams):
     assert list(queued) == ["clear_team_channels", "reset_nextcloud_team"]
 
 
+def test_hand_overs_of_two_teams_queue_a_removal_and_a_reset_for_each(event, teams):
+    """One team's pending removal and reset are no other team's."""
+    from core.models import QueuedTask
+
+    Team.objects.filter(pk__in=[teams[1].pk, teams[2].pk]).update(discord_role_id=5, discord_category_id=6)
+    set_team_school(teams[1], "School Two", contact_email="a@example.com")
+    set_team_school(teams[2], "School Three", contact_email="a@example.com")
+
+    queued = QueuedTask.objects.order_by("created_at", "pk").values_list("task_type", "payload__team_number")
+    assert list(queued) == [
+        ("clear_team_channels", 2),
+        ("reset_nextcloud_team", 2),
+        ("clear_team_channels", 3),
+        ("reset_nextcloud_team", 3),
+    ]
+
+
+@pytest.mark.parametrize(
+    "leftover",
+    [{"discord_role_id": 5}, {"discord_category_id": 6}, {"channels_need_clearing": True}],
+    ids=["role only", "category only", "removal still owed"],
+)
+def test_any_one_discord_leftover_queues_its_removal_on_a_hand_over(event, teams, leftover):
+    """A role without a category, a category without a role, or a removal marked but never queued (its task was
+    deleted) is each still on Discord: the hand-over marks the team and queues the removal for it."""
+    from core.models import QueuedTask
+
+    Team.objects.filter(pk=teams[1].pk).update(**leftover)
+
+    set_team_school(teams[1], "School Two", contact_email="a@example.com")
+
+    queued = QueuedTask.objects.order_by("created_at", "pk").values_list("task_type", "payload__team_number")
+    assert list(queued) == [("clear_team_channels", 2), ("reset_nextcloud_team", 2)]
+    assert Team.objects.get(pk=teams[1].pk).channels_need_clearing
+
+
 def _handed_over_again(team):
     """The team's school changes once its first assignment's queued work is done."""
     from core.models import QueuedTask
@@ -271,3 +307,25 @@ def test_clearing_the_school_list_is_refused_while_a_team_has_linked_members(eve
 
     assert str(LINKED_TEAMS_CLEAR).startswith("Teams have linked Discord members")
     assert SchoolInfo.objects.exists()
+
+
+@pytest.mark.parametrize("change", ["remove", "clear"])
+def test_a_member_unlinked_before_does_not_hold_back_removing_or_clearing_the_school(event, teams, change):
+    """An unlink keeps the link row, inactive: the team has no linked members left."""
+    from django.contrib.auth.models import User
+
+    from registration.services import clear_school_list, remove_team_school
+    from team.models import DiscordLink
+
+    set_team_school(teams[0], "School One", contact_email="a@example.com")
+    user = User.objects.create(username="member01")
+    DiscordLink.objects.create(discord_id=11, discord_username="m", user=user, team=teams[0], is_active=False)
+
+    match change:
+        case "remove":
+            remove_team_school(teams[0])
+        case "clear":
+            clear_school_list()
+
+    assert not SchoolInfo.objects.exists()
+    assert not event.team_assignments.exists()

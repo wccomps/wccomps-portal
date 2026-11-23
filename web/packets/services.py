@@ -10,9 +10,10 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from registration.locks import school_list_lock
 from registration.models import Event
-from registration.stage import ACTIONS, Action
+from registration.stage import ACTIONS, Action, Stage, event_stage
 
-from core.authentik_utils import set_team_password
+from core.authentik_utils import enable_team_account, set_team_password
+from core.models import CompetitionConfig
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, single_account, team_username
@@ -209,7 +210,13 @@ class PacketDistributionService:
         return email
 
     def send_packet_email(self, distribution: PacketDistribution, override_emails: list[str] | None = None) -> None:
-        """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses."""
+        """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses.
+
+        While the open event has no scores and no start has run in the current window, a packet carrying credentials
+        first turns the team account on, so they work when it arrives; the controlled applications stay closed until
+        the start. Not once the competition runs, ran or was played: a stop turns the accounts off, and a resend
+        before Close Out mustn't turn one back on. A failure to turn it on is logged and audited and doesn't hold the
+        email."""
         packet = distribution.packet
         team = distribution.team
 
@@ -223,6 +230,9 @@ class PacketDistributionService:
             recipients,
             f"{settings.ORG_SHORT_NAME}: {packet.title}",
         )
+        stage = event_stage()
+        if stage.stage == Stage.READY and not stage.running and not CompetitionConfig.get_config().started_this_window:
+            enable_team_account(team.team_number, actor="packet distribution")
         email.send(fail_silently=False)
 
         sent_to = ", ".join(recipients)

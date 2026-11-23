@@ -186,6 +186,7 @@ class TeamServiceExport:
     gross_points: int
     total_sla_penalty: int
     total_points: int
+    quotient_team_id: int | None = None
 
 
 @dataclass
@@ -431,6 +432,7 @@ def _service_export(data: object) -> list[TeamServiceExport]:
                 gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
                 total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
                 total_points=_whole(team_data.get("total_points", 0), "a team's total"),
+                quotient_team_id=_whole(team_data["team_id"], "a team's ID") if "team_id" in team_data else None,
             )
         )
     logger.info(f"Fetched service export for {len(exports)} teams")

@@ -30,11 +30,9 @@
                     </c-badge>
                 </td>
                 <td>
-                    {% with stats=packet.get_distribution_stats %}
-                        <small>{{ stats.sent }} sent, {{ stats.downloaded }} downloaded
-                            {% if stats.failed %}, <span class="text-danger">{{ stats.failed }} failed</span>{% endif %}
-                        </small>
-                    {% endwith %}
+                    <small>{{ packet.sent_count }} sent, {{ packet.downloaded_count }} downloaded
+                        {% if packet.failed_count %}, <span class="text-danger">{{ packet.failed_count }} failed</span>{% endif %}
+                    </small>
                 </td>
                 <td>
                     <small>{{ packet.created_at|date:"Y-m-d H:i" }} by {{ packet.uploaded_by }}</small>

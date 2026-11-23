@@ -115,6 +115,17 @@ def test_removing_is_refused_when_the_school_changed_since_the_page_was_opened(c
     assert EventTeamAssignment.objects.get().school.name == "Other College"
 
 
+def test_removing_with_no_school_posted_is_refused_whatever_the_schools_id(client):
+    """A post without the shown school (a crafted or truncated form) is a change, even for the school with id 1."""
+    School.objects.create(pk=1, name="Example University", name_key="example university")
+    _team_with_school()
+
+    response = client.post(reverse("school_info_remove", args=[4]), {})
+
+    assert "Team 4&#x27;s school changed since you opened this page; reload." in response.content.decode()
+    assert SchoolInfo.objects.get().school_id == 1
+
+
 def test_removing_is_refused_while_members_are_linked(client):
     """Removing, then adding a school, would skip the unlink and the password reset a different school gets."""
     from django.contrib.auth.models import User

@@ -148,7 +148,7 @@ Nor change on all users, except as the team folder section below allows, an acce
 | Object | Permission | Scope | Used for (`web/core/authentik_manager.py`) |
 |---|---|---|---|
 | Users | view | global | Reading every user and their groups (and, in team folder mode, their folders and attributes) for the group refresh, team accounts, team folder sign-ins and the readiness check "Usernames fixed" (`list_all_users`, `team_folder_pages`, `find_user`) |
-| Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
+| Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop, and enabling a team's account when a packet carries its credentials (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
 | Users | reset password | object: each team account | Setting team passwords (`set_password`) |
 | Groups | view | global | Reading group names (and, in team folder mode, their attributes for the readiness check "Usernames fixed") (`list_all_groups`) |
 | Groups | add user | object: each team group | The readiness fix that puts a team account in its team group (`add_user_to_group`) |
@@ -222,9 +222,11 @@ Django's admin). An active team's group grants blue team access to its members.
   team's accounts the members of its group whose username fully matches it. The portal's password resets and the
   packet's credentials are off; manage passwords in Authentik.
 
-A competition start enables each active team's accounts and opens the controlled applications; a stop disables every
-team's accounts and closes them. Create the accounts in Authentik before the event; the readiness checks list the
-missing ones.
+A packet carrying a team's credentials turns its account on when it is sent, before the start; a competition start
+enables each active team's accounts and opens the controlled applications, and a stop disables every team's accounts
+and closes them. So each controlled application needs an enabled binding besides its blue team one (the readiness
+checks fail one without), and any other application team accounts mustn't reach before the start needs a binding
+that keeps them out. Create the accounts in Authentik before the event; the readiness checks list the missing ones.
 
 ### Teams without Authentik groups (team folder)
 
@@ -292,8 +294,8 @@ controlled applications, chosen on the Competition setup page (`/ops/admin/compe
 one needs a policy binding to a group whose name contains `blueteam` (any case), such as a group holding the team
 groups, or in team folder mode to a policy whose name contains it (see the team folder above); a start enables that
 binding and a stop disables it. A start is refused while the list is empty, and the readiness check "App bindings
-configured" fails for an application without such a binding, and in team folder mode for one without a second enabled
-binding.
+configured" fails for an application without such a binding or without a second enabled binding (team accounts are
+on before the start), and in team folder mode for one with more than one blue team binding.
 
 ## Optional integrations
 
@@ -467,6 +469,31 @@ Ticketing migration 0009 seeds six categories: Service Scoring Validation, Box R
 Scoring Service Check, Black Team Phone Consultation, Black Team Hands-on Consultation, and Other / General Issue, each
 with its point cost and required fields. Edit, add or delete them at `/ops/admin/categories/` (gold team or ticketing
 admin). If you replace Box Reset / Scrub, point `BOX_RESET_CATEGORY_ID` at the new category's ID.
+
+## Service scoring corrections
+
+For an approved ruling after a competition stops, an operator with deployment shell access can record separate
+raw service and SLA credits without replacing Quotient's check history. Keep the approved CSV private. Its exact
+header is `team_id,check_points_delta,sla_points_restored,net_points_delta`. Include one row per scored team on
+the service, sorted by unique positive **Quotient ID**. Only service and net may be negative. Use at most
+nine digits per integer, with no padding, leading plus, or negative zero. Use LF line endings, including
+a final LF, and no BOM. Net must equal the service delta plus the SLA credit; it is never applied separately.
+
+Run `manage.py service_correction verify --event EVENT --service SERVICE --ruling SLUG --manifest PATH
+--manifest-sha256 APPROVED_SHA` with the independently approved digest. It reads the live Quotient export,
+resolves each ID using the scored team's name and the event's portal team assignment, and checks the current
+portal import. Keep its baseline digest with the decision record. Run `apply` with the same arguments plus
+`--baseline-sha256 BASELINE_SHA --actor OPERATOR --expect-composite POINTS`; add `--require-unchanged-ranks`
+when the ruling calls for it. A failed score or rank check rolls back the entire application.
+Use `--full-void` on both `verify` and `apply` to require exact removal of each team's earned service
+points and restoration of its entire SLA deduction. Use `--expect-service-max MAX` on `apply` to require the
+existing denominator. Neither flag rewrites the service or its checks, or changes the denominator.
+
+One batch can be active per event; an identical application is a no-op. The raw service credit uses the multiplier
+recorded at application. A detected sync conflict rolls back the import and blocks Close Out until a matching
+sync or audited revocation. To revoke before Close Out, pass the event, service, ruling, manifest digest and
+revoking operator, without the manifest path. Frozen scorecards show the credit and unadjusted service detail;
+the close-out ZIP's final scores export carries the two credit columns.
 
 ## Settings reference
 

@@ -241,6 +241,7 @@ CODE_EXCEPTIONS = {
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
+    "*/management/commands/*:add_arguments": "Django calls this hook when building the command's argument parser",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",
     "*:clean_*": "Django form validation calls clean_<field>",
@@ -369,6 +370,7 @@ URL_EXCEPTIONS = {
     "home": "The site root (/), requested when someone opens the portal domain",
     "admin:login": "The Django admin's own login page: Django links it (AuthentikAdminSite overrides the view to "
     "refuse a signed-in non-admin)",
+    "admin:scoring_servicescore_delete": "Django admin links to Delete from the imported service score change form",
     "health_check": "The Kubernetes readiness probe and the uptime probe request /health/ by path",
     "livez": "Liveness probe (docker-compose.yml healthcheck, the Kubernetes deployment), requested by path",
     "oauth_callback": "Authentik redirects here after login (core/oauth.py sends the path as redirect_uri)",

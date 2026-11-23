@@ -1,6 +1,7 @@
 import ipaddress
 import logging
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import TypedDict
 
@@ -8,13 +9,17 @@ import httpx
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import models
 from quotient.client import QuotientClient, ServiceCheck
+from registration.models import Event
 
+from core.models import CompetitionConfig
+from core.services.competition import run_lock
 from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
-from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+from .models import QuotientMetadataCache, ServiceCorrectionBatch, ServiceDetail, ServiceScore
+from .service_corrections import CorrectionConflictError, check_sync, correction_problem, guarded_service_sync
 
 logger = logging.getLogger(__name__)
 _DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
@@ -98,7 +103,7 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
         debug = check.debug or ""
         if not domain and (domain_match := _DNS_RECORD_DOMAIN_RE.search(debug)):
             fqdn = domain_match.group(1).lower()
-            if not fqdn.endswith(".arpa") and not all(part.isdigit() for part in fqdn.split(".")):
+            if _is_host_name(fqdn):
                 domain = fqdn.split(".", 1)[1] if fqdn.count(".") >= 2 else fqdn
         if not internal_mask and (ip_match := _DNS_ANSWER_IPV4_PREFIX_RE.search(debug)):
             try:
@@ -109,6 +114,33 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
         if domain and internal_mask:
             break
     return domain, internal_mask
+
+
+def _is_host_name(fqdn: str) -> bool:
+    """A host name, not an address, an address or name template (10.100.1xx.44, www.teamxx.ice.land: any label with
+    `xx`) or a reverse-lookup name."""
+    labels = fqdn.split(".")
+    return (
+        len(fqdn) <= 253
+        and len(labels) >= 2
+        and all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+        and labels[-1][0].isalpha()
+        and labels[-1] != "arpa"
+        and "xx" not in fqdn
+    )
+
+
+def _box_hostname_domain(boxes_data: list[BoxData]) -> str:
+    """The narrowest domain that covers the most boxes addressed by name (borgar.ice.land and www.corp.ice.land:
+    ice.land; web.inv3.example.org and git.inv3.example.org: inv3.example.org), or "" when no box is. Narrowest, so
+    the proxy's browser file doesn't send the rest of a shared parent domain through the team ports."""
+    covered: Counter[str] = Counter()
+    for box in boxes_data:
+        host = box["ip"].strip().lower().rstrip(".")
+        if _is_host_name(host):
+            labels = host.split(".")
+            covered.update(".".join(labels[i:]) for i in range(1, len(labels) - 1))
+    return max(covered, key=lambda domain: (covered[domain], domain.count(".")), default="")
 
 
 def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> None:
@@ -145,6 +177,10 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
                 break
         if "external_mask" in payload and "team_domain_name" in payload and "internal_mask" in payload:
             break
+
+    # Without a domain the proxy keeps the last event's and refuses every name in this one
+    if "team_domain_name" not in payload and (domain := _box_hostname_domain(boxes_data)):
+        payload["team_domain_name"] = domain
 
     if not payload:
         return
@@ -233,15 +269,13 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
     """Sync each team's aggregate ServiceScore and per-service ServiceDetail records from Quotient, removing and
     skipping teams with no services in the export. Raises ValueError, writing nothing, when Quotient's scores or
     uptimes can't be read or don't fit the portal's columns."""
+    event_id = Event.objects.filter(is_active=True).values_list("pk", flat=True).first()
     client = QuotientClient()
 
     export_data = client.get_service_export()
     if export_data is None:
         raise ValueError("Failed to retrieve service scores from Quotient")
-    if not export_data:
-        return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
-
-    uptimes_data = client.get_uptimes()
+    uptimes_data = client.get_uptimes() if export_data else []
     if uptimes_data is None:
         raise ValueError("Failed to retrieve uptimes from Quotient")
     uptimes_by_team = {tu.team_number: tu.uptimes for tu in uptimes_data}
@@ -272,12 +306,18 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             )
             for svc in team_export.services
         ]
-        for row in (score, *details):
-            _check_storable(row, f"Quotient's scores for team {team.team_number}")
         rows.append((team, score, details))
 
-    with transaction.atomic():
+    with run_lock() as locked, guarded_service_sync(event_id):
+        if not locked:
+            raise ValueError("A competition transition or score sync is in progress.")
+        CompetitionConfig.locked()
+        if Event.objects.filter(is_active=True).values_list("pk", flat=True).first() != event_id:
+            raise ValueError("The active event changed during score sync.")
+        check_sync(event_id, export_data, uptimes_data)
         for team, score, details in rows:
+            for row in (score, *details):
+                _check_storable(row, f"Quotient's scores for team {team.team_number}")
             ServiceDetail.objects.filter(team=team).delete()
             if not details:
                 ServiceScore.objects.filter(team=team).delete()
@@ -297,8 +337,16 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             ServiceDetail.objects.bulk_create(details)
             details_synced += len(details)
 
-    # Keep the reactive service scaling current: the max service points at full uptime.
-    set_template_max("service_max", service_max_from_details())
+        if export_data:
+            set_template_max("service_max", service_max_from_details())
+        if problem := correction_problem(event_id, check_sync_conflict=False):
+            raise CorrectionConflictError(problem)
+        if event_id is not None:
+            ServiceCorrectionBatch.objects.filter(
+                event_id=event_id,
+                revoked_at__isnull=True,
+                sync_conflict=True,
+            ).update(sync_conflict=False)
 
     return {
         "teams_created": teams_created,
@@ -361,6 +409,19 @@ def get_box_choices() -> list[tuple[str, str]]:
             choices.append((box["name"], label))
         return choices
     return []
+
+
+def affected_box_labels(boxes: list[str] | str | None) -> str:
+    """Use picker labels only when the inventory agrees on a name's label."""
+    if not boxes:
+        return ""
+    labels: dict[str, str] = {}
+    for name, label in get_box_choices():
+        if labels.setdefault(name, label) != label:
+            labels[name] = name
+    if isinstance(boxes, str):
+        return labels.get(boxes, boxes)
+    return ", ".join(labels.get(box, box) for box in boxes)
 
 
 def get_service_choices() -> list[tuple[str, str]]:
