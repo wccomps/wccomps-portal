@@ -71,6 +71,20 @@ def test_removing_a_school_takes_the_lock(team):
     _assert_locks_before_reading_the_open_event(queries)
 
 
+def test_removing_a_school_locks_the_team_before_checking_for_linked_members(team):
+    """A link takes the team row's lock, so a member linking meanwhile is seen, not left on a team with no school."""
+    _event()
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+
+    with CaptureQueriesContext(connection) as queries:
+        remove_team_school(team)
+
+    sql = [query["sql"] for query in queries.captured_queries]
+    lock = next(i for i, q in enumerate(sql) if 'FROM "team_team"' in q and "FOR UPDATE" in q and f"= {team.pk}" in q)
+    check = next(i for i, q in enumerate(sql) if 'FROM "team_discordlink"' in q)
+    assert lock < check
+
+
 def test_clearing_the_list_takes_the_lock_with_no_event_or_season(team):
     set_team_school(team, "Example University", contact_email="c@example.edu")
 

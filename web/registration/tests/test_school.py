@@ -1,12 +1,13 @@
 """A school is one record across events, matched by name ignoring case and spacing."""
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from django.db import IntegrityError
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from registration.models import (
     Event,
@@ -161,6 +162,9 @@ def test_assign_teams_adds_each_school_to_the_school_list_with_its_captain(gold_
     assert info.team == assignment.team
     assert info.school == assignment.school
     assert info.contact_email == "captain@example.edu"
+    assert (info.secondary_email, info.notes) == ("", "")
+    # The School Info page says who last changed it
+    assert info.updated_by == gold_team_user.get_username()
     assert assignment.registration == registration
 
 
@@ -175,18 +179,47 @@ def test_assign_teams_uses_the_first_contact_without_a_captain(gold_team_user, e
     assert SchoolInfo.objects.get().contact_email == "coach@example.edu"
 
 
+def _no_contact(event, school_name):
+    registration = TeamRegistration.objects.create(school_name=school_name, status="approved")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+
+
 def test_assign_teams_skips_a_registration_with_no_contact_email(gold_team_user, event):
     Team.objects.create(team_number=4, team_name="Team 04")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
-    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
-    client = Client()
-    client.force_login(gold_team_user)
+    _no_contact(event, "Example University")
 
-    response = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
 
     assert not SchoolInfo.objects.exists()
     assert not EventTeamAssignment.objects.exists()
-    assert "Example University: no contact email" in response.content.decode()
+    assert "Skipped Example University: no contact email on the registration." in response.content.decode()
+
+
+def test_assign_teams_with_too_few_free_teams_assigns_none_and_says_how_many_it_needs(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    _enrolled(event, "Example University")
+    _enrolled(event, "Other College")
+    _no_contact(event, "Third College")
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    content = response.content.decode()
+    assert "Not enough teams available. Need 2, have 1." in content
+    assert "Skipped Third College: no contact email on the registration." in content
+    assert not SchoolInfo.objects.exists()
+    assert not EventTeamAssignment.objects.exists()
+
+
+def test_assign_teams_says_how_many_teams_it_assigned(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "Example University")
+    _enrolled(event, "Other College")
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert "Assigned 2 teams successfully." in response.content.decode()
+    assert SchoolInfo.objects.count() == 2
 
 
 def test_assign_teams_skips_a_school_already_in_the_school_list(gold_team_user, event):
@@ -207,6 +240,68 @@ def test_assign_teams_skips_a_school_already_in_the_school_list(gold_team_user, 
     assert not EventTeamAssignment.objects.exists()
 
 
+def test_assign_teams_names_every_school_it_skipped_for_already_having_a_team(gold_team_user, event):
+    set_team_school(
+        Team.objects.create(team_number=4, team_name="Team 04"), "Example University", contact_email="c@example.edu"
+    )
+    set_team_school(
+        Team.objects.create(team_number=5, team_name="Team 05"), "Other College", contact_email="d@example.edu"
+    )
+    _enrolled(event, "Example University")
+    _enrolled(event, "Other College")
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert [str(m) for m in response.context["messages"]] == [
+        "Skipped Example University, Other College: that school already has a team.",
+        "No eligible registrations to assign.",
+    ]
+
+
+def test_assign_teams_names_the_schools_with_no_contact_in_the_order_they_enrolled(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    _no_contact(event, "Example University")
+    _no_contact(event, "Other College")
+    # Other College enrolled first, though its row was written second
+    RegistrationEventEnrollment.objects.filter(registration__school_name="Other College").update(
+        enrolled_at=timezone.now() - timedelta(days=1)
+    )
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert [str(m) for m in response.context["messages"]] == [
+        "Skipped Other College, Example University: no contact email on the registration.",
+        "No eligible registrations to assign.",
+    ]
+
+
+def test_assign_teams_names_every_school_registered_twice_and_says_what_to_do(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    for name in ["Example University", "example university", "Other College", "OTHER COLLEGE"]:
+        _enrolled(event, name)
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert [str(m) for m in response.context["messages"]] == [
+        "Not assigned: Example University, Other College: more than one approved registration names that school. "
+        "Reject the ones that aren't the school's on the Registrations page, then assign again.",
+        "No eligible registrations to assign.",
+    ]
+    assert not SchoolInfo.objects.exists()
+
+
+def test_assign_teams_assigns_only_registrations_enrolled_in_the_open_event(gold_team_user, event):
+    other = Event.objects.create(season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3))
+    Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "Example University")
+    _enrolled(other, "Other College")
+
+    _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]))
+
+    assert list(SchoolInfo.objects.values_list("school__name", flat=True)) == ["Example University"]
+
+
 def test_assign_teams_is_refused_for_an_event_that_is_not_open(gold_team_user, event):
     other = Event.objects.create(season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3))
     Team.objects.create(team_number=4, team_name="Team 04")
@@ -216,7 +311,9 @@ def test_assign_teams_is_refused_for_an_event_that_is_not_open(gold_team_user, e
 
     response = client.post(reverse("registration_assign_teams", args=[other.pk]), follow=True)
 
-    assert "only be assigned for the open event" in response.content.decode()
+    assert [str(m) for m in response.context["messages"]] == [
+        "Teams can only be assigned for the open event: import its school list first."
+    ]
     assert not SchoolInfo.objects.exists()
     assert not EventTeamAssignment.objects.exists()
 
@@ -393,6 +490,26 @@ def test_assign_teams_skips_a_team_that_got_a_school_after_it_was_picked(gold_te
     assert SchoolInfo.objects.get(team=team).school_name == "Other College"
     assert list(EventTeamAssignment.objects.values_list("school__name", flat=True)) == ["Other College"]
     assert "Skipped Example University: the team picked for it got a school meanwhile" in response.content.decode()
+
+
+def test_assign_teams_names_every_school_whose_picked_team_got_a_school_meanwhile(gold_team_user, event, monkeypatch):
+    from registration import views
+
+    teams = [Team.objects.create(team_number=n, team_name=f"Team 0{n}") for n in (4, 5)]
+    _enrolled(event, "Example University")
+    _enrolled(event, "Second College")
+
+    def schools_set_meanwhile(picked):
+        for team, name in zip(teams, ["Other College", "Third College"], strict=True):
+            set_team_school(team, name, contact_email="o@example.edu")
+
+    monkeypatch.setattr(views.random, "shuffle", schools_set_meanwhile)
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert [str(m) for m in response.context["messages"]] == [
+        "Skipped Example University, Second College: the team picked for it got a school meanwhile. Assign again."
+    ]
 
 
 def test_event_detail_notes_sent_packets_once_for_the_event(gold_team_user, event):

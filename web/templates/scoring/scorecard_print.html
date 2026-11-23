@@ -332,6 +332,7 @@
             | Inject: {{ scaling.inject_raw|floatformat:0 }} raw × {{ scaling.inject_modifier|floatformat:2 }}
             | Orange Checks: {{ scaling.orange_raw|floatformat:0 }} raw × {{ scaling.orange_modifier|floatformat:2 }}
         </p>
+        {% include "scoring/_service_correction_lines.html" %}
         {% if stats.service_stats %}
             <h2>Service Uptime Detail</h2>
             <table>

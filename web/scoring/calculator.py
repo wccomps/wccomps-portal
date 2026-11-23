@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
 
@@ -19,6 +19,7 @@ from .models import (
     ScoringTemplate,
     ServiceScore,
 )
+from .service_corrections import CreditLine, current_credits
 
 
 class Scaling(TypedDict):
@@ -142,6 +143,7 @@ class Standing:
     is_excluded: bool
     scaling: Scaling
     rank: int | None = None
+    service_corrections: list[CreditLine] = field(default_factory=list)
 
     @property
     def has_scoring_activity(self) -> bool:
@@ -159,18 +161,21 @@ class Standing:
         return self.team.school_emails
 
 
-def _standing(team: Team, raw: _RawScores, template: ScoringTemplate, is_excluded: bool) -> Standing:
-    """A team's score: each category's raw points times its modifier, plus its SLA penalties, ticket charges,
-    red deductions and incident recovery. The scaled points and the total are rounded to the cent.
-    """
+def _standing(
+    team: Team, raw: _RawScores, template: ScoringTemplate, is_excluded: bool, credits: list[CreditLine]
+) -> Standing:
+    """A team's score, including service credits at their recorded modifiers and unscaled SLA credits."""
     service_mod, inject_mod, orange_mod = _get_modifiers(template)
-    scaled_service = raw["service"] * service_mod
+    sla = raw["sla"] + sum(line["sla_credit"] for line in credits)
+    scaled_service = raw["service"] * service_mod + sum(
+        line["service_credit"] * line["service_modifier"] for line in credits
+    )
     scaled_inject = raw["inject"] * inject_mod
     scaled_orange = raw["orange"] * orange_mod
 
     two_places = Decimal("0.01")
     total_score = (
-        scaled_service + scaled_inject + scaled_orange + raw["sla"] + raw["adjustments"] + raw["red"] + raw["recovery"]
+        scaled_service + scaled_inject + scaled_orange + sla + raw["adjustments"] + raw["red"] + raw["recovery"]
     ).quantize(two_places, rounding=ROUND_HALF_UP)
 
     return Standing(
@@ -179,11 +184,12 @@ def _standing(team: Team, raw: _RawScores, template: ScoringTemplate, is_exclude
         inject_points=scaled_inject.quantize(two_places, rounding=ROUND_HALF_UP),
         orange_points=scaled_orange.quantize(two_places, rounding=ROUND_HALF_UP),
         red_deductions=raw["red"],
-        sla_penalties=raw["sla"],
+        sla_penalties=sla,
         point_adjustments=raw["adjustments"],
         incident_recovery_points=raw["recovery"],
         total_score=total_score,
         is_excluded=is_excluded,
+        service_corrections=credits,
         scaling={
             "service_raw": raw["service"],
             "inject_raw": raw["inject"],
@@ -205,10 +211,13 @@ def compute_standings() -> list[Standing]:
     """
     teams = list(Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number"))
     raw = _raw_scores(teams)
+    credits = current_credits([team.pk for team in teams])
     template = ScoringTemplate.objects.first() or ScoringTemplate()
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
 
-    standings = [_standing(team, raw[team.pk], template, team.pk in excluded_team_ids) for team in teams]
+    standings = [
+        _standing(team, raw[team.pk], template, team.pk in excluded_team_ids, credits.get(team.pk, [])) for team in teams
+    ]
     standings.sort(key=lambda standing: standing.total_score, reverse=True)
 
     rank = 0

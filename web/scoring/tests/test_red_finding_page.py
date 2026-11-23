@@ -10,7 +10,7 @@ from django.test import Client
 from django.urls import reverse
 
 from core.tests.roles import role_user
-from scoring.models import RedTeamScore
+from scoring.models import QuotientMetadataCache, RedTeamScore
 
 pytestmark = pytest.mark.django_db
 
@@ -50,6 +50,24 @@ def gold_user(create_user_with_groups: Callable[..., User]) -> User:
 @pytest.fixture
 def finding(red_team_user: User) -> RedTeamScore:
     return RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=red_team_user)
+
+
+def test_affected_boxes_use_only_unambiguous_inventory_labels(red_team_user: User, finding: RedTeamScore) -> None:
+    QuotientMetadataCache.objects.create(
+        boxes=[
+            {"name": "web", "ip": "192.0.2.12"},
+            {"name": "web", "ip": "192.0.2.13"},
+            {"name": "web", "ip": "192.0.2.12"},
+            {"name": "db", "ip": "192.0.2.30"},
+            {"name": "db", "ip": "198.51.100.30"},
+        ]
+    )
+    finding.affected_boxes = ["web", "db", "retired-router"]
+    finding.save(update_fields=["affected_boxes"])
+
+    row = re.search(r"<dt>Affected Boxes</dt>\s*<dd>\s*(.*?)\s*</dd>", _red(red_team_user, finding))
+    assert row is not None
+    assert row[1] == "web, .30 db, retired-router"
 
 
 def test_a_gold_reviewer_gets_no_link_to_a_red_team_only_page(gold_user: User, finding: RedTeamScore) -> None:

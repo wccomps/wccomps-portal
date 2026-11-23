@@ -28,6 +28,20 @@ class TestMiddlewareConfiguration:
         )
 
 
+# Must match AuthentikRequiredMiddleware whitelist
+MIDDLEWARE_WHITELIST_PREFIXES = ["/static/"]
+MIDDLEWARE_WHITELIST_EXACT = [
+    "/health/",
+    "/livez/",
+    "/register/",
+    "/auth/login/",
+    "/auth/callback/",
+    "/auth/logout/",
+    "/auth/link",
+    "/admin/login/",
+]
+
+
 class TestAuthentikRequiredMiddleware:
     """Tests for AuthentikRequiredMiddleware."""
 
@@ -106,50 +120,6 @@ class TestAuthentikRequiredMiddleware:
 
         assert response.status_code == 401
         assert json.loads(response.content) == {"error": "Your session expired. Reload the page to sign in again."}
-
-    def test_auth_path_whitelisted(self, middleware):
-        """Paths starting with /auth/ should be accessible without login."""
-        factory = RequestFactory()
-        request = factory.get("/auth/login/")
-        request.user = AnonymousUser()
-
-        response = middleware(request)
-
-        assert response.status_code == 200
-        assert response.content == b"OK"
-
-    def test_static_path_whitelisted(self, middleware):
-        """Paths starting with /static/ should be accessible without login."""
-        factory = RequestFactory()
-        request = factory.get("/static/css/style.css")
-        request.user = AnonymousUser()
-
-        response = middleware(request)
-
-        assert response.status_code == 200
-        assert response.content == b"OK"
-
-    def test_health_path_whitelisted(self, middleware):
-        """Paths starting with /health/ should be accessible without login."""
-        factory = RequestFactory()
-        request = factory.get("/health/")
-        request.user = AnonymousUser()
-
-        response = middleware(request)
-
-        assert response.status_code == 200
-        assert response.content == b"OK"
-
-    def test_register_root_whitelisted(self, middleware):
-        """Exact /register/ path should be accessible without login."""
-        factory = RequestFactory()
-        request = factory.get("/register/")
-        request.user = AnonymousUser()
-
-        response = middleware(request)
-
-        assert response.status_code == 200
-        assert response.content == b"OK"
 
     def test_register_subpaths_require_auth(self, middleware):
         """Only /register/ itself is public: a path below it asks a visitor to sign in."""
@@ -231,18 +201,15 @@ class TestAuthentikRequiredMiddleware:
 
         assert response.status_code == 200
 
+    @pytest.mark.parametrize("path", ["/static/css/style.css", *MIDDLEWARE_WHITELIST_EXACT])
+    def test_an_anonymous_visitor_reaches_each_exempt_page(self, middleware, path):
+        request = RequestFactory().get(path)
+        request.user = AnonymousUser()
 
-# Must match AuthentikRequiredMiddleware whitelist
-MIDDLEWARE_WHITELIST_PREFIXES = ["/static/"]
-MIDDLEWARE_WHITELIST_EXACT = [
-    "/health/",
-    "/livez/",
-    "/register/",
-    "/auth/login/",
-    "/auth/callback/",
-    "/auth/logout/",
-    "/auth/link",
-]
+        response = middleware(request)
+
+        assert response.status_code == 200
+        assert response.content == b"OK"
 
 
 def _collect_url_paths(resolver: URLResolver | None = None, prefix: str = "/") -> list[str]:

@@ -12,8 +12,10 @@ from django.utils import timezone
 from core import oauth
 from core.models import UserGroups
 from core.services.user_groups import refresh_user_groups
-from core.tests import test_oauth_flow
-from core.tests.test_oauth_flow import oauth_state_session  # noqa: F401
+from core.tests.test_oauth_flow import (
+    _login,
+    oauth_state_session,  # noqa: F401
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -50,9 +52,23 @@ def test_a_sign_in_during_the_refresh_keeps_what_it_read(oauth_state_session):  
     UserGroups.objects.create(user=account, authentik_id="sub-06", groups=[], account_active=False)
 
     def a_sign_in_commits() -> None:
-        _in_another_thread(lambda: test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN))
+        _in_another_thread(lambda: _login(client, state, SIGNED_IN))
 
     _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], a_sign_in_commits)
+
+    row = UserGroups.objects.get(authentik_id="sub-06")
+    assert (row.groups, row.account_active) == (["WCComps_BlueTeam06"], True)
+
+
+def test_a_first_sign_in_during_the_refresh_keeps_what_it_read(oauth_state_session):  # noqa: F811
+    """The account's row is made by a sign-in that read Authentik after the refresh did: the refresh's older answer
+    (the account still disabled) doesn't land over it."""
+    client, state = oauth_state_session
+
+    def a_first_sign_in_commits() -> None:
+        _in_another_thread(lambda: _login(client, state, SIGNED_IN))
+
+    _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], a_first_sign_in_commits)
 
     row = UserGroups.objects.get(authentik_id="sub-06")
     assert (row.groups, row.account_active) == (["WCComps_BlueTeam06"], True)
@@ -72,7 +88,7 @@ def test_a_refresh_during_a_sign_in_keeps_what_it_read(oauth_state_session):  # 
         return read_claims(userinfo)
 
     with patch("core.oauth._claims", side_effect=claims_read_before_a_refresh):
-        test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN)
+        _login(client, state, SIGNED_IN)
 
     row = UserGroups.objects.get(authentik_id="sub-06")
     assert (row.groups, row.account_active) == ([], False)
@@ -92,7 +108,7 @@ def test_a_refresh_that_changes_nothing_still_outdates_an_older_sign_in(oauth_st
         return read_claims(userinfo)
 
     with patch("core.oauth._claims", side_effect=claims_read_before_a_refresh):
-        test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN)
+        _login(client, state, SIGNED_IN)
 
     row = UserGroups.objects.get(authentik_id="sub-06")
     assert (row.groups, row.account_active) == ([], False)
@@ -105,7 +121,7 @@ def test_a_sign_in_on_a_pod_whose_clock_runs_ahead_does_not_hold_off_later_refre
     ahead = timezone.now() + timedelta(hours=1)
 
     with patch("django.utils.timezone.now", return_value=ahead):
-        test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN)
+        _login(client, state, SIGNED_IN)
     _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], lambda: None)
 
     assert UserGroups.objects.get(authentik_id="sub-06").account_active is False
