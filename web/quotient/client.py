@@ -463,8 +463,12 @@ def _team_service_names(data: object) -> set[str]:
 
 
 def _history_team_ordinal(name: str) -> int | None:
-    # Quotient's OIDC fallback considers the trailing ASCII digits of every trimmed name.
-    match = re.search(r"(?<![0-9])[0-9]+$", name.strip())
+    # Go strings.TrimSpace uses Unicode White_Space, excluding Python's extra C0 separators.
+    whitespace = (
+        "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
+        "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+    )
+    match = re.search(r"(?<![0-9])[0-9]+\Z", name.rstrip(whitespace))
     digits = match[0].lstrip("0") if match else ""
     if not digits or len(digits) > 10:
         return None

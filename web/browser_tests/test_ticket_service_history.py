@@ -16,7 +16,15 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 @pytest.mark.parametrize(
     "scenario",
-    ["unique", "ambiguous", "summary unavailable", "team ambiguous", "team OIDC conflict", "team absent"],
+    [
+        "unique",
+        "ambiguous",
+        "summary unavailable",
+        "team ambiguous",
+        "team OIDC conflict",
+        "team non-Go space",
+        "team absent",
+    ],
 )
 def test_staff_history_loads_only_an_unambiguous_stored_name(
     live_server, pw_browser, ticketing_support_user, blue_team, settings, scenario
@@ -37,7 +45,8 @@ def test_staff_history_loads_only_an_unambiguous_stored_name(
         names.append("WEB-KIOSK..HTTP")
     roster = [{"ID": 1, "Name": "team02"}]
     if scenario != "team absent":
-        roster.append({"ID": 42, "Name": "team01"})
+        name = "team01\x1c" if scenario == "team non-Go space" else "team01"
+        roster.append({"ID": 42, "Name": name})
     if scenario == "team ambiguous":
         roster.append({"ID": 43, "Name": "Team 1"})
     if scenario == "team OIDC conflict":
