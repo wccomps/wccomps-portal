@@ -231,7 +231,7 @@ def test_hand_overs_of_two_teams_queue_a_removal_and_a_reset_for_each(event, tea
     [{"discord_role_id": 5}, {"discord_category_id": 6}, {"channels_need_clearing": True}],
     ids=["role only", "category only", "removal still owed"],
 )
-def test_any_one_discord_leftover_queues_its_removal_on_a_hand_over(event, teams, leftover):
+def test_hand_over_queues_discord_cleanup_for_either_id_or_pending_clear_flag(event, teams, leftover):
     from core.models import QueuedTask
 
     Team.objects.filter(pk=teams[1].pk).update(**leftover)
