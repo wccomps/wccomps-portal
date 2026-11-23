@@ -70,7 +70,6 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
 
     mapping: dict[str, str] = {}
     unmapped: list[str] = []
-    skipped: list[str] = []
     # Email slots no column's normalized name already takes
     email_columns = iter(c for c in ("contact_email", "secondary_email") if c not in normalized.values())
     for raw, name in normalized.items():
@@ -81,8 +80,8 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
         elif "email" in norm:
             mapping[raw] = next(email_columns, name)
         elif "team" in norm or norm.replace(" ", "").replace("#", "").isdigit():
-            # Skip team number columns — teams are assigned randomly
-            skipped.append(raw)
+            # Team numbers in the CSV do not control the randomly assigned teams.
+            mapping[raw] = name
         else:
             unmapped.append(raw)
 
@@ -92,10 +91,6 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
     else:
         for raw in unmapped:
             mapping[raw] = normalized[raw]
-
-    # Map skipped columns so the unknown-columns warning lists them
-    for raw in skipped:
-        mapping[raw] = normalized[raw]
 
     return mapping
 

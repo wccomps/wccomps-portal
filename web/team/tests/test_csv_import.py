@@ -207,16 +207,26 @@ Example U,captain@example.edu,coach@example.edu
         }
 
     @pytest.mark.parametrize(
-        ("header", "ignored"),
+        ("header", "detected", "ignored"),
         [
             # Team number columns are skipped: teams are assigned at random
-            ("Team No,# 1,Email,School", "#_1, team_no"),
+            (
+                "Team No,Email,# 1,School",
+                "Team No as team_no, Email as contact_email, # 1 as #_1, School as school_name",
+                "#_1, team_no",
+            ),
             # With school_name named, the one other column is not taken for it
-            ("school_name,Email,Coach", "coach"),
-            ("school_name,Email,Coach Name,Region", "coach_name, region"),
+            ("school_name,Email,Coach", "Email as contact_email, Coach as coach", "coach"),
+            (
+                "school_name,Email,Coach Name,Region",
+                "Email as contact_email, Coach Name as coach_name, Region as region",
+                "coach_name, region",
+            ),
         ],
     )
-    def test_columns_that_are_not_the_schools_are_named_and_ignored(self, header: str, ignored: str) -> None:
+    def test_columns_that_are_not_the_schools_are_named_and_ignored(
+        self, header: str, detected: str, ignored: str
+    ) -> None:
         cells = {"Email": "a@example.edu", "School": "Example U", "school_name": "Example U"}
         row = ",".join(cells.get(name, "7") for name in header.split(","))
         csv_file = SimpleUploadedFile("test.csv", f"{header}\n{row}\n".encode())
@@ -227,7 +237,10 @@ Example U,captain@example.edu,coach@example.edu
             [{"school_name": "Example U", "contact_email": "a@example.edu", "secondary_email": "", "notes": ""}],
             [],
         )
-        assert result["warnings"][1:] == [f"Unknown columns will be ignored: {ignored}"]
+        assert result["warnings"] == [
+            f"Columns auto-detected: {detected}",
+            f"Unknown columns will be ignored: {ignored}",
+        ]
 
     @pytest.mark.parametrize(
         ("header", "row"),
