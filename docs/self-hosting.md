@@ -356,11 +356,16 @@ Without Proxmox, a box reset ticket says Proxmox isn't configured and is resolve
 
 ### aweful-proxy
 
-Each Quotient metadata sync posts the team network layout it reads from Quotient (team count, address masks, the team
-DNS server and domain) to `AWEFUL_PROXY_URL/config`, with `AWEFUL_PROXY_TOKEN` as a Bearer token when set. A failed
-post is only logged. Without `AWEFUL_PROXY_URL` nothing is posted. With a token the URL must be https, unless the proxy
-is reached over a network nobody else can read (an in-cluster Service) and `ALLOW_HTTP_URLS` names
-`AWEFUL_PROXY_URL`.
+Each Quotient metadata sync posts the team count, address masks, team DNS server and domain when available to
+`AWEFUL_PROXY_URL/config`, with `AWEFUL_PROXY_TOKEN` as a Bearer token when set. A failed POST is only logged. Without
+`AWEFUL_PROXY_URL` nothing is posted. With a token the URL must be https, unless the proxy is reached over a network
+nobody else can read (an in-cluster Service) and `ALLOW_HTTP_URLS` names `AWEFUL_PROXY_URL`.
+
+If Quotient lists a DNS service, the domain comes from its expected DNS check records. If none of the lookups yields
+a valid domain, the proxy's configured domain is unchanged. If Quotient lists no DNS service, set
+`AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN` to the exact team domain for the event (for example, `teams.event.example`);
+Portal does not infer it from inventory hostnames. An empty or invalid value leaves the existing domain in place,
+so verify the proxy's domain when switching events.
 
 ### Nextcloud
 
@@ -530,6 +535,7 @@ Every setting, with its default when unset and its meaning. `.env.example` has t
 | `PROXMOX_DEFAULT_SNAPSHOT` | `clean` | Snapshot a box reset offers first |
 | `BOX_RESET_CATEGORY_ID` | `2` | The ticket category with the box reset |
 | `AWEFUL_PROXY_URL`, `AWEFUL_PROXY_TOKEN` | empty (off) | aweful-proxy; with a token, the URL must be https |
+| `AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN` | empty (preserve proxy domain) | Exact team domain to send when Quotient lists no DNS service |
 | `ALLOW_HTTP_URLS` | empty (all https) | Service URL settings, comma-separated, allowed to be plain http: only for a service on a network nobody else can read, such as `AWEFUL_PROXY_URL` at an in-cluster address |
 | `NEXTCLOUD_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD` | empty (off) | Nextcloud and its admin login; the URL must be https |
 | `NEXTCLOUD_OIDC_PROVIDER_ID` | `1` | The Authentik provider's id in Nextcloud's `user_oidc` app |

@@ -1,7 +1,6 @@
 import ipaddress
 import logging
 import re
-from collections import Counter
 from decimal import Decimal
 from typing import TypedDict
 
@@ -117,8 +116,7 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
 
 
 def _is_host_name(fqdn: str) -> bool:
-    """A host name, not an address, an address or name template (10.100.1xx.44, www.teamxx.ice.land: any label with
-    `xx`) or a reverse-lookup name."""
+    """Reject addresses, team templates and reverse-lookup names."""
     labels = fqdn.split(".")
     return (
         len(fqdn) <= 253
@@ -128,19 +126,6 @@ def _is_host_name(fqdn: str) -> bool:
         and labels[-1] != "arpa"
         and "xx" not in fqdn
     )
-
-
-def _box_hostname_domain(boxes_data: list[BoxData]) -> str:
-    """The narrowest domain that covers the most boxes addressed by name (borgar.ice.land and www.corp.ice.land:
-    ice.land; web.inv3.example.org and git.inv3.example.org: inv3.example.org), or "" when no box is. Narrowest, so
-    the proxy's browser file doesn't send the rest of a shared parent domain through the team ports."""
-    covered: Counter[str] = Counter()
-    for box in boxes_data:
-        host = box["ip"].strip().lower().rstrip(".")
-        if _is_host_name(host):
-            labels = host.split(".")
-            covered.update(".".join(labels[i:]) for i in range(1, len(labels) - 1))
-    return max(covered, key=lambda domain: (covered[domain], domain.count(".")), default="")
 
 
 def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> None:
@@ -153,10 +138,12 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
     if sample_teams:
         payload["number_of_teams"] = max(sample_teams)
 
+    has_dns_service = False
+
     for box in boxes_data:
         dns_service = next(
             (
-                s["name"]
+                s
                 for s in box.get("services", [])
                 if s.get("name", "").upper() == "DNS" or s.get("display_name", "").upper() == "DNS"
             ),
@@ -164,12 +151,13 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
         )
         if not dns_service:
             continue
+        has_dns_service = True
         if "external_mask" not in payload and (parsed := _parse_dns_box_ip_template(box.get("ip", ""))):
             payload["external_mask"], payload["team_dns_server_last_octet"] = parsed
         for sample_team in sample_teams[:3] or [1]:
             checks = client.get_service_checks(
                 sample_team,
-                f"{box['name']}:{dns_service}",
+                f"{box['name']}:{dns_service['name']}",
                 force_refresh=True,
             )
             domain, internal_mask = _extract_dns_check_network(checks)
@@ -182,9 +170,12 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
         if "external_mask" in payload and "team_domain_name" in payload and "internal_mask" in payload:
             break
 
-    # Without a domain the proxy keeps the last event's and refuses every name in this one
-    if "team_domain_name" not in payload and (domain := _box_hostname_domain(boxes_data)):
-        payload["team_domain_name"] = domain
+    # The proxy retains its configured domain when the update omits it.
+    if not has_dns_service and (domain := settings.AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN.strip().lower().rstrip(".")):
+        if _is_host_name(domain):
+            payload["team_domain_name"] = domain
+        else:
+            logger.warning("Ignoring invalid AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN")
 
     if not payload:
         return

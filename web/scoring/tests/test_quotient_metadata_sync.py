@@ -172,9 +172,15 @@ def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmo
     assert [b["name"] for b in QuotientMetadataCache.objects.get().boxes] == ["TREX", "PANGEA"]
 
 
-def test_metadata_sync_pushes_the_domain_boxes_are_named_under_without_a_dns_service():
-    """With no DNS service the proxy gets the domain from box names, or it keeps the last event's. Address templates,
-    name templates and deeper names don't change which domain covers the boxes."""
+@pytest.mark.parametrize(
+    ("configured_domain", "domain_field"),
+    [
+        ("", {}),
+        ("*.example.test", {}),
+        ("  Teams.Event.Example.  ", {"team_domain_name": "teams.event.example"}),
+    ],
+)
+def test_metadata_sync_only_sends_the_operator_domain_without_dns(configured_domain, domain_field):
     from django.test import override_settings
     from quotient.client import QuotientBox, QuotientInfrastructure, QuotientService
 
@@ -184,21 +190,17 @@ def test_metadata_sync_pushes_the_domain_boxes_are_named_under_without_a_dns_ser
     infra = QuotientInfrastructure(
         boxes=[
             QuotientBox(
-                name="WEB", ip="web.example.land", services=[QuotientService(name="HTTP", display_name="HTTP")]
+                name="WEB", ip="web.inventory.example", services=[QuotientService(name="HTTP", display_name="HTTP")]
             ),
-            QuotientBox(name="GIT", ip="git.example.land", services=[QuotientService(name="SSH", display_name="SSH")]),
-            QuotientBox(name="FILES", ip="10.100.1XX.44", services=[QuotientService(name="SMB", display_name="SMB")]),
-            QuotientBox(name="PINS", ip="10.100.1_.67", services=[QuotientService(name="WEB", display_name="WEB")]),
-            QuotientBox(name="WIKI", ip="www.corp.example.land.", services=[]),
-            *(
-                QuotientBox(name=f"TPL{n}", ip=f"{n}.teamxx.other.land", services=[])
-                for n in ("www", "git", "ftp", "mail")
-            ),
+            QuotientBox(name="GIT", ip="git.inventory.example", services=[]),
         ]
     )
 
     with (
-        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080", AWEFUL_PROXY_TOKEN="secret-token"),
+        override_settings(
+            AWEFUL_PROXY_URL="https://proxy.example.test",
+            AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN=configured_domain,
+        ),
         patch("scoring.quotient_sync.QuotientClient") as client,
         patch("scoring.quotient_sync.httpx.post") as mock_post,
     ):
@@ -207,16 +209,7 @@ def test_metadata_sync_pushes_the_domain_boxes_are_named_under_without_a_dns_ser
         sync_quotient_metadata()
 
     client.return_value.get_service_checks.assert_not_called()
-    assert mock_post.call_args.kwargs["json"] == {"number_of_teams": 7, "team_domain_name": "example.land"}
-
-
-def test_box_name_domain_is_the_narrowest_that_covers_the_most_boxes():
-    """An event domain deeper than two labels stays whole; a parent it shares with other sites isn't pushed."""
-    from scoring.quotient_sync import _box_hostname_domain
-
-    boxes = [{"name": n, "ip": f"{n}.inv3.example.org", "services": []} for n in ("web", "git")]
-
-    assert _box_hostname_domain(boxes) == "inv3.example.org"
+    assert mock_post.call_args.kwargs["json"] == {"number_of_teams": 7, **domain_field}
 
 
 def test_metadata_sync_pushes_config_to_aweful_proxy():
@@ -235,7 +228,8 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
                 name="BUGS",
                 ip="10.100.1XX.10",
                 services=[QuotientService(name="DNS", display_name="DNS")],
-            )
+            ),
+            QuotientBox(name="WEB", ip="web.inventory.example", services=[]),
         ]
     )
     checks = [
@@ -261,7 +255,11 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
     ]
 
     with (
-        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080/", AWEFUL_PROXY_TOKEN="secret-token"),
+        override_settings(
+            AWEFUL_PROXY_URL="http://10.0.0.10:8080/",
+            AWEFUL_PROXY_TOKEN="secret-token",
+            AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN="fallback.example",
+        ),
         patch("scoring.quotient_sync.QuotientClient") as client,
         patch("scoring.quotient_sync.httpx.post") as mock_post,
     ):
@@ -280,6 +278,26 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
         "team_dns_server_last_octet": 10,
         "team_domain_name": "acme.anvil",
         "internal_mask": "192.168.220.",
+    }
+
+    with (
+        override_settings(
+            AWEFUL_PROXY_URL="https://proxy.example.test",
+            AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN="fallback.example",
+        ),
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("scoring.quotient_sync.httpx.post") as mock_post,
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        client.return_value.get_service_checks.return_value = None
+        sync_quotient_metadata()
+
+    assert client.return_value.get_service_checks.call_count == 2
+    assert mock_post.call_args.kwargs["json"] == {
+        "number_of_teams": 38,
+        "external_mask": "10.100.1xx.",
+        "team_dns_server_last_octet": 10,
     }
 
     with (
