@@ -4,8 +4,8 @@ The team lock leaves rows referencing the team writable, and linking waits for i
 
 import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable
+from contextlib import ExitStack
 from queue import Queue
 from unittest.mock import patch
 
@@ -138,48 +138,27 @@ def test_a_feedback_edit_holding_a_score_does_not_deadlock_the_wipe(team):
     assert _not_refusals(errors) == []
 
 
-@contextmanager
-def _another_transaction_holding(team: Team, signing_out: User | None = None) -> Iterator[int]:
-    """Another transaction holds the team's lock until the block ends, as an unlink or the wipe does. With signing_out,
-    it first signs that account out everywhere, as a credentials reset does before its unlink."""
-    errors: list[BaseException] = []
-    pid = Queue[int]()
-    release = threading.Event()
-
-    def hold() -> None:
-        if signing_out is not None:
-            sign_out_everywhere(User.objects.get(pk=signing_out.pk))
-        assert Team.objects.filter(pk=team.pk).lock() == [team.pk]
-        pid.put(connection.connection.get_backend_pid())
-        assert release.wait(30)
-
-    holding = _in_thread(hold, errors)
-    try:
-        yield pid.get(timeout=10)
-    finally:
-        release.set()
-        holding.join(30)
-    assert errors == []
-
-
 def test_a_locked_team_still_takes_rows_that_reference_it(team):
-    """The team lock is FOR NO KEY UPDATE, so while an unlink or the wipe holds a team, rows referencing it stay
-    writable: an insert's foreign key check needs only a key share lock on the team. The row here is a link inserted
-    directly; a link made through execute_link takes the team lock itself and waits."""
+    """The insert's foreign key check takes KEY SHARE, which does not conflict with NO KEY UPDATE."""
     joiner = User.objects.create(username="joiner06")
+    errors: list[BaseException] = []
 
-    with _another_transaction_holding(team), transaction.atomic():
+    def insert() -> None:
         with connection.cursor() as cursor:
             cursor.execute("SET LOCAL lock_timeout = '2s'")
         DiscordLink.objects.create(user=joiner, discord_id=607, discord_username="j", team=team, is_active=True)
 
+    with transaction.atomic():
+        assert Team.objects.filter(pk=team.pk).lock() == [team.pk]
+        inserting = _in_thread(insert, errors)
+        inserting.join(30)
+        assert not inserting.is_alive()
+    assert errors == []
     assert DiscordLink.objects.filter(team=team, is_active=True).count() == 2
 
 
 def test_a_link_confirmed_during_a_reset_waits_for_it_and_links_nothing(team):
-    """A credentials reset signs the account out and, in the same transaction, unlinks its team under the team lock.
-    A link confirmed meanwhile by a session of that account waits for the lock, then finds the session signed out and
-    links nothing, so no link outlasts the reset."""
+    """Checking the session auth hash before taking the team lock would miss the uncommitted sign-out."""
     account = User.objects.create(username="team06")
     errors: list[BaseException] = []
     results: list[LinkResult | None] = []
@@ -190,14 +169,16 @@ def test_a_link_confirmed_during_a_reset_waits_for_it_and_links_nothing(team):
         pid.put(connection.connection.get_backend_pid())
         results.append(execute_link(607, "j", account, team))
 
-    with ExitStack() as workers, _another_transaction_holding(team, signing_out=account) as reset_pid:
+    with ExitStack() as workers, transaction.atomic():
+        sign_out_everywhere(User.objects.get(pk=account.pk))
+        assert Team.objects.filter(pk=team.pk).lock() == [team.pk]
         linker = _in_thread(link, errors)
         workers.callback(linker.join, 30)
         link_pid = pid.get(timeout=10)
         deadline = time.monotonic() + 10
         with connection.cursor() as cursor:
             while time.monotonic() < deadline:
-                cursor.execute("SELECT %s = ANY(pg_blocking_pids(%s))", [reset_pid, link_pid])
+                cursor.execute("SELECT pg_backend_pid() = ANY(pg_blocking_pids(%s))", [link_pid])
                 if cursor.fetchone()[0]:
                     break
                 if not linker.is_alive():
