@@ -1,7 +1,7 @@
 {% extends "admin/ops_base.html" %}
 {% load cotton %}
 {% block title %}
-    Sync Roles - WCComps Portal
+    Sync Roles - {{ SITE_NAME }}
 {% endblock title %}
 {% block admin_content %}
     <div x-data="syncRolesAdmin">
@@ -13,7 +13,7 @@
             <div>
                 <p>Synchronize competition Discord roles with Authentik groups and team seats.</p>
                 <ul class="text-muted mb-10">
-                    <li>Linked users get the Discord role for each of their Authentik groups (e.g., WCComps_GoldTeam); members linked to an active team get its team role and Blueteam</li>
+                    <li>Linked users get the Discord role for each of their Authentik groups (e.g., {{ example_group }}); members linked to an active team get its team role and Blueteam</li>
                     <li>Anyone else holding one of those roles loses it, including members who haven't linked; they get it back once they link and are in the group or on an active team</li>
                     <li>Bots, and roles the bot can't manage, are left alone; problems are listed with the results</li>
                     <li>This also runs automatically every few minutes</li>

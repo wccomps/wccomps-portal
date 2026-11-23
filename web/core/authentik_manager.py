@@ -2,7 +2,8 @@
 
 import logging
 import uuid
-from typing import TypedDict, cast
+from collections.abc import Iterator, Mapping
+from typing import NotRequired, TypedDict, cast
 from urllib.parse import quote
 
 import httpx
@@ -34,11 +35,16 @@ class AuthentikGroupEntry(TypedDict):
 
 class AuthentikUserEntry(AuthentikUser):
     groups: list[str]
+    path: NotRequired[str]
 
 
 logger = logging.getLogger(__name__)
 
 MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past this is broken, not long
+
+# What every user listing must hold; a listing with paths also needs "path"
+USER_FIELDS: dict[str, type] = {"pk": int, "username": str, "uid": str, "is_active": bool, "groups": list}
+HASHED_USER_ID = "hashed_user_id"  # an OAuth2 provider's default sub_mode: sub is the user's uid
 
 SESSIONS_HIDDEN = (
     "Authentik showed the portal's token no sessions at all: its Authentik user lacks the view Authenticated "
@@ -49,6 +55,25 @@ SESSIONS_HIDDEN = (
 def reason_for(error: AuthentikAPIError) -> str:
     """Why an Authentik call failed, for an operator: never the URL or the answer."""
     return error.message
+
+
+def is_blueteam_binding(binding: AuthentikBinding, kind: str) -> bool:
+    """Whether the binding is to a group or policy (kind) whose name contains "blueteam"."""
+    fields: Mapping[str, object] = binding
+    bound = fields.get(f"{kind}_obj")
+    name = bound.get("name") if isinstance(bound, dict) else None
+    return isinstance(name, str) and "blueteam" in name.lower()
+
+
+def blueteam_binding(bindings: list[AuthentikBinding], kinds: tuple[str, ...]) -> AuthentikBinding | None:
+    """The blue team binding of one of kinds (is_blueteam_binding), the earlier kind preferred, or None."""
+    for kind in kinds:
+        for binding in bindings:
+            if is_blueteam_binding(binding, kind):
+                logger.info(f"Found blueteam {kind} binding: {binding['pk']}")
+                return binding
+    logger.warning(f"No BlueTeam {' or '.join(kinds)} binding among {len(bindings)}")
+    return None
 
 
 def _holds(value: object, kind: type) -> bool:
@@ -214,18 +239,12 @@ class AuthentikManager:
         logger.info(f"Found application '{slug}' with pk={app['pk']}")
         return cast(AuthentikApplication, app)
 
-    def get_blueteam_binding(self, app_pk: str) -> AuthentikBinding | None:
-        """The application's BlueTeam group binding, or None when it has none."""
+    def app_bindings(self, app_pk: str) -> list[AuthentikBinding]:
+        """The application's policy bindings, each with its ``pk``, ``target`` and, as Authentik answers them,
+        ``enabled`` and the bound ``group_obj`` or ``policy_obj``."""
         bindings = self._list_all("/api/v3/policies/bindings/", {"target": app_pk}, {"pk": str, "target": str})
-        for binding in bindings:
-            group_obj = binding.get("group_obj")
-            group_name = group_obj.get("name") if isinstance(group_obj, dict) else None
-            # Guard: an ignored filter would answer every binding the token may view
-            if binding["target"] == app_pk and isinstance(group_name, str) and "blueteam" in group_name.lower():
-                logger.info(f"Found blueteam group binding: {binding['pk']} (group={group_name})")
-                return cast(AuthentikBinding, binding)
-        logger.warning(f"No BlueTeam group binding among {len(bindings)} for application {app_pk}")
-        return None
+        # Guard: an ignored filter would answer every binding the token may view
+        return cast(list[AuthentikBinding], [binding for binding in bindings if binding["target"] == app_pk])
 
     def update_binding_enabled(self, binding: AuthentikBinding, enabled: bool) -> None:
         """Set a binding's enabled state; an enabled binding allows the group access."""
@@ -238,15 +257,15 @@ class AuthentikManager:
         self._check(response, f"Update binding {binding_pk}")
         logger.info(f"Set binding {binding_pk} to {'enabled' if enabled else 'disabled'}")
 
-    def set_application_enabled(self, app_slug: str, enabled: bool) -> None:
-        """Open or close an application to blue teams through its BlueTeam group binding; AuthentikAPIError when it
-        can't, the application or its binding missing included."""
+    def set_application_enabled(self, app_slug: str, enabled: bool, kinds: tuple[str, ...]) -> None:
+        """Open or close an application to blue teams through its BlueTeam binding (blueteam_binding, of these kinds);
+        AuthentikAPIError when it can't, the application or its binding missing included."""
         app = self.get_application_by_slug(app_slug)
         if not app:
             raise AuthentikAPIError(f"Application '{app_slug}' not found in Authentik")
-        binding = self.get_blueteam_binding(app["pk"])
+        binding = blueteam_binding(self.app_bindings(app["pk"]), kinds)
         if not binding:
-            raise AuthentikAPIError(f"Application '{app_slug}' has no BlueTeam group binding")
+            raise AuthentikAPIError(f"Application '{app_slug}' has no BlueTeam {' or '.join(kinds)} binding")
         self.update_binding_enabled(binding, enabled=enabled)
         logger.info(f"Application '{app_slug}' {'enabled' if enabled else 'disabled'} for blue teams")
 
@@ -353,7 +372,10 @@ class AuthentikManager:
         """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list
         field: of strings). Raises AuthentikAPIError on an answer other than a 2xx list of that shape, or past
         MAX_PAGES."""
-        results: list[dict[str, object]] = []
+        return [result for page in self._pages(path, params, fields) for result in page]
+
+    def _pages(self, path: str, params: dict[str, str], fields: dict[str, type]) -> Iterator[list[dict[str, object]]]:
+        """_list_all a page at a time, so a caller can stop reading once it has what it wants."""
         for page in range(1, MAX_PAGES + 1):
             response = self._request(
                 "get", f"{self.base_url}{path}", params={**params, "page": str(page), "page_size": "100"}
@@ -362,21 +384,48 @@ class AuthentikManager:
             for result in found:
                 if not all(_holds(result.get(name), kind) for name, kind in fields.items()):
                     raise AuthentikAPIError(f"List {path}: a result without {', '.join(fields)}", url=str(response.url))
-            results.extend(found)
+            yield found
             if not has_next:
-                return results
+                return
         raise AuthentikAPIError(f"List {path}: more than {MAX_PAGES} pages")
 
-    def list_all_users(self) -> list[AuthentikUserEntry]:
-        """Every Authentik user, with ``pk``, ``username``, ``uid``, ``is_active`` and group pks in ``groups``."""
+    def list_all_users(self, *, with_path: bool = False) -> list[AuthentikUserEntry]:
+        """Every Authentik user, with ``pk``, ``username``, ``uid``, ``is_active`` and group pks in ``groups``, and
+        with_path, their folder in ``path``."""
+        fields = USER_FIELDS | {"path": str} if with_path else USER_FIELDS
         return cast(
-            list[AuthentikUserEntry],
-            self._list_all(
-                "/api/v3/core/users/",
-                {"include_groups": "false"},
-                {"pk": int, "username": str, "uid": str, "is_active": bool, "groups": list},
-            ),
+            list[AuthentikUserEntry], self._list_all("/api/v3/core/users/", {"include_groups": "false"}, fields)
         )
+
+    def team_folder_pages(self, path: str) -> Iterator[list[AuthentikUserEntry]]:
+        """The users in this folder, as list_all_users has them with their path, a page at a time. Each answered row's
+        path is checked: Authentik ignores a filter it doesn't know and answers every user the token may view."""
+        pages = self._pages(
+            "/api/v3/core/users/", {"path": path, "include_groups": "false"}, USER_FIELDS | {"path": str}
+        )
+        for page in pages:
+            yield cast(list[AuthentikUserEntry], [user for user in page if user["path"] == path])
+
+    def users_may_change_username(self) -> bool:
+        """Authentik's system setting letting users change their own username (default_user_change_username).
+        AuthentikAPIError when it can't be read: the token needs view System settings."""
+        response = self._request("get", f"{self.base_url}/api/v3/admin/settings/")
+        self._check(response, "Read the system settings")
+        settings_data = self._json(response, "Read the system settings")
+        allowed = settings_data.get("default_user_change_username") if isinstance(settings_data, dict) else None
+        if type(allowed) is not bool:
+            raise AuthentikAPIError("Read the system settings: no boolean default_user_change_username")
+        return allowed
+
+    def oauth2_sub_mode(self, client_id: str) -> str | None:
+        """The sub_mode of the OAuth2 provider with exactly this client ID, or None when the token sees none (it needs
+        view on that provider)."""
+        providers = self._list_all(
+            "/api/v3/providers/oauth2/", {"client_id": client_id}, {"client_id": str, "sub_mode": str}
+        )
+        # Guard: an ignored filter would answer every provider the token may view
+        provider = next((p for p in providers if p["client_id"] == client_id), None)
+        return None if provider is None else cast(str, provider["sub_mode"])
 
     def list_all_groups(self) -> list[AuthentikGroupEntry]:
         """Every Authentik group, with ``pk``, ``name`` and parent pks in ``parents``."""

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
@@ -5,11 +6,13 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.functional import cached_property
 
 from core.models import Approvable
 from core.stored_files import MAX_SCREENSHOT_SIZE, StoredFile
-from core.utils import shorten
+from core.utils import advisory_xact_lock, shorten
+from core.validators import validate_jsonb_storable
 
 
 def format_boxes_display(boxes: list[str] | str | None) -> str:
@@ -109,10 +112,14 @@ class QuotientMetadataCache(models.Model):
 
     boxes = models.JSONField(
         default=list,
+        blank=True,
+        validators=[validate_jsonb_storable],
         help_text="List of boxes from Quotient metadata",
     )
     services = models.JSONField(
         default=list,
+        blank=True,
+        validators=[validate_jsonb_storable],
         help_text="List of services from Quotient metadata",
     )
 
@@ -391,8 +398,16 @@ class RedTeamScreenshot(StoredFile):
         return f"{self.filename} ({self.finding})"
 
 
+# Who sees and reviews every team's incident reports: White Team (the permission's groups hold Gold Team and admins)
+INCIDENT_STAFF = "white_team"
+
+
 class IncidentReport(Approvable):
     """Blue team incident report submission."""
+
+    # A team's reports per window: each can carry MAX_SUBMISSION_SIZE of screenshots into Postgres
+    SUBMISSION_LIMIT = 10
+    SUBMISSION_WINDOW = timedelta(hours=1)
 
     team = models.ForeignKey(
         "team.Team",
@@ -459,6 +474,23 @@ class IncidentReport(Approvable):
     @property
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
+
+    @classmethod
+    def over_submission_limit(cls, team_id: int) -> bool:
+        """Whether the team has filed SUBMISSION_LIMIT reports within SUBMISSION_WINDOW. Call it in the transaction
+        that saves the report: it takes an advisory lock on the team until that ends, so submissions at once can't all
+        pass."""
+        advisory_xact_lock(f"incident_reports:team:{team_id}")
+        since = timezone.now() - cls.SUBMISSION_WINDOW
+        return cls.objects.filter(team_id=team_id, created_at__gte=since).count() >= cls.SUBMISSION_LIMIT
+
+    @classmethod
+    def limit_reached_message(cls) -> str:
+        minutes = int(cls.SUBMISSION_WINDOW.total_seconds() // 60)
+        return (
+            f"Your team has filed {cls.SUBMISSION_LIMIT} incident reports in the last {minutes} minutes. "
+            "Wait a while before filing another."
+        )
 
 
 class IncidentScreenshot(StoredFile):
@@ -648,6 +680,12 @@ class ServiceDetail(models.Model):
     )
     service_name = models.CharField(max_length=100, help_text="Service identifier (e.g., balrog-ntp)")
     points = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    uptime = models.DecimalField(
+        max_digits=6,
+        decimal_places=4,
+        default=Decimal("0"),
+        help_text="Uptime percentage (0.0000 to 1.0000)",
+    )
     sla_violations = models.IntegerField(
         default=0,
         help_text="Number of SLA violations",
@@ -662,6 +700,47 @@ class ServiceDetail(models.Model):
 
     def __str__(self) -> str:
         return f"{self.team.team_name}, {self.service_name}: {self.points}"
+
+
+class ServiceCorrectionBatch(models.Model):
+    event = models.ForeignKey("registration.Event", on_delete=models.PROTECT)
+    service_name = models.CharField(max_length=100)
+    ruling = models.SlugField(max_length=100)
+    manifest_sha256 = models.CharField(max_length=64)
+    baseline_sha256 = models.CharField(max_length=64)
+    portal_baseline_sha256 = models.CharField(max_length=64)
+    service_modifier = models.CharField(max_length=64)
+    sync_conflict = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "service_name", "ruling"], name="unique_service_correction_ruling"
+            ),
+            models.UniqueConstraint(
+                fields=["event"],
+                condition=models.Q(revoked_at__isnull=True),
+                name="one_active_service_correction_per_event",
+            ),
+        ]
+
+
+class ServiceCorrection(models.Model):
+    batch = models.ForeignKey(ServiceCorrectionBatch, on_delete=models.PROTECT)
+    team = models.ForeignKey("team.Team", on_delete=models.PROTECT)
+    quotient_team_id = models.PositiveBigIntegerField()
+    service_credit = models.IntegerField()
+    sla_credit = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["batch", "team"], name="one_service_correction_per_team"),
+            models.UniqueConstraint(
+                fields=["batch", "quotient_team_id"], name="one_service_correction_per_quotient_id"
+            ),
+        ]
 
 
 class ScoringExclusion(models.Model):

@@ -12,7 +12,7 @@ from django.db.models import Q
 from bot.ticket_dashboard import TicketActionView, format_ticket_embed
 from bot.utils import DISCORD_THREAD_NAME_CHAR_LIMIT, THREAD_AUTO_ARCHIVE_MINUTES, fit, team_chat_channel
 from core.auth_utils import get_user_team
-from core.discord_tasks import PermanentTaskError
+from core.queued_tasks import PermanentTaskError
 from team.models import DiscordLink
 from ticketing.models import Ticket
 

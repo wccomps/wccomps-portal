@@ -5,7 +5,7 @@ from django.urls import reverse
 
 from core.broadcast import AllTeams, Announcements, Teams, parse_broadcast_target
 from core.forms import BroadcastForm
-from core.models import DiscordTask
+from core.models import QueuedTask
 
 
 @pytest.mark.parametrize(
@@ -45,4 +45,4 @@ def test_a_bad_range_is_not_queued(client) -> None:
 
     assert response.status_code == 400
     assert "Invalid range" in response.json()["error"]
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()

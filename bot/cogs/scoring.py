@@ -7,14 +7,27 @@ from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
-from scoring.models import IncidentReport
+from scoring.models import INCIDENT_STAFF, IncidentReport
 
 from bot.permissions import check_blue_team, linked_team_member
 from bot.ticket_input import form_errors
 from bot.utils import add_field
+from core.auth_utils import has_permission
 
 logger = logging.getLogger(__name__)
+
+
+def _save_within_limit(incident: IncidentReport) -> bool:
+    """Save the report unless its team is over IncidentReport's submission limit, as the web form does: counted and
+    saved in one transaction under the team's lock, staff exempt. Whether it was saved."""
+    with transaction.atomic():
+        staff = incident.submitted_by is not None and has_permission(incident.submitted_by, INCIDENT_STAFF)
+        if not staff and IncidentReport.over_submission_limit(incident.team_id):
+            return False
+        incident.save()
+    return True
 
 
 class ScoringCog(commands.Cog):
@@ -83,7 +96,9 @@ class ScoringCog(commands.Cog):
             return
 
         try:
-            await incident.asave()
+            if not await sync_to_async(_save_within_limit)(incident):
+                await interaction.response.send_message(IncidentReport.limit_reached_message(), ephemeral=True)
+                return
 
             embed = discord.Embed(
                 title="Incident Report Submitted",

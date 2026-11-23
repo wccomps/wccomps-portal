@@ -318,9 +318,9 @@ def box_reset_lock_key(ticket_id: int) -> str:
 
 
 def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, snapshot: str) -> Iterator[str]:
-    from core.discord_tasks import PostComment
-    from core.models import DiscordTask
+    from core.models import QueuedTask
     from core.proxmox import ProxmoxAPIError, get_proxmox_client, match_team_vm, normalize_ticket_host
+    from core.queued_tasks import PostComment
     from ticketing.models import TicketComment
 
     # Held across the state check and the reset, so a second submission sees the resolved ticket
@@ -342,6 +342,11 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
             yield ndjson_done(error, success=False)
             return
 
+        client = get_proxmox_client()
+        if not client.configured:
+            yield ndjson_done("Proxmox isn't configured.", success=False)
+            return
+
         if normalize_ticket_host(ticket.team.team_number, ticket.hostname) is None:
             yield ndjson_done(
                 f"No Proxmox VM matched hostname '{ticket.hostname}' for Team {ticket.team.team_number}.",
@@ -349,7 +354,6 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
             )
             return
 
-        client = get_proxmox_client()
         vms = client.list_team_vms(ticket.team.team_number)
         if vms is None:
             yield ndjson_done("Proxmox isn't reachable.", success=False)
@@ -379,7 +383,7 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
                 author=user,
                 comment_text=f"Starting box reset of {vm.name} to snapshot '{snapshot}'.",
             )
-            DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=start_comment.id))
+            QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=start_comment.id))
 
             yield ndjson_progress(f"Rolling back {vm.name} to '{snapshot}'...", 1, 4)
             rollback_upid = client.rollback_snapshot(vm.node, vm.vmid, snapshot)
@@ -419,7 +423,7 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
                 author=user,
                 comment_text=f"Box reset of {vm.name} to snapshot '{snapshot}' complete; VM is started.",
             )
-            DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=done_comment.id))
+            QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=done_comment.id))
             _record_box_reset_outcome(
                 ticket=ticket,
                 user=user,

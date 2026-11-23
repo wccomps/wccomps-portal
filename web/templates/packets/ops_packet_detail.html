@@ -1,7 +1,7 @@
 {% extends "admin/ops_base.html" %}
 {% load cotton status_variants %}
 {% block title %}
-    Packet: {{ packet.title }} - WCComps Portal
+    Packet: {{ packet.title }} - {{ SITE_NAME }}
 {% endblock title %}
 {% block admin_content %}
     <div x-data="packetAdmin">
@@ -17,19 +17,19 @@
                     </c-badge>
                     <span>{{ packet.filename }} ({{ packet.file_size|filesizeformat }})</span>
                     <span class="text-muted">|</span>
-                    <span>{{ stats.total }} teams</span>
+                    <span>{{ packet.total_distributions }} teams</span>
                     <span class="text-muted">|</span>
-                    <span>{{ stats.sent }} sent</span>
-                    {% if stats.pending and packet.is_sent %}
+                    <span>{{ packet.sent_count }} sent</span>
+                    {% if packet.pending_count and packet.is_sent %}
                         <span class="text-muted">|</span>
-                        <span class="text-warning">{{ stats.pending }} pending</span>
+                        <span class="text-warning">{{ packet.pending_count }} pending</span>
                     {% endif %}
-                    {% if stats.failed > 0 %}
+                    {% if packet.failed_count > 0 %}
                         <span class="text-muted">|</span>
-                        <span class="text-danger">{{ stats.failed }} failed</span>
+                        <span class="text-danger">{{ packet.failed_count }} failed</span>
                     {% endif %}
                     <span class="text-muted">|</span>
-                    <span>{{ stats.downloaded }} downloaded</span>
+                    <span>{{ packet.downloaded_count }} downloaded</span>
                 </div>
                 <div class="d-flex gap-10">
                     {% if packet.status == "draft" %}
@@ -41,7 +41,7 @@
                             Distribute
                         </c-button>
                     {% endif %}
-                    {% if stats.pending > 0 and packet.is_sent %}
+                    {% if packet.pending_count > 0 and packet.is_sent %}
                         <c-button variant="warning"
                                   @click="runStreamAction"
                                   data-action="resend_pending"
@@ -50,7 +50,7 @@
                             Retry Pending
                         </c-button>
                     {% endif %}
-                    {% if stats.failed > 0 %}
+                    {% if packet.failed_count > 0 %}
                         <c-button variant="warning"
                                   @click="runStreamAction"
                                   data-action="resend_failed"

@@ -5,14 +5,17 @@ request_finished) never ran for it: after a Postgres restart its one connection 
 every loop logged errors forever while the process looked healthy.
 """
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 import pytest_asyncio
 from asgiref.sync import sync_to_async
 from django.db import connection
 from django.db.utils import Error as DjangoDBError
 
-from bot.utils import recycle_db_connection
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.utils import recycle_db_connection
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
@@ -27,7 +30,7 @@ async def _fresh_connection_each_test():
 
 @sync_to_async
 def _count_tasks() -> int:
-    return DiscordTask.objects.count()
+    return QueuedTask.objects.count()
 
 
 @sync_to_async
@@ -67,23 +70,43 @@ async def test_recycling_is_harmless_on_healthy_connection():
     assert await _count_tasks() == 0
 
 
+def _discord_queue() -> object:
+    from bot.discord_queue import DiscordQueueProcessor
+
+    return DiscordQueueProcessor(MagicMock())
+
+
+def _worker_queue() -> object:
+    from core.worker_tasks import WorkerQueueProcessor
+
+    return WorkerQueueProcessor()
+
+
+def _dashboard() -> object:
+    from bot.unified_dashboard import UnifiedDashboard
+
+    dashboard = UnifiedDashboard.__new__(UnifiedDashboard)
+    dashboard.bot = MagicMock()
+    dashboard.bot.wait_until_ready = AsyncMock()
+    dashboard.running = True
+    return dashboard
+
+
 @pytest.mark.parametrize(
-    ("module", "loop_attr", "work_attr"),
+    ("module", "make", "work_attr"),
     [
-        ("bot.discord_queue", "DiscordQueueProcessor", "_process_pending_tasks"),
-        ("bot.unified_dashboard", "UnifiedDashboard", "_pass"),
+        ("core.task_queue", _discord_queue, "process_pending"),
+        ("core.task_queue", _worker_queue, "process_pending"),
+        ("bot.unified_dashboard", _dashboard, "_pass"),
     ],
+    ids=["discord-queue", "worker-queue", "dashboard"],
 )
-async def test_each_loop_recycles_before_its_work(module, loop_attr, work_attr, monkeypatch):
+async def test_each_loop_recycles_before_its_work(module, make, work_attr, monkeypatch):
     """Each polling loop must recycle the connection at the start of every pass."""
     import importlib
-    from unittest.mock import AsyncMock, MagicMock
 
     mod = importlib.import_module(module)
-    cls = getattr(mod, loop_attr)
-    obj = cls.__new__(cls)
-    obj.bot = MagicMock()
-    obj.bot.wait_until_ready = AsyncMock()
+    obj = make()
     calls: list[str] = []
 
     async def fake_recycle() -> None:
@@ -91,14 +114,13 @@ async def test_each_loop_recycles_before_its_work(module, loop_attr, work_attr, 
 
     async def fake_work(*_args: object) -> None:
         calls.append("work")
-        obj.running = False  # one pass only
+        raise asyncio.CancelledError  # one pass only
 
     monkeypatch.setattr(mod, "recycle_db_connection", fake_recycle)
     monkeypatch.setattr(obj, work_attr, fake_work)
     monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
-    obj.running = True
-
-    loop_method = next(getattr(obj, n) for n in ("_process_loop", "_dashboard_loop") if hasattr(obj, n))
-    await loop_method()
+    loop_method = next(getattr(obj, n) for n in ("run", "_dashboard_loop") if hasattr(obj, n))
+    with pytest.raises(asyncio.CancelledError):
+        await loop_method()
 
     assert calls == ["recycle", "work"]

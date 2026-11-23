@@ -1,5 +1,25 @@
 """Settings for the test suite: production settings plus what tests need to run fast and in parallel."""
 
+import os
+
+# The suite runs as WRCCDC's deployment (its production configmap's values): fixtures use its group names, names and
+# hosts. setdefault, so a test run can still override one from the environment.
+for _name, _value in {
+    "PORTAL_GROUP_PREFIX": "WCComps_",
+    "PORTAL_ADMIN_GROUP": "WCComps_Discord_Admin",
+    "ORG_NAME": "Western Cyber Competitions",
+    "ORG_SHORT_NAME": "WCComps",
+    "AUTHENTIK_URL": "https://auth.wccomps.org",
+    "QUOTIENT_API_URL": "https://scoring.wccomps.org",
+    "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
+    "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
+    "DISCORD_BOT_TOKEN": "test-token",
+    "DISCORD_SERVER_OWNER_ROLE": "WRCCDC Server Owners",
+    # A fixed key as strong as portal.required asks, so the processes' startup checks pass (public: tests only)
+    "DJANGO_SECRET_KEY": "test-only-key-0123456789-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJ",
+}.items():
+    os.environ.setdefault(_name, _value)
+
 from portal.settings import *  # noqa: F403
 from portal.settings import DATABASES, LOGGING, STORAGES
 

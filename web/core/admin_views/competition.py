@@ -40,7 +40,6 @@ from core.admin_views.readiness import READINESS_FIXES, action_readiness_check, 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from core.authentik_utils import credentials_csv, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
-from core.discord_tasks import LogToChannel
 from core.errors import json_endpoint
 from core.forms import (
     ActionForm,
@@ -52,7 +51,7 @@ from core.forms import (
     StartMessageForm,
     TypedConfirmForm,
 )
-from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig, DiscordTask
+from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig
 from core.services.competition import (
     KEEP,
     ConfigEditError,
@@ -63,9 +62,10 @@ from core.services.competition import (
     set_schedule,
     set_start_message,
 )
+from core.services.ops import notify_ops
 from core.utils import Stepped, drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
-from team.models import active_team_numbers
+from team.models import active_team_numbers, single_account
 
 from ..auth_utils import require_permission
 from ..utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES, UnknownTimezoneError, parse_datetime_to_utc
@@ -174,11 +174,11 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
             message, complete = result.summary(), False
         case RunOutcome.INCOMPLETE:
             ops = f"**Competition {verb} (incomplete)** by {authentik_username} (web)\n{result.summary()}"
-            DiscordTask.enqueue(LogToChannel(message=ops))
+            notify_ops(ops, actor=authentik_username)
             message, complete = f"Incomplete: run {'Start' if enable else 'Stop'} again.\n{result.summary()}", False
         case RunOutcome.COMPLETE:
             ops = f"**Competition {verb}** by {authentik_username} (web)\n{result.summary()}"
-            DiscordTask.enqueue(LogToChannel(message=ops))
+            notify_ops(ops, actor=authentik_username)
             message, complete = result.summary(), True
     yield ndjson_done(message, success=complete)
 
@@ -385,11 +385,26 @@ SECTION_CONTEXT: dict[Section, Callable[[EventStage], dict[str, object]]] = {
 def admin_competition(request: HttpRequest) -> HttpResponse:
     stage = event_stage()
     panel = event_panel(event_facts(stage))
+    can_cancel = not cancel_event_problem(stage)
     can_clear = not clear_leftovers_problem(stage)
+    # Resetting passwords needs a team's one account: with several, they're managed in Authentik
+    can_reset = single_account()
+    advanced = [
+        name
+        for name, shown in (
+            ("reset team passwords", can_reset),
+            ("start the competition again", panel.reopen_offered),
+            ("cancel the event", can_cancel),
+            ("clear leftover data", can_clear),
+        )
+        if shown
+    ]
     context: dict[str, object] = {
         "panel": panel,
         "anchors": ids(Anchor),
-        "can_cancel": not cancel_event_problem(stage),
+        "advanced_heading": f"Advanced: {', '.join(advanced)}" if advanced else "Advanced",
+        "can_reset": can_reset,
+        "can_cancel": can_cancel,
         "can_clear": can_clear,
         "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
     }

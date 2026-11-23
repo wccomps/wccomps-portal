@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -11,11 +12,18 @@ from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
 from scoring.models import QuotientMetadataCache
 from scoring.scorecard import build_peer_context, build_scorecard_context
+from scoring.service_corrections import correction_problem
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
-from core.discord_tasks import ClearTeamChannels, ReconcileTeams
-from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
+from core.queued_tasks import (
+    ClearTeamChannels,
+    CompetitionStatusChanged,
+    ReconcileNextcloud,
+    ReconcileTeams,
+    ResetNextcloudTeam,
+)
 from core.services.competition import run_lock
 from core.services.linking import COMPETITION_CLEANUP, unlink_teams
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
@@ -27,6 +35,7 @@ from .models import (
     EventArchive,
     EventResult,
     EventTeamAssignment,
+    RegistrationEventEnrollment,
     School,
     Season,
     TeamRegistration,
@@ -79,6 +88,65 @@ def school_shown(info: SchoolInfo | None) -> tuple[int, str] | None:
     return (info.school_id, info.school.name_key) if info is not None else None
 
 
+@dataclass(frozen=True)
+class SchoolClash:
+    """Why the review page flags a registration: the other pending or approved registrations of its school for one of
+    its events, oldest first, and the team already holding its school."""
+
+    same_school: list[TeamRegistration]
+    held_by: Team | None
+
+    @property
+    def approved_twin(self) -> bool:
+        """Another approved one: the review page offers Reject on an approved registration then."""
+        return any(other.status == "approved" for other in self.same_school)
+
+
+def school_clashes() -> dict[int, SchoolClash]:
+    """The pending and approved registrations for events still to come whose school (by normalize_school_name)
+    another such registration names for one of the same events, or a team holds that wasn't given to it; by id.
+
+    A student can register a rival school's name with their own email: approving both, or the wrong one, would send
+    the rival's team password to them. Earlier seasons' registrations of a school don't count: it registers again.
+    """
+    school_of: dict[int, str] = {}
+    at_event: defaultdict[tuple[str, int], set[int]] = defaultdict(set)
+    for registration_id, school_name, event_id in RegistrationEventEnrollment.objects.filter(
+        registration__status__in=("pending", "approved"), event__is_finalized=False
+    ).values_list("registration_id", "registration__school_name", "event_id"):
+        school_of[registration_id] = key = normalize_school_name(school_name)
+        at_event[key, event_id].add(registration_id)
+
+    same_school: defaultdict[int, set[int]] = defaultdict(set)
+    for registration_ids in at_event.values():
+        for registration_id in registration_ids:
+            same_school[registration_id] |= registration_ids - {registration_id}
+
+    holders = {info.school.name_key: info.team for info in SchoolInfo.objects.select_related("school", "team")}
+    given = set(
+        EventTeamAssignment.objects.filter(registration_id__in=school_of).values_list("registration_id", "team_id")
+    )
+    held_by = {
+        registration_id: team
+        for registration_id, key in school_of.items()
+        if (team := holders.get(key)) is not None and (registration_id, team.pk) not in given
+    }
+
+    flagged = {registration_id for registration_id, others in same_school.items() if others} | held_by.keys()
+    shown = TeamRegistration.objects.prefetch_related("contacts").in_bulk(
+        set[int]().union(*(same_school[registration_id] for registration_id in flagged))
+    )
+    return {
+        registration_id: SchoolClash(
+            same_school=sorted(
+                (shown[other] for other in same_school[registration_id]), key=lambda r: (r.submitted_at, r.pk)
+            ),
+            held_by=held_by.get(registration_id),
+        )
+        for registration_id in flagged
+    }
+
+
 @transaction.atomic
 def set_team_school(
     team: Team,
@@ -128,9 +196,11 @@ def set_team_school(
         raise TeamTakenError(f"Team {team.team_number} already has a school: {info.school_name}.")
     held = (info.school_id if info else None) if isinstance(previous_school, Held) else previous_school
     if not rename and held != school.pk:
-        # The last school's announcements and Discord channels aren't the new one's
+        # The last school's announcements, Discord channels and Nextcloud files aren't the new one's; queued in this
+        # transaction, so nothing is reset for a hand-over that rolls back
         QueuedAnnouncement.objects.filter(team=team).delete()
         _clear_old_channels(team)
+        _enqueue_unless_pending(ResetNextcloudTeam(team_number=team.team_number))
     if info is None:
         info = SchoolInfo.objects.create(team=team, **fields)
     else:
@@ -189,11 +259,23 @@ def _clear_old_channels(team: Team) -> None:
     )
     if not left.update(channels_need_clearing=True):
         return
-    pending = DiscordTask.objects.filter(
-        task_type=ClearTeamChannels.task_type, status="pending", payload__team_number=team.team_number
+    _enqueue_unless_pending(ClearTeamChannels(team_number=team.team_number))
+
+
+def _enqueue_unless_pending(payload: ClearTeamChannels | ResetNextcloudTeam) -> None:
+    """Queue payload unless a row of its type for its team is already pending."""
+    pending = QueuedTask.objects.filter(
+        task_type=payload.task_type, status="pending", payload__team_number=payload.team_number
     )
     if not pending.exists():
-        DiscordTask.enqueue(ClearTeamChannels(team_number=team.team_number))
+        QueuedTask.enqueue(payload)
+
+
+def queue_team_reconcile(actor: str, open_event_id: int | None) -> None:
+    """Queue the teardown and set-up of the team channels and of the Nextcloud accounts, for the open event
+    open_event_id (None, none open), in the caller's transaction."""
+    QueuedTask.enqueue(ReconcileTeams(requested_by=actor, open_event_id=open_event_id))
+    QueuedTask.enqueue(ReconcileNextcloud(requested_by=actor, open_event_id=open_event_id))
 
 
 def activate_teams(teams: list[Team]) -> int:
@@ -389,7 +471,7 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     opening = not event.is_active
     event.open()
     if opening:
-        DiscordTask.enqueue(ReconcileTeams(requested_by=updated_by, open_event_id=event.pk))
+        queue_team_reconcile(updated_by, event.pk)
         # Queued for team numbers whose channels the teardown removed; a new school would get them on linking
         QueuedAnnouncement.objects.all().delete()
     # So a team keeping its school in an event already open keeps its Discord channels and announcements
@@ -511,6 +593,8 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
         return f"Nothing to close out for {stage.event}. {stage.alternative}"
     if not stage.played:
         return f"Nothing to close out. {stage.status} {stage.next_step}"
+    if problem := correction_problem(stage.event.pk if stage.event else None):
+        return problem
     if stage.event is None and not Season.objects.filter(is_active=True).exists():
         return (
             "No season is active, and Close Out records these scores at a new event in the active season. Make a "
@@ -616,7 +700,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
         event.close()
         _reset_for_next_event(config)
         # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
-        DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
+        queue_team_reconcile(actor, None)
         AuditLog.objects.create(
             action=EVENT_CLOSED_OUT,
             admin_user=actor,
@@ -811,10 +895,10 @@ def teardown_problem(stage: EventStage, open_event_id: int | None) -> str:
 
 
 def _reset_for_next_event(config: CompetitionConfig) -> int:
-    """Clear the schedule, start message, Quotient box list and queued announcements (again after commit), and
-    scrub the start broadcasts, failing any not yet sent. Call with the config row locked; returns how many
-    announcements it deleted."""
-    broadcasts = DiscordTask.objects.filter(pk__in=config.start_broadcasts)
+    """Clear the schedule, start message, Quotient box list and queued announcements (again after commit), scrub the
+    start broadcasts, failing any not yet sent, and queue a status refresh. Call with the config row locked; returns
+    how many announcements it deleted."""
+    broadcasts = QueuedTask.objects.filter(pk__in=config.start_broadcasts)
     broadcasts.filter(status="pending").update(status="failed", error_message=START_BROADCAST_STOPPED)
     broadcasts.filter(status="processing").update(status="failed", error_message=START_BROADCAST_CUT_OFF)
     for task in broadcasts:
@@ -842,6 +926,7 @@ def _reset_for_next_event(config: CompetitionConfig) -> int:
             "updated_at",
         ]
     )
+    QueuedTask.enqueue(CompetitionStatusChanged())
     QuotientMetadataCache.objects.all().delete()
     announcements, _ = QueuedAnnouncement.objects.all().delete()
     # Again once committed: the bot may queue one the transaction's snapshot didn't see
@@ -870,7 +955,7 @@ def reset_for_discord_cleanup(actor: str) -> DiscordCleanupReset:
             target_id=config.pk,
             details={"unlinked": reset.unlinked, "queued_announcements_deleted": reset.announcements},
         )
-        DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
+        queue_team_reconcile(actor, None)
     return reset
 
 

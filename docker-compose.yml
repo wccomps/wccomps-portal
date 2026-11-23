@@ -1,12 +1,27 @@
-# Run the portal with Docker: Postgres, the web app and the Discord bot.
+# Run the portal with Docker: Postgres, the web app, the worker and (with the chat profile) the chat process: the
+# Discord bot, the Zulip runner, or both.
 #   cp .env.example .env    # fill it in
 #   docker compose up -d     # published image; `docker compose up -d --build` runs this checkout
-# The web app listens on http://localhost:${WEB_PORT:-8000}; put it behind an HTTPS reverse proxy
-# (with DJANGO_DEBUG=False the session and CSRF cookies are HTTPS-only).
+#   docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* trio is set
+# The web app is published on 127.0.0.1:8000 of the host (WEB_PORT) for an HTTPS reverse proxy on the same host, as
+# docs/self-hosting.md "The reverse proxy" describes (with DJANGO_DEBUG=False the session and CSRF cookies are
+# HTTPS-only). Publish it wider (WEB_PORT=8000) only on purpose: Docker's port rules get past a host firewall, and a
+# client reaching gunicorn directly skips the proxy's limits.
+# The portal's containers run with a read-only root, no Linux capabilities and no privilege escalation; they write only
+# to their /tmp (uploads, fontconfig) and /app/run (heartbeats), each a tmpfs.
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs:
+    - /tmp
+    - /app/run:uid=1001,gid=1001
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Pinned by digest; refresh both together (docker buildx imagetools inspect postgres:16-alpine)
+    image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       POSTGRES_DB: ${DB_NAME:-wccomps}
       POSTGRES_USER: ${DB_USER:-wccomps}
@@ -26,6 +41,7 @@ services:
       retries: 5
 
   web:
+    <<: *hardened
     image: ghcr.io/wccomps/wccomps-portal:${PORTAL_TAG:-main}
     build: .
     env_file: .env
@@ -36,7 +52,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${WEB_PORT:-8000}:8000"
+      - "${WEB_PORT:-127.0.0.1:8000}:8000"
     restart: unless-stopped
     healthcheck:
       # Any HTTP answer means gunicorn is up (and migrations are done): a Host header outside
@@ -56,13 +72,13 @@ services:
       retries: 3
       start_period: 60s
 
-  bot:
-    # Same image; skip its entrypoint (migrations are web's job) and run the bot instead.
-    # Exactly one bot may run per Discord token.
+  worker:
+    # Same image; skip its entrypoint (migrations are web's job) and run the periodic jobs and the worker queue.
+    <<: *hardened
     image: ghcr.io/wccomps/wccomps-portal:${PORTAL_TAG:-main}
     entrypoint: []
     working_dir: /app
-    command: ["python", "main.py"]
+    command: ["python", "-m", "worker"]
     env_file: .env
     environment:
       DB_HOST: postgres
@@ -71,6 +87,41 @@ services:
       web:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "core.health", "worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  chat:
+    # Same image; skip its entrypoint and run the chat backends configured in .env (Discord: DISCORD_BOT_TOKEN; Zulip:
+    # ZULIP_SITE, ZULIP_BOT_EMAIL and ZULIP_API_KEY). Run exactly one chat process per deployment.
+    profiles: [chat]
+    <<: *hardened
+    image: ghcr.io/wccomps/wccomps-portal:${PORTAL_TAG:-main}
+    entrypoint: []
+    working_dir: /app
+    command: ["python", "-m", "chat"]
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      # The chat process never reaches Proxmox or aweful-proxy and sends no mail (THREAT_MODEL.md), so it doesn't get
+      # their credentials: a hole in the code that parses Discord and Zulip input can't hand them out
+      PROXMOX_API_TOKEN: ""
+      AWEFUL_PROXY_TOKEN: ""
+      EMAIL_HOST_PASSWORD: ""
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "core.health", "chat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
 volumes:
   postgres_data:

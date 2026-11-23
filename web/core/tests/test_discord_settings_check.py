@@ -6,7 +6,7 @@ the values, so role sync, /link roles and announcement broadcasts silently did n
 
 import pytest
 
-from core.admin_views.readiness import ALL_CHECKS, _check_discord_settings
+from core.admin_views.readiness import _check_discord_settings, checks
 from core.utils import REQUIRED_DISCORD_SETTINGS, missing_discord_settings
 
 
@@ -55,4 +55,4 @@ def test_readiness_passes_when_all_set(all_set):
 
 
 def test_readiness_runs_the_check():
-    assert any(fn is _check_discord_settings for _, fn in ALL_CHECKS)
+    assert any(fn is _check_discord_settings for _, fn in checks())

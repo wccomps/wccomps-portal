@@ -11,20 +11,22 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
+from bot.cogs.help_panels import TicketButton, _has_button, post_ticket_panel
 from bot.role_sync import sync_member_roles
 from bot.utils import (
-    TaskProgress,
     category_chat_channel,
     find_team_category,
     find_team_role,
+    org_named,
+    room_judge_role_name,
     send_parts,
     team_category_name,
     team_role_name,
 )
-from bot.utils import announcement as announcement_text
-from core.discord_tasks import SetupTeamInfrastructure
-from core.models import DiscordTask, QueuedAnnouncement
+from core.models import QueuedAnnouncement, QueuedTask
+from core.queued_tasks import SetupTeamInfrastructure
+from core.task_queue import StepsState, TaskProgress
+from core.utils import announcement as announcement_text
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -93,7 +95,7 @@ def _record_teardown(team: Team, cleared: list[str], then_setup: bool) -> None:
     with transaction.atomic():
         team.save(update_fields=[*cleared, "channels_need_clearing"])
         if then_setup and not team.channels_need_clearing and team.members.filter(is_active=True).exists():
-            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
+            QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
 
 
 class TeamInfrastructureError(Exception):
@@ -104,15 +106,21 @@ _TEAM_ROLE_NAME_PATTERN = re.compile(r"^Team (\d+)$")
 _TEAM_CATEGORY_NAME_PATTERN = re.compile(r"^team (\d+)$", re.IGNORECASE)
 
 _TALKS = {"read_messages": True, "send_messages": True, "connect": True, "speak": True}
-# Roles found by name that see every team category, and what they may do there
-GUEST_ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
-    "WCComps Observers": {"read_messages": True, "send_messages": False, "connect": False},
-    "Orange Team Guest": _TALKS,
-    "Black Team Guest": _TALKS,
-    "WCComps Room Judge": {"read_messages": True},
-    "WCComps Operations Team": _TALKS,
-    "WRCCDC Server Owners": _TALKS,
-}
+
+
+def guest_role_permissions() -> dict[str, dict[str, bool]]:
+    """Roles found by name that see every team category, and what they may do there."""
+    roles = {
+        org_named("Observers"): {"read_messages": True, "send_messages": False, "connect": False},
+        "Orange Team Guest": _TALKS,
+        "Black Team Guest": _TALKS,
+        room_judge_role_name(): {"read_messages": True},
+        org_named("Operations Team"): _TALKS,
+    }
+    if settings.DISCORD_SERVER_OWNER_ROLE:
+        roles[settings.DISCORD_SERVER_OWNER_ROLE] = _TALKS
+    return roles
+
 
 type Overwrites = dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]
 
@@ -122,7 +130,7 @@ async def recreate_team_infrastructure(
     team: Team,
     reason: str,
     bot: discord.Client | None = None,
-    progress: TaskProgress | None = None,
+    progress: TaskProgress[StepsState] | None = None,
 ) -> tuple[list[str], discord.CategoryChannel]:
     """Delete what the team has in Discord and set it up again; returns what was deleted and the new category. With
     progress the delete counts as a step, so a retry keeps what the first attempt built."""
@@ -174,7 +182,7 @@ async def setup_team_infrastructure(
         category = await step(
             "create the category",
             guild.create_category(
-                name=team_category_name(team_number), overwrites=overwrites, reason="WCComps team category"
+                name=team_category_name(team_number), overwrites=overwrites, reason=org_named("team category")
             ),
         )
     elif role not in category.overwrites and role != guild.default_role:
@@ -192,13 +200,13 @@ async def setup_team_infrastructure(
     if not chat_channel:
         chat_channel = await step(
             "create the chat channel",
-            category.create_text_channel(f"team{team_number:02d}-chat", reason="WCComps team text channel"),
+            category.create_text_channel(f"team{team_number:02d}-chat", reason=org_named("team text channel")),
         )
     await step("post the ticket panel", _post_ticket_panel(bot, team_number, chat_channel))
     if not any(isinstance(c, discord.VoiceChannel) for c in category.channels):
         await step(
             "create the voice channel",
-            category.create_voice_channel(f"team{team_number:02d}-voice", reason="WCComps team voice channel"),
+            category.create_voice_channel(f"team{team_number:02d}-voice", reason=org_named("team voice channel")),
         )
     logger.info(f"Set up infrastructure for {team.team_name}")
 
@@ -227,7 +235,7 @@ async def _create_role(guild: discord.Guild, team_number: int) -> discord.Role:
         name=team_role_name(team_number),
         color=template_role.color if template_role else discord.Color.default(),
         mentionable=True,
-        reason="WCComps team role",
+        reason=org_named("team role"),
     )
     logger.info(f"Created role {role.name}")
     return role
@@ -273,7 +281,7 @@ def _category_overwrites(guild: discord.Guild, role: discord.Role) -> Overwrites
         staff_role = guild.get_role(role_id)
         if staff_role and staff_role not in (guild.default_role, role):
             overwrites[staff_role] = discord.PermissionOverwrite(**permissions)
-    for name, permissions in GUEST_ROLE_PERMISSIONS.items():
+    for name, permissions in guest_role_permissions().items():
         if guest_role := discord.utils.get(guild.roles, name=name):
             overwrites[guest_role] = discord.PermissionOverwrite(**permissions)
     return overwrites
@@ -281,13 +289,13 @@ def _category_overwrites(guild: discord.Guild, role: discord.Role) -> Overwrites
 
 async def _post_ticket_panel(bot: discord.Client | None, team_number: int, chat_channel: discord.TextChannel) -> None:
     """Post the team's ticket panel unless the bot's is among the chat channel's first messages."""
-    help_panels_cog = bot.get_cog("HelpPanelsCog") if isinstance(bot, commands.Bot) else None
-    if not isinstance(help_panels_cog, HelpPanelsCog):
+    if not isinstance(bot, commands.Bot):
+        logger.warning(f"No ticket panel posted to team {team_number}'s channel: the setup was given no bot")
         return
     async for message in chat_channel.history(limit=50, oldest_first=True):
-        if bot and message.author == bot.user and _has_button(message, TicketButton.CUSTOM_ID):
+        if message.author == bot.user and _has_button(message, TicketButton.CUSTOM_ID):
             return
-    await help_panels_cog.post_team_ticket_panel(chat_channel.id)
+    await post_ticket_panel(bot, chat_channel)
     logger.info(f"Posted ticket panel to team {team_number} channel")
 
 
@@ -298,7 +306,9 @@ async def _deliver_queued_announcements(team: Team, channel: discord.TextChannel
     delivered = 0
     for queued in announcements:
         try:
-            await send_parts(channel, announcement_text(queued.sender_name, queued.message))
+            # No queued task runs this delivery: one that fails partway is sent whole again at the next setup
+            progress = TaskProgress.in_memory(StepsState())
+            await send_parts(channel, announcement_text(queued.sender_name, queued.message), progress=progress)
             queued.delivered_at = timezone.now()
             await queued.asave()
             delivered += 1

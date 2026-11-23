@@ -13,6 +13,9 @@
             <c-slot name="toolbar">
                 <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
                         variant="change">Edit Event</c-link>
+                {% if has_archive %}
+                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}">Download Close Out Archive (ZIP)</c-link>
+                {% endif %}
             </c-slot>
             <c-detail_grid>
                 <c-detail_row label="Date">
@@ -31,8 +34,9 @@
                 </c-detail_row>
             </c-detail_grid>
         </c-module>
-        <c-module title="Team Enrollments ({{ total_enrolled }})">
+        <c-module title="Teams">
             <p>
+                <strong>{{ total_enrolled }}</strong> enrolled,
                 <strong>{{ total_assigned }}</strong> teams assigned,
                 <strong>{{ assignable_count }}</strong> ready to assign
             </p>
@@ -48,7 +52,7 @@
                     </c-button>
                 </c-form>
             {% endif %}
-            <c-table id="enrollments_list" class="w-full" aria_label="Team enrollments">
+            <c-table id="teams_list" class="w-full" aria_label="Teams">
                 <c-slot name="headers">
                     <tr>
                         <c-table_header sortable="false">
@@ -68,23 +72,30 @@
                         </c-table_header>
                     </tr>
                 </c-slot>
-                {% for item in enrollment_data %}
+                {% for item in rows %}
                     <tr>
-                        <td>{{ item.registration.school_name }}</td>
-                        <td>
-                            <c-badge variant="{{ item.registration.status|badge_variant:'registration' }}">
-                                {{ item.registration.get_status_display }}
-                            </c-badge>
-                        </td>
-                        <td>
-                            {% with contact=item.registration.primary_contact %}
-                                {% if contact %}
-                                    {{ contact.name }}
-                                    <br>
-                                    <small>{{ contact.email }}</small>
-                                {% endif %}
-                            {% endwith %}
-                        </td>
+                        <td>{{ item.school_name }}</td>
+                        {% if item.registration %}
+                            <td>
+                                <c-badge variant="{{ item.registration.status|badge_variant:'registration' }}">
+                                    {{ item.registration.get_status_display }}
+                                </c-badge>
+                            </td>
+                            <td>
+                                {% with contact=item.registration.primary_contact %}
+                                    {% if contact %}
+                                        {{ contact.name }}
+                                        <br>
+                                        <small>{{ contact.email }}</small>
+                                    {% endif %}
+                                {% endwith %}
+                            </td>
+                        {% else %}
+                            <td>
+                                <span class="text-muted">No registration</span>
+                            </td>
+                            <td></td>
+                        {% endif %}
                         <td>
                             {% if item.assignment %}
                                 <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
@@ -111,7 +122,7 @@
                 {% empty %}
                     <tr>
                         <td colspan="5">
-                            <c-empty_state title="No teams enrolled for this event" />
+                            <c-empty_state title="No teams for this event" />
                         </td>
                     </tr>
                 {% endfor %}

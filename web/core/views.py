@@ -52,18 +52,21 @@ from team.forms import (
     ImportMode,
     parse_csv_file,
 )
-from team.models import DiscordLink, SchoolInfo, Team
+from team.models import SchoolInfo, Team, single_account
 
 from .auth_utils import (
     get_authentik_id,
     get_role_based_landing_url,
+    lock_account,
     permission_groups_of,
     require_permission,
+    sign_out_everywhere,
     team_for_groups,
 )
 from .errors import json_endpoint
 from .form_errors import ask_for_the_file_again
 from .forms import LinkConfirmForm, SchoolInfoEditForm
+from .team_accounts import is_team_account
 from .utils import list_filters, optional_int, requested_sort, stable_order
 
 logger = logging.getLogger(__name__)
@@ -104,10 +107,6 @@ def link_initiate(request: HttpRequest) -> HttpResponse:
     request.session["pending_link_discord_id"] = link_token.discord_id
 
     params = {"next": f"/auth/link-callback?token={link_token.token}"}
-    if DiscordLink.objects.filter(discord_id=link_token.discord_id, is_active=False).exists():
-        # Someone unlinked from the wrong team still has that team's Authentik session in their browser;
-        # prompt=login makes Authentik ask for the right account's credentials instead of reusing it.
-        params["prompt"] = "login"
     return redirect(f"/auth/login/?{urlencode(params)}")
 
 
@@ -419,7 +418,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
             form.add_error(None, str(changed))
             return page(form)
         if new_school or unlinked:
-            _report_new_school(request, team_number, school_name, unlinked, authentik_username)
+            _report_new_school(request, team, school_name, unlinked, authentik_username)
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 
@@ -447,11 +446,34 @@ RESET_TEAM_INSTEAD = (
 )
 
 
-def _report_new_school(request: HttpRequest, team_number: int, school_name: str, unlinked: int, actor: str) -> None:
+def _sign_out_team_accounts(team: Team) -> int:
+    """End the portal sessions of every local account in the team's group whose username fully matches the team's
+    account pattern, without asking Authentik (the groups are the ones stored at sign-in and each refresh); how many
+    accounts."""
+    with transaction.atomic():
+        members = User.objects.filter(usergroups__groups__contains=[team.authentik_group]).select_related("usergroups")
+        accounts = [u for u in members if is_team_account(team.team_number, u.username)]
+        for account in accounts:
+            lock_account(account.usergroups.authentik_id)
+            sign_out_everywhere(account)
+    return len(accounts)
+
+
+def _report_new_school(request: HttpRequest, team: Team, school_name: str, unlinked: int, actor: str) -> None:
     """Reset the team's credentials once the new school is saved, so the old school's members can't sign in or link
-    again, and say what the change did."""
-    reset = reset_team_credentials(team_number, actor=actor)
+    again (with several accounts per team, end their portal sessions instead), and say what the change did."""
+    team_number = team.team_number
     done = f"Team {team_number} now holds {school_name}: {unlinked} Discord member(s) unlinked"
+    if not single_account():
+        signed_out = _sign_out_team_accounts(team)
+        messages.warning(
+            request,
+            f"{done}; ended the portal sessions of {signed_out} team account(s). Teams have several accounts, so the "
+            "portal changes no passwords and can't end Authentik sessions: in Authentik, change the team's passwords "
+            "and end their sessions before the new school gets them.",
+        )
+        return
+    reset = reset_team_credentials(team_number, actor=actor)
     match reset:
         case Refused(error=error):
             messages.error(request, f"{done}, but the password reset failed: {error}. {RESET_TEAM_INSTEAD}")

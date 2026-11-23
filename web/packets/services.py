@@ -10,12 +10,13 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from registration.locks import school_list_lock
 from registration.models import Event
-from registration.stage import ACTIONS, Action
+from registration.stage import ACTIONS, Action, Stage, event_stage
 
-from core.authentik_utils import set_team_password
+from core.authentik_utils import enable_team_account, set_team_password
+from core.models import CompetitionConfig
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
-from team.models import SchoolInfo, Team, team_username
+from team.models import SchoolInfo, Team, single_account, team_username
 
 from .models import Packet, PacketDistribution
 
@@ -176,8 +177,10 @@ class PacketDistributionService:
     ) -> EmailMultiAlternatives:
         from core.services.competition import competition_schedule_context
 
-        password = self._team_password(team)
-        username = team_username(team.team_number)
+        # Only a single-account team's credentials go in the email; with several, the region hands them out itself
+        username, password = (
+            (team_username(team.team_number), self._team_password(team)) if single_account() else (None, None)
+        )
         raw_extras = packet.team_extras.get(str(team.team_number), {}) if packet.team_extras else {}
         team_extras = {k.replace("_", " ").title(): v for k, v in raw_extras.items()}
         context: dict[str, object] = {
@@ -187,6 +190,8 @@ class PacketDistributionService:
             "password": password,
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
+            "ORG_NAME": settings.ORG_NAME,
+            "ORG_SHORT_NAME": settings.ORG_SHORT_NAME,
             **competition_schedule_context(),
         }
 
@@ -198,14 +203,20 @@ class PacketDistributionService:
             body=text_content,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=recipients,
-            reply_to=[settings.DEFAULT_REPLY_TO_EMAIL],
+            reply_to=[settings.DEFAULT_REPLY_TO_EMAIL] if settings.DEFAULT_REPLY_TO_EMAIL else None,
         )
         email.attach_alternative(html_content, "text/html")
         email.attach(packet.filename, bytes(packet.file_data), packet.mime_type)
         return email
 
     def send_packet_email(self, distribution: PacketDistribution, override_emails: list[str] | None = None) -> None:
-        """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses."""
+        """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses.
+
+        While the open event has no scores and no start has run in the current window, a packet carrying credentials
+        first turns the team account on, so they work when it arrives; the controlled applications stay closed until
+        the start. Not once the competition runs, ran or was played: a stop turns the accounts off, and a resend
+        before Close Out mustn't turn one back on. A failure to turn it on is logged and audited and doesn't hold the
+        email."""
         packet = distribution.packet
         team = distribution.team
 
@@ -217,8 +228,11 @@ class PacketDistributionService:
             packet,
             team,
             recipients,
-            f"WCComps: {packet.title}",
+            f"{settings.ORG_SHORT_NAME}: {packet.title}",
         )
+        stage = event_stage()
+        if stage.stage == Stage.READY and not stage.running and not CompetitionConfig.get_config().started_this_window:
+            enable_team_account(team.team_number, actor="packet distribution")
         email.send(fail_silently=False)
 
         sent_to = ", ".join(recipients)
@@ -255,7 +269,7 @@ class PacketDistributionService:
 
     def send_test_packet_email(self, packet: Packet, team: Team, email: str) -> None:
         """Send a test packet email to a specific address without creating distribution records."""
-        msg = self._build_packet_email(packet, team, [email], f"[TEST] WCComps: {packet.title}")
+        msg = self._build_packet_email(packet, team, [email], f"[TEST] {settings.ORG_SHORT_NAME}: {packet.title}")
         msg.send(fail_silently=False)
 
         logger.info(f"Sent test email for packet {packet.id} (team {team.team_number}) to {email}")

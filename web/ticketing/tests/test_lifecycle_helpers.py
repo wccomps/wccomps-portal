@@ -4,7 +4,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from core.models import DiscordTask
+from core.models import QueuedTask
 from ticketing.lifecycle import cancel_ticket, change_ticket_category_atomic, reopen_ticket
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -98,5 +98,5 @@ def test_web_cancel_tells_discord(blue_team_user, team):
     client.force_login(blue_team_user)
     client.post(reverse("ticket_cancel", args=[ticket.ticket_number]))
 
-    task = DiscordTask.objects.get(task_type="post_ticket_update", ticket=ticket)
+    task = QueuedTask.objects.get(task_type="post_ticket_update", ticket=ticket)
     assert task.payload["action"] == "cancelled"

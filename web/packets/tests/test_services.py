@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from registration.models import School
 
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from team.models import SchoolInfo, Team
 
 from ..models import Packet, PacketDistribution
@@ -163,8 +163,8 @@ class PacketDistributionServiceTestCase(TestCase):
             self.assertIn(password, call.kwargs["body"])
         row = AuditLog.objects.get(action="team_password_set")
         self.assertEqual(
-            (row.admin_user, row.target_id, row.details),
-            ("packet distribution", 1, {"password_set": True, "error": None}),
+            (row.admin_user, row.target_entity, row.target_id, row.details),
+            ("packet distribution", "team", 1, {"password_set": True, "error": None}),
         )
 
     @patch("packets.services.EmailMultiAlternatives")
@@ -180,7 +180,7 @@ class PacketDistributionServiceTestCase(TestCase):
 
         manager.user_sessions.assert_not_called()
         manager.end_sessions.assert_not_called()
-        self.assertFalse(DiscordTask.objects.filter(task_type="log_to_channel").exists())
+        self.assertFalse(QueuedTask.objects.filter(task_type="log_to_channel").exists())
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_failed_password_set_sends_nothing(self, mock_email_class):
@@ -279,6 +279,26 @@ class PacketCompletesItselfTestCase(TestCase):
 
         self.packet.refresh_from_db()
         self.assertEqual(self.packet.status, "cancelled")
+
+    @patch("packets.services.EmailMultiAlternatives")
+    def test_the_last_send_completes_only_its_own_packet(self, _email):
+        other = Packet.objects.create(
+            title="Other",
+            file_data=b"x",
+            filename="o.pdf",
+            mime_type="application/pdf",
+            file_size=1,
+            uploaded_by="gold",
+            status="distributing",
+        )
+        PacketDistribution.objects.create(packet=other, team=Team.objects.get(team_number=1))
+        self.dists[0].mark_as_sent("t1@example.com")
+
+        self.service.send_packet_email(self.dists[1])
+
+        self.packet.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual((self.packet.status, other.status), ("completed", "distributing"))
 
     def test_migration_completes_packets_whose_emails_all_went_out(self):
         from importlib import import_module

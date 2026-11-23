@@ -181,8 +181,13 @@ class ProxmoxClient:
         self.verify_ssl = verify_ssl if verify_ssl is not None else bool(getattr(settings, "PROXMOX_VERIFY_SSL", True))
         self.client: httpx.Client | None = None
 
+    @property
+    def configured(self) -> bool:
+        """Whether PROXMOX_API_URL and PROXMOX_API_TOKEN are set; without them every call answers None."""
+        return bool(self.base_urls and self.api_token)
+
     def _get_client(self) -> httpx.Client:
-        if not self.base_urls or not self.api_token:
+        if not self.configured:
             raise ProxmoxAPIError("Proxmox API credentials not configured")
         if self.client is None:
             auth_header = (

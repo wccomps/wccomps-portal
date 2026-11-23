@@ -32,8 +32,8 @@ def test_seasons_and_events_pages(live_server, pw_browser):
 
         page.get_by_role("button", name="View", exact=True).click()
         page.wait_for_load_state("networkidle")
-        assert page.get_by_role("heading", name="Team Enrollments (0)").is_visible()
-        assert page.get_by_text("No teams enrolled for this event").is_visible()
+        assert page.get_by_role("heading", name="Teams", exact=True).is_visible()
+        assert page.get_by_text("No teams for this event").is_visible()
 
         page.go_back()
         page.wait_for_load_state("networkidle")

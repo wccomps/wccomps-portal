@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import ipaddress
 import json
@@ -6,21 +7,23 @@ import queue
 import re
 import threading
 from collections.abc import Callable, Collection, Generator, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Page, Paginator
-from django.db import DatabaseError, InterfaceError, connection, transaction
+from django.db import DatabaseError, InterfaceError, close_old_connections, connection, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 
-from core.discord_tasks import SyncRolesResult
+from core.queued_tasks import SyncRolesResult
 
 if TYPE_CHECKING:
     from team.models import Team
@@ -127,6 +130,23 @@ def open_parentheses(text: str) -> int:
     return depth
 
 
+def split_message(text: str, limit: int) -> list[str]:
+    """text in messages of at most limit characters, broken at line ends where possible, so nothing is lost."""
+    chunks = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return [*chunks, text] if text or not chunks else chunks
+
+
+def announcement(sender: str, message: str) -> str:
+    """A broadcast as a team's chat channel or stream shows it."""
+    return f"**Announcement from {sender}:**\n\n{message}"
+
+
 def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str:
     """Encode a single progress line as newline-delimited JSON for streaming views."""
     return json.dumps({"step": step, "current": current, "total": total, "ok": ok}) + "\n"
@@ -169,6 +189,12 @@ def advisory_lock(key: int | str, *, wait: bool = False, conn: BaseDatabaseWrapp
                 # Only a closed connection has released it; an aborted transaction still holds it
                 if db.connection is not None and not db.connection.closed:
                     raise
+
+
+def advisory_xact_lock(key: str) -> None:
+    """Wait for the transaction-scoped advisory lock on key, held until the outermost transaction ends."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", [key])
 
 
 def _inline(lines: Iterator[str]) -> Iterator[str]:
@@ -410,3 +436,74 @@ def drain[R](steps: Generator[object, None, R]) -> R:
     for _ in stepped:
         pass
     return stepped.result
+
+
+async def recycle_db_connection() -> None:
+    """Drop a long-running process's DB connection if it is broken or past CONN_MAX_AGE; the next query reconnects.
+
+    Django only does this on request_started/request_finished, and the bot and the queues serve no requests,
+    so after a Postgres restart their single connection stayed dead and every loop failed forever.
+    Must run via sync_to_async's default (thread_sensitive=True) executor: that one thread owns
+    the connection the process's ordinary ORM calls use.
+    """
+    await sync_to_async(close_old_connections)()
+
+
+async def run_blocking[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+    """Run slow sync work (Authentik, Quotient) on a pool thread, not the one thread every other
+    sync_to_async call in the process queues on, so interactions and loops keep answering meanwhile.
+    """
+    return await _hop(functools.partial(func, *args, **kwargs), None, release=True)
+
+
+async def _hop[T](step: Callable[[], T], thread: ThreadPoolExecutor | None, *, release: bool) -> T:
+    """Run step off the event loop, on thread or a pool thread when None. release closes that thread's connection
+    after, which recycle_db_connection never reaches."""
+
+    def run() -> T:
+        try:
+            return step()
+        finally:
+            if release:
+                connection.close()
+
+    if thread is None:
+        return await sync_to_async(run, thread_sensitive=False)()
+    return await asyncio.get_running_loop().run_in_executor(thread, run)
+
+
+class BlockingSteps[Y, R]:
+    """Step a sync generator on a pool thread of its own, an await per item, so a lock it takes stays on one
+    connection. Use it under contextlib.aclosing, which closes the generator on that thread; .result is its return."""
+
+    def __init__(self, steps: Generator[Y, None, R]) -> None:
+        self._steps = steps
+        self._returned: tuple[R] | None = None
+        self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="blocking-steps")
+
+    def __aiter__(self) -> BlockingSteps[Y, R]:
+        return self
+
+    async def __anext__(self) -> Y:
+        for item in await _hop(self._advance, self._thread, release=False):
+            return item
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        try:
+            await _hop(self._steps.close, self._thread, release=True)
+        finally:
+            self._thread.shutdown(wait=False)
+
+    def _advance(self) -> list[Y]:
+        try:
+            return [next(self._steps)]
+        except StopIteration as finished:
+            self._returned = (finished.value,)
+            return []
+
+    @property
+    def result(self) -> R:
+        if self._returned is None:
+            raise RuntimeError("The generator has not finished")
+        return self._returned[0]

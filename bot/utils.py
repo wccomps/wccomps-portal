@@ -1,19 +1,17 @@
-import asyncio
-import functools
 import io
 import logging
-from collections.abc import Awaitable, Callable, Collection, Generator, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Final, Literal, TypedDict
+from collections.abc import Collection, Iterable, Sequence
+from datetime import datetime
+from typing import Final, Literal
 
 import discord
-from asgiref.sync import sync_to_async
 from discord import app_commands
 from django.conf import settings
-from django.db import close_old_connections, connection
 
-from core.utils import missing_discord_settings
+from core.chat_notices import Field
+from core.heartbeat import beat
+from core.task_queue import StepsState, TaskProgress
+from core.utils import missing_discord_settings, split_message
 from team.models import MAX_TEAMS, Team
 
 logger = logging.getLogger(__name__)
@@ -46,7 +44,8 @@ def fit(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-DISCORD_CHOICE_CHAR_LIMIT = 100
+# Discord's limit on a command's description and on a choice's name and value
+DISCORD_SHORT_TEXT_CHAR_LIMIT = 100
 DISCORD_CHOICE_COUNT_LIMIT = 25
 DISCORD_SELECT_OPTION_LIMIT = 25
 
@@ -55,9 +54,9 @@ def choices(options: list[tuple[str, str]]) -> list[app_commands.Choice[str]]:
     """Autocomplete choices from (name, value) pairs as Discord takes them: at most 25, each name cut to 100
     characters, and values past 100 characters omitted (Discord refuses a choice value over 100 characters)."""
     return [
-        app_commands.Choice(name=fit(name.strip() or value, DISCORD_CHOICE_CHAR_LIMIT), value=value)
+        app_commands.Choice(name=fit(name.strip() or value, DISCORD_SHORT_TEXT_CHAR_LIMIT), value=value)
         for name, value in options
-        if 0 < len(value) <= DISCORD_CHOICE_CHAR_LIMIT
+        if 0 < len(value) <= DISCORD_SHORT_TEXT_CHAR_LIMIT
     ][:DISCORD_CHOICE_COUNT_LIMIT]
 
 
@@ -89,73 +88,39 @@ def add_field(embed: discord.Embed, name: str, value: str, *, inline: bool = Fal
     return True
 
 
-def split_message(text: str, limit: int = DISCORD_MESSAGE_CHAR_LIMIT) -> list[str]:
-    """text in Discord-sized messages, broken at line ends where possible, so nothing is lost."""
-    chunks = []
-    while len(text) > limit:
-        cut = text.rfind("\n", 0, limit)
-        if cut <= 0:
-            cut = limit
-        chunks.append(text[:cut])
-        text = text[cut:].lstrip("\n")
-    return [*chunks, text] if text or not chunks else chunks
-
-
-def announcement(sender: str, message: str) -> str:
-    """A broadcast as a team's channel shows it."""
-    return f"**Announcement from {sender}:**\n\n{message}"
-
-
-class ProgressState(TypedDict, total=False):
-    done: int  # steps done, for a task that counts them
-    # A broadcast's: recipients reached, refused for good (with why), counts, and parts sent to each it failed on
-    reached: list[int]
-    refused: dict[str, str]
-    sent: int
-    queued: int
-    parts: dict[str, int]
-
-
-@dataclass
-class TaskProgress:
-    """What a queued task already did, saved with the task so a retry does only the rest."""
-
-    state: ProgressState = field(default_factory=ProgressState)
-    save: Callable[[ProgressState], Awaitable[None]] | None = None
-
-    @property
-    def done(self) -> int:
-        return self.state.get("done", 0)
-
-    async def advance(self) -> None:
-        self.state["done"] = self.done + 1
-        await self.saved()
-
-    async def saved(self) -> None:
-        if self.save:
-            await self.save(self.state)
+def add_fields(embed: discord.Embed, fields: Iterable[Field], *, time_style: discord.utils.TimestampStyle) -> None:
+    """Add a notice's fields (core.chat_notices) with add_field, a wide one on a row of its own and a time in Discord's
+    markup."""
+    for name, value, wide in fields:
+        shown = discord.utils.format_dt(value, style=time_style) if isinstance(value, datetime) else value or ""
+        add_field(embed, name, shown, inline=not wide)
 
 
 async def send_parts(
     channel: discord.abc.Messageable,
     text: str,
     *,
+    progress: TaskProgress[StepsState],
     allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS,
-    progress: TaskProgress | None = None,
+    parts: list[str] | None = None,
 ) -> None:
-    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
-    the first may ping what allowed_mentions allows: the rest is the sender's text. With progress, parts an earlier
-    attempt sent are skipped."""
-    progress = progress or TaskProgress()
-    for n, part in enumerate(split_message(text)):
-        if n < progress.done:
+    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters, or as the
+    parts given (ticketing.utils.relay_parts), skipping the parts progress says an earlier attempt sent, and beating
+    the queue's heartbeat after each. Only the first may ping what allowed_mentions allows: the rest is the sender's
+    text."""
+    if parts is None:
+        parts = split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)
+    done = progress.done
+    for n, part in enumerate(parts):
+        if n < done:
             continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
         await progress.advance()
+        beat()
 
 
 async def send_announcement(
-    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress | None = None
+    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress[StepsState]
 ) -> None:
     """Send a broadcast to the announcements channel, pinging only the blue team role."""
     blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
@@ -163,13 +128,14 @@ async def send_announcement(
     await send_parts(
         channel,
         f"{role_mention}\n\n{message}",
-        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
         progress=progress,
+        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
     )
 
 
 async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
-    """Post to the ops channel; whether it was posted. Never raises: a failure is logged."""
+    """Post to the ops channel, split into messages within Discord's limit; whether it was all posted. Never raises: a
+    failure is logged, and parts already posted stay."""
     try:
         channel_id = settings.DISCORD_LOG_CHANNEL_ID
         if not channel_id:
@@ -181,87 +147,16 @@ async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
             logger.error(f"Operations channel {channel_id} not found")
             return False
 
-        message = fit(message, DISCORD_MESSAGE_CHAR_LIMIT)
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             logger.error(f"Channel {channel_id} is not a text channel or thread")
             return False
-        await channel.send(message)
+        for part in split_message(message, DISCORD_MESSAGE_CHAR_LIMIT):
+            await channel.send(part)
         logger.info(f"Logged to ops channel: {message}")
         return True
     except Exception as e:
         logger.exception(f"Failed to log to ops channel: {e}")
         return False
-
-
-async def recycle_db_connection() -> None:
-    """Drop the bot's DB connection if it is broken or past CONN_MAX_AGE; the next query reconnects.
-
-    Django only does this on request_started/request_finished, and the bot serves no requests,
-    so after a Postgres restart its single connection stayed dead and every loop failed forever.
-    Must run via sync_to_async's default (thread_sensitive=True) executor: that one thread owns
-    the connection the bot's ordinary ORM calls use.
-    """
-    await sync_to_async(close_old_connections)()
-
-
-async def run_blocking[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
-    """Run slow sync work (Authentik, Quotient) on a pool thread, not the one thread every other
-    sync_to_async call in the bot queues on, so interactions and loops keep answering meanwhile.
-    """
-    return await _hop(functools.partial(func, *args, **kwargs), None, release=True)
-
-
-async def _hop[T](step: Callable[[], T], thread: ThreadPoolExecutor | None, *, release: bool) -> T:
-    """Run step off the event loop, on thread or a pool thread when None. release closes that thread's connection
-    after, which recycle_db_connection never reaches."""
-
-    def run() -> T:
-        try:
-            return step()
-        finally:
-            if release:
-                connection.close()
-
-    if thread is None:
-        return await sync_to_async(run, thread_sensitive=False)()
-    return await asyncio.get_running_loop().run_in_executor(thread, run)
-
-
-class BlockingSteps[Y, R]:
-    """Step a sync generator on a pool thread of its own, an await per item, so a lock it takes stays on one
-    connection. Use it under contextlib.aclosing, which closes the generator on that thread; .result is its return."""
-
-    def __init__(self, steps: Generator[Y, None, R]) -> None:
-        self._steps = steps
-        self._returned: tuple[R] | None = None
-        self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="blocking-steps")
-
-    def __aiter__(self) -> BlockingSteps[Y, R]:
-        return self
-
-    async def __anext__(self) -> Y:
-        for item in await _hop(self._advance, self._thread, release=False):
-            return item
-        raise StopAsyncIteration
-
-    async def aclose(self) -> None:
-        try:
-            await _hop(self._steps.close, self._thread, release=True)
-        finally:
-            self._thread.shutdown(wait=False)
-
-    def _advance(self) -> list[Y]:
-        try:
-            return [next(self._steps)]
-        except StopIteration as finished:
-            self._returned = (finished.value,)
-            return []
-
-    @property
-    def result(self) -> R:
-        if self._returned is None:
-            raise RuntimeError("The generator has not finished")
-        return self._returned[0]
 
 
 async def report_missing_discord_settings(bot: discord.Client) -> None:
@@ -283,6 +178,16 @@ async def find_team(team_number: int) -> Team | str:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     team = await Team.objects.filter(team_number=team_number).afirst()
     return team or f"Team {team_number} not found"
+
+
+def org_named(text: str) -> str:
+    """text after the organization's short name ("WCComps Room Judge")."""
+    return f"{settings.ORG_SHORT_NAME} {text}"
+
+
+def room_judge_role_name() -> str:
+    """The Discord role a close out takes away, which sees every team category."""
+    return org_named("Room Judge")
 
 
 def team_role_name(team_number: int) -> str:

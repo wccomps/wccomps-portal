@@ -57,6 +57,7 @@ from orange_team.models import (
 from packets.models import Packet, PacketDistribution
 from registration.models import (
     Event,
+    EventArchive,
     EventTeamAssignment,
     RegistrationContact,
     RegistrationEventEnrollment,
@@ -80,7 +81,7 @@ from scoring.models import (
 )
 
 from core.errors import is_json_endpoint, wants_json_error
-from core.models import AuditLog, BotState, CompetitionConfig, DiscordTask
+from core.models import AuditLog, BotState, CompetitionConfig, QueuedTask
 from core.tests.roles import ROLE_GROUPS, grants, role_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
 from team.models import LinkAttempt, LinkRateLimit, LinkToken, Team
@@ -156,6 +157,11 @@ def build_world() -> World:
         date=date(2026, 11, 7),
         registration_open=True,
     )
+    # Closed out before the open event: its archive is what the event page offers to download
+    archived = Event.objects.create(
+        season=season, name="State", event_type="state", event_number=1, date=date(2026, 9, 5), is_finalized=True
+    )
+    EventArchive.objects.create(event=archived, data=b"PK\x05\x06" + bytes(18))
     teams = [
         Team.objects.get(team_number=1),  # role_user made it, for the blue_team role
         *(Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (2, 3)),
@@ -202,13 +208,13 @@ def build_world() -> World:
     ]
     TicketComment.objects.create(ticket=tickets[0], author=users["blue_team"], comment_text="Hello")
 
-    from core.discord_tasks import SyncRoles
+    from core.queued_tasks import SyncRoles
 
-    sync = DiscordTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=True))
-    DiscordTask.objects.filter(pk=sync.pk).update(
+    [sync] = QueuedTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=True))
+    QueuedTask.objects.filter(pk=sync.pk).update(
         status="completed", result={"roles_added": 1, "roles_removed": 0, "errors": 0, "changes": []}
     )
-    pending_task = DiscordTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=False))
+    [pending_task] = QueuedTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=False))
 
     # Red team: findings by red (pending and approved), one by admin that red contributes to, a pool, screenshots
     attack = AttackType.objects.filter(is_active=True).first()
@@ -354,6 +360,7 @@ def build_world() -> World:
         "registration_id": [r.pk for r in registrations],
         "season_id": [season.pk],
         "event_id": [event.pk, later.pk],
+        "archived_event_id": [archived.pk],
         "event_assignment_id": list(EventTeamAssignment.objects.values_list("pk", flat=True)),
         "link_token": [link_token.token],
         "app_label": sorted({model._meta.app_label for model in admin.site._registry}),
@@ -373,7 +380,7 @@ def _seed_admin_only_models(teams: list[Team], ticket: Ticket, admin_user: User)
     LinkAttempt.objects.create(discord_id=1, discord_username="linker", authentik_username="prop-admin", success=False)
     LinkRateLimit.objects.create(discord_id=1)
     TicketHistory.objects.create(ticket=ticket, action="created", actor=admin_user)
-    CommentRateLimit.objects.create(ticket=ticket, discord_id=1)
+    CommentRateLimit.objects.create(ticket=ticket, actor_key="web:1")
     ServiceScore.objects.create(team=teams[0])
     ScoringExclusion.objects.create(team=teams[2])
 

@@ -975,24 +975,63 @@ fieldset:has([required]) > legend.required::after,
     background: var(--primary-dark, #2e5266);
 }
 
-/* No box on desktop: each link is an item of .primary-navigation's wrapping row */
+/* On desktop the links wrap within their own box and the tools keep the right of the first row, so a long list of
+   links (an admin's) takes another row of links, not a row holding only the tools. Only when the links would get less
+   than their basis does the tools group wrap below them. */
 .nav-menu {
-    display: contents;
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    row-gap: 6px;
+    min-width: 0;
 }
 
 .nav-links {
-    display: contents;
+    display: flex;
+    flex: 1 1 480px;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    min-width: 0;
 }
 
-/* The tools wrap as one group, at the right of their row */
 .nav-utils {
     display: flex;
     align-items: center;
     margin-left: auto;
 }
 
-.nav-utils a {
+.nav-utils a,
+.nav-logout {
     flex: none;
+}
+
+/* Log out is a POST (a cross-site link can't sign anyone out), drawn as the nav's links are */
+.nav-logout {
+    margin: 0;
+}
+
+.nav-logout button {
+    background: transparent;
+    border: 0;
+    color: var(--header-link-color, #fff);
+    padding: 8px 15px;
+    margin-right: 5px;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.nav-logout button:hover {
+    background-color: var(--header-bg, #417690);
+}
+
+.nav-logout button:focus {
+    outline: 2px solid var(--header-link-color, #fff);
+    outline-offset: 2px;
 }
 
 /* Mobile layout */
@@ -1021,6 +1060,9 @@ fieldset:has([required]) > legend.required::after,
     .nav-menu {
         display: none;
         flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        row-gap: 0;
         padding-top: 10px;
     }
 
@@ -1038,7 +1080,10 @@ fieldset:has([required]) > legend.required::after,
 
     .nav-links {
         display: flex;
+        flex: none;
         flex-direction: column;
+        flex-wrap: nowrap;
+        row-gap: 0;
     }
 
     .nav-links a {

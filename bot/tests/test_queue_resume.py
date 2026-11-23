@@ -7,13 +7,14 @@ import discord
 import pytest
 
 from bot.tests.discord_fakes import bot_with, recording_thread, ticket_message
-from core.models import DiscordTask
+from core.models import QueuedTask
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
+from ticketing.utils import ticket_url
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
-LONG = "\n".join(f"line {n:04d} " + "x" * 80 for n in range(60))  # about three Discord messages
+LONG = "\n".join(f"line {n:04d} " + "x" * 80 for n in range(60))  # about three Discord messages; a relay sends two
 
 
 def flaky_send(sent: list[str], fail_on: int) -> AsyncMock:
@@ -30,11 +31,11 @@ def flaky_send(sent: list[str], fail_on: int) -> AsyncMock:
     return AsyncMock(side_effect=send)
 
 
-async def run_twice(processor: Any, task: DiscordTask) -> None:
+async def run_twice(processor: Any, task: QueuedTask) -> None:
     await processor._process_task(task)
     await task.arefresh_from_db()
     assert task.status == "pending"
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
+    await QueuedTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
     await processor._process_task(task)
     await task.arefresh_from_db()
     assert task.status == "completed"
@@ -54,21 +55,22 @@ async def test_a_long_comment_retried_after_its_second_part_failed_sends_each_pa
 
     thread = recording_thread(2499, failing_sends={2}, pinned_text=ticket_message(ticket.ticket_number))
     comment = await ticket.comments.acreate(comment_text=LONG)
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_comment", ticket=ticket, payload={"ticket_id": ticket.id, "comment_id": comment.id}
     )
 
     with patch("bot.discord_queue.competition_guild", return_value=MagicMock(spec=discord.Guild)):
         await run_twice(DiscordQueueProcessor(bot_with(thread)), task)
 
-    assert len(thread.texts) == len(set(thread.texts)) == 3
+    assert len(thread.texts) == len(set(thread.texts)) == 2
+    assert thread.texts[-1].endswith(ticket_url(ticket.ticket_number))
 
 
 async def test_a_long_reopen_reason_retried_sends_each_part_once(ticket: Ticket) -> None:
     from bot.discord_queue import DiscordQueueProcessor
 
     thread = recording_thread(2499, failing_sends={2}, pinned_text=ticket_message(ticket.ticket_number))
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_ticket_update",
         ticket=ticket,
         payload={"ticket_id": ticket.id, "action": "reopened", "actor": "ops", "reason": LONG},
@@ -77,7 +79,8 @@ async def test_a_long_reopen_reason_retried_sends_each_part_once(ticket: Ticket)
     with patch("bot.discord_queue.competition_guild", return_value=MagicMock(spec=discord.Guild)):
         await run_twice(DiscordQueueProcessor(bot_with(thread)), task)
 
-    assert len(thread.texts) == len(set(thread.texts)) == 3
+    assert len(thread.texts) == len(set(thread.texts)) == 2
+    assert thread.texts[-1].endswith(ticket_url(ticket.ticket_number))
 
 
 async def test_a_team_broadcast_retried_reaches_only_the_teams_it_missed() -> None:
@@ -99,7 +102,7 @@ async def test_a_team_broadcast_retried_reaches_only_the_teams_it_missed() -> No
     guild.get_channel.side_effect = channels.get
     processor = DiscordQueueProcessor(MagicMock(spec=discord.Client))
     processor._guild = MagicMock(return_value=guild)
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="broadcast_message", payload={"target": "41-43", "message": "lunch", "sender": "ops"}
     )
 
@@ -133,14 +136,14 @@ async def test_a_broadcast_retry_resumes_by_team_not_by_position() -> None:
     guild.get_channel.side_effect = channels.get
     processor = DiscordQueueProcessor(MagicMock(spec=discord.Client))
     processor._guild = MagicMock(return_value=guild)
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="broadcast_message", payload={"target": "all-teams", "message": "lunch", "sender": "ops"}
     )
 
     with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock) as ops:
         await processor._process_task(task)
         await Team.objects.filter(team_number=45).aupdate(is_active=False)
-        await DiscordTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
+        await QueuedTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
         await task.arefresh_from_db()
         await processor._process_task(task)
 
@@ -164,20 +167,20 @@ def team_guild(sends: dict[int, Any]) -> tuple[MagicMock, dict[int, MagicMock]]:
     return guild, chats
 
 
-async def broadcast_task(guild: MagicMock, target: str) -> tuple[Any, DiscordTask]:
+async def broadcast_task(guild: MagicMock, target: str) -> tuple[Any, QueuedTask]:
     from bot.discord_queue import DiscordQueueProcessor
 
     processor = DiscordQueueProcessor(MagicMock(spec=discord.Client))
     processor._guild = MagicMock(return_value=guild)
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="broadcast_message", payload={"target": target, "message": "lunch", "sender": "ops"}
     )
     return processor, task
 
 
-async def run_until_done(processor: Any, task: DiscordTask) -> None:
+async def run_until_done(processor: Any, task: QueuedTask) -> None:
     while task.status not in ("completed", "failed"):
-        await DiscordTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
+        await QueuedTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
         await task.arefresh_from_db()
         await processor._process_task(task)
         await task.arefresh_from_db()
@@ -221,7 +224,7 @@ async def test_a_long_broadcast_retried_sends_each_part_once() -> None:
     guild, chats = team_guild({38: None})
     chats[38].send = flaky_send(sent, fail_on=2)
     processor, task = await broadcast_task(guild, "38")
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(payload={"target": "38", "message": LONG, "sender": "ops"})
+    await QueuedTask.objects.filter(pk=task.pk).aupdate(payload={"target": "38", "message": LONG, "sender": "ops"})
     await task.arefresh_from_db()
 
     with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):

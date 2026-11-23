@@ -9,8 +9,8 @@ import pytest
 from django.utils import timezone
 
 from core.authentik_manager import AuthentikAPIError
-from core.discord_tasks import BroadcastMessage
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.models import AuditLog, CompetitionConfig, QueuedTask
+from core.queued_tasks import BroadcastMessage, SyncQuotientMetadata
 from core.services.competition import (
     COMPETITION_RUN_LOCK_ID,
     RUN_IN_PROGRESS,
@@ -22,6 +22,7 @@ from core.services.competition import (
     current_timer_plan,
     run_competition,
 )
+from core.team_accounts import TeamAccounts
 from core.utils import Stepped, drain
 from team.models import MAX_TEAMS, Team, team_username
 
@@ -34,8 +35,8 @@ def run_competition_to_completion(enable: bool, actor: str) -> CompetitionRunRes
 
 @pytest.fixture(autouse=True)
 def _team_accounts_through_the_manager():
-    def switch(manager: MagicMock, number: int, is_active: bool) -> None:
-        ok, why = manager.team_account(team_username(number), is_active=is_active)
+    def switch(manager: MagicMock, username: str, is_active: bool) -> None:
+        ok, why = manager.team_account(username, is_active=is_active)
         if not ok:
             raise AuthentikAPIError(why)
 
@@ -94,13 +95,31 @@ def test_start_enables_apps_and_accounts_refreshes_groups_and_audits(authentik, 
     assert result.apps_ok == ["scoring", "netbird"]
     assert result.accounts_ok == result.accounts_total == len(ACTIVE_TEAMS)
     authentik.refresh.assert_called_once()
-    authentik.sync_metadata.assert_called_once_with(None)
+    authentik.sync_metadata.assert_not_called()
     authentik.sync_scores.assert_not_called()
     config.refresh_from_db()
     assert config.applications_enabled
     assert config.competition_start_time is None
     assert config.competition_end_time is not None
     assert AuditLog.objects.get(action="competition_started").admin_user == "timer"
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
+
+
+def test_start_queues_the_quotient_metadata_sync_for_the_worker(authentik, config):
+    """The worker runs it: the start reaches neither Quotient nor Proxmox, so the chat process needs no Proxmox or
+    aweful-proxy credentials."""
+    steps = list(run_competition(True, "gold_admin"))
+
+    authentik.sync_metadata.assert_not_called()
+    authentik.sync_scores.assert_not_called()
+    queued = QueuedTask.objects.get(task_type=SyncQuotientMetadata.task_type)
+    assert (queued.backend, queued.typed_payload()) == ("worker", SyncQuotientMetadata(requested_by="gold_admin"))
+    assert (steps[-1].message, steps[-1].ok) == ("Quotient metadata sync queued", True)
+    result = run_competition_to_completion(False, "gold_admin")
+    assert not result.metadata_sync_queued
+    assert QueuedTask.objects.filter(task_type=SyncQuotientMetadata.task_type).count() == 1
+    audit = AuditLog.objects.get(action="competition_started")
+    assert audit.details["metadata_sync_queued"] is True and "scores_synced" not in audit.details
 
 
 def test_start_enables_only_the_active_teams_accounts(authentik, config):
@@ -122,6 +141,65 @@ def test_stop_disables_every_team_account(authentik, config):
     assert "Accounts disabled: 50/50" in result.summary()
 
 
+@pytest.mark.parametrize(("enable", "expected"), [(True, ACTIVE_TEAMS), (False, list(range(1, MAX_TEAMS + 1)))])
+def test_one_account_per_team_toggles_each_teams_account_without_listing(authentik, config, enable, expected):
+    """With the default pattern, a team's account is its team_username, in its group or not: no listing of
+    Authentik's users and groups first."""
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=not enable)
+
+    run_competition_to_completion(enable, "timer")
+
+    authentik.list_all_users.assert_not_called()
+    authentik.list_all_groups.assert_not_called()
+    assert [c.args[0] for c in authentik.team_account.call_args_list] == [team_username(n) for n in expected]
+
+
+def test_start_toggles_every_matched_account(authentik, config, settings):
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    accounts = {n: TeamAccounts([f"team{n:02d}a", f"team{n:02d}b"], ["blueteamadmin"]) for n in ACTIVE_TEAMS}
+    with patch("core.services.competition.accounts_by_team", return_value=accounts):
+        result = run_competition_to_completion(True, "timer")
+    enabled = [c.args[0] for c in authentik.team_account.call_args_list]
+    assert enabled == ["team01a", "team01b", "team02a", "team02b", "team03a", "team03b"]
+    assert result.accounts_ok == result.accounts_total == 6
+
+
+def test_start_fails_a_team_with_no_account(authentik, config, settings):
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    accounts = {n: TeamAccounts([] if n == 2 else [f"team{n:02d}a"], []) for n in ACTIVE_TEAMS}
+    with patch("core.services.competition.accounts_by_team", return_value=accounts):
+        result = run_competition_to_completion(True, "timer")
+    assert result.account_failures == [("team 02", "no team account in its group")]
+    assert result.outcome is RunOutcome.INCOMPLETE
+
+
+def test_start_fails_an_active_team_whose_group_is_missing_once(authentik, config, settings):
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    Team.objects.filter(team_number=2).update(authentik_group="WCComps_BlueTeam02")
+    authentik.list_all_groups.return_value = [
+        {"pk": f"g{n}", "name": f"WCComps_BlueTeam{n:02d}", "parents": []} for n in ACTIVE_TEAMS if n != 2
+    ]
+    authentik.list_all_users.return_value = [
+        {"pk": n, "username": f"team{n:02d}a", "uid": str(n), "is_active": False, "groups": [f"g{n}"]}
+        for n in ACTIVE_TEAMS
+    ]
+    result = run_competition_to_completion(True, "timer")
+    assert result.account_failures == [("team 02", "no team account in its group")]
+    assert result.accounts_ok == len(ACTIVE_TEAMS) - 1
+
+
+def test_stop_with_several_accounts_skips_numbers_with_no_group(authentik, config, settings):
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
+    authentik.list_all_groups.return_value = [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}]
+    authentik.list_all_users.return_value = [
+        {"pk": 1, "username": "team01a", "uid": "1", "is_active": True, "groups": ["g1"]}
+    ]
+    result = run_competition_to_completion(False, "timer")
+    assert result.account_failures == []
+    assert [c.args[0] for c in authentik.team_account.call_args_list] == ["team01a"]
+
+
 def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, django_user_model):
     user = django_user_model.objects.create_user(username="gold_admin")
     CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
@@ -133,10 +211,10 @@ def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, dja
     assert steps[-1].ok is True
     authentik.sync_scores.assert_called_with(user)
     authentik.sync_metadata.assert_not_called()
-    assert result.quotient_synced is True
+    assert result.scores_synced is True and not result.metadata_sync_queued
     assert "Quotient service scores: synced" in result.summary()
     audit = AuditLog.objects.filter(action="competition_stopped").order_by("-pk").first()
-    assert audit is not None and audit.details["quotient_synced"] is True
+    assert audit is not None and audit.details["scores_synced"] is True
 
 
 def test_stop_keeps_the_note_that_the_service_maximum_was_not_updated(authentik, config):
@@ -172,11 +250,11 @@ def test_stop_records_failed_score_sync_without_aborting(authentik, config):
     assert steps[-1].message == "Quotient score sync failed: Failed to retrieve service scores from Quotient"
     assert steps[-1].ok is False
     assert result.outcome is RunOutcome.COMPLETE
-    assert result.quotient_synced is False
+    assert result.scores_synced is False
     assert "Quotient service scores: sync failed" in result.summary()
     config.refresh_from_db()
     assert not config.applications_enabled
-    assert AuditLog.objects.get(action="competition_stopped").details["quotient_synced"] is False
+    assert AuditLog.objects.get(action="competition_stopped").details["scores_synced"] is False
 
 
 def test_stop_after_the_scheduled_stop_clears_it(authentik, config):
@@ -302,7 +380,7 @@ def test_schedule_edited_during_a_run_survives(authentik, config):
 @pytest.mark.parametrize(("enable", "expected_accounts"), [(True, len(ACTIVE_TEAMS)), (False, MAX_TEAMS)])
 def test_progress_counts_every_step(authentik, config, enable, expected_accounts):
     steps = list(run_competition(enable, "web:admin"))
-    total = 2 + expected_accounts + 2  # apps, accounts, group refresh, Quotient sync
+    total = 2 + expected_accounts + 2  # apps, accounts, group refresh, Quotient score sync or metadata sync queued
     assert [s.current for s in steps] == list(range(1, total + 1))
     assert {s.total for s in steps} == {total}
 
@@ -319,7 +397,7 @@ def test_no_controlled_apps_changes_nothing(authentik, config):
 
 def _queued_broadcasts() -> list[BroadcastMessage]:
     return [
-        payload for task in DiscordTask.objects.all() if isinstance(payload := task.typed_payload(), BroadcastMessage)
+        payload for task in QueuedTask.objects.all() if isinstance(payload := task.typed_payload(), BroadcastMessage)
     ]
 
 
@@ -366,6 +444,19 @@ def test_blank_start_message_sends_nothing(authentik, config):
 
     assert _queued_broadcasts() == []
     assert not result.start_message_queued
+
+
+def test_start_message_is_not_reported_queued_without_a_chat_backend(authentik, config, settings):
+    settings.DISCORD_BOT_TOKEN = ""
+    CompetitionConfig.objects.filter(pk=1).update(start_message="Default login: admin / changeme")
+
+    result = run_competition_to_completion(True, "timer")
+
+    assert _queued_broadcasts() == []
+    assert not result.start_message_queued
+    assert "Start message queued" not in result.summary()
+    assert AuditLog.objects.get(action="competition_started").details["start_message_queued"] is False
+    assert CompetitionConfig.objects.get(pk=1).start_broadcasts == []
 
 
 def test_stop_never_sends_the_start_message(authentik, config):
@@ -772,6 +863,21 @@ def test_giving_up_drops_only_the_schedule_its_series_carried_out(config, resche
     config = CompetitionConfig.get_config()
     assert config.timer_series_enable is None
     assert config.competition_start_time == (later if rescheduled else None)
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
+
+
+def test_a_schedule_change_queues_one_status_refresh(config):
+    from core.services.competition import set_schedule
+
+    set_schedule("gold", start=timezone.now() + timedelta(hours=1))
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
+
+
+def test_a_controlled_apps_change_queues_one_status_refresh(config):
+    from core.services.competition import set_controlled_apps
+
+    set_controlled_apps(lambda apps: [*apps, "quotient2"], "gold")
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
 def test_setting_a_schedule_ends_a_live_series_for_its_direction_only(config):
@@ -841,7 +947,19 @@ def test_a_start_records_the_broadcast_it_queued(authentik, config):
     run_competition_to_completion(True, "timer")
 
     config.refresh_from_db()
-    assert config.start_broadcasts == [DiscordTask.objects.get(task_type="broadcast_message").pk]
+    assert config.start_broadcasts == [QueuedTask.objects.get(task_type="broadcast_message").pk]
+
+
+def test_start_records_every_copy_of_the_start_message(zulip_configured, authentik, config):
+    """With Discord and Zulip both configured, the cancel scrub covers each chat system's copy of the credentials."""
+    CompetitionConfig.objects.filter(pk=1).update(start_message="Your credentials: x")
+
+    run_competition_to_completion(True, "timer")
+
+    config.refresh_from_db()
+    copies = QueuedTask.objects.filter(task_type="broadcast_message")
+    assert sorted(copies.values_list("backend", flat=True)) == ["discord", "zulip"]
+    assert sorted(config.start_broadcasts) == sorted(copies.values_list("pk", flat=True))
 
 
 def test_a_start_marks_its_window_until_a_new_start_time_is_set(authentik, config):

@@ -91,7 +91,7 @@ def test_the_readiness_results_are_a_standard_table_with_result_badges(live_serv
     try:
         with (
             patch("core.admin_views.competition.AuthentikManager", return_value=manager),
-            patch("core.admin_views.readiness.ALL_CHECKS", _checks()),
+            patch("core.admin_views.readiness.checks", _checks),
         ):
             page, _, errors = visit_and_capture_errors(context, f"{live_server.url}/ops/admin/competition/setup/")
             page.get_by_role("button", name="Run Checks").click()

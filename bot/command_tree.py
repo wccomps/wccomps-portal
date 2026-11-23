@@ -10,6 +10,8 @@ from typing import Protocol
 import discord
 from discord import app_commands
 
+from core.validators import json_strings
+
 logger = logging.getLogger(__name__)
 
 NUL_REFUSAL = "Your text has a NUL character (\\0) in it, which can't be stored. Remove it and try again."
@@ -18,13 +20,7 @@ FAILED = "Something went wrong running that command. Try again, or ask an admin 
 
 def holds_nul(value: object) -> bool:
     """Whether a NUL character is anywhere in the interaction data (an option's value, at any depth)."""
-    if isinstance(value, str):
-        return "\x00" in value
-    if isinstance(value, dict):
-        return any(holds_nul(v) for v in value.values())
-    if isinstance(value, list):
-        return any(holds_nul(v) for v in value)
-    return False
+    return any("\x00" in text for text in json_strings(value))
 
 
 class PortalCommandTree(app_commands.CommandTree):

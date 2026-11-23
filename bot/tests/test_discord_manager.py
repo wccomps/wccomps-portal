@@ -10,6 +10,7 @@ from django.conf import settings
 from bot.discord_manager import (
     TeamInfrastructureError,
     delete_team_infrastructure,
+    guest_role_permissions,
     recreate_team_infrastructure,
     setup_team_infrastructure,
 )
@@ -523,6 +524,42 @@ class TestReusedCategory:
         assert overwrites[everyone].read_messages is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_org_named_guest_roles_and_reasons_follow_the_short_name(team, mock_guild_with_base_roles, monkeypatch):
+    """The org's guest roles are found by its short name; another region's names get nothing."""
+    guild = mock_guild_with_base_roles
+    monkeypatch.setattr(settings, "ORG_SHORT_NAME", "Example")
+    guests = {}
+    names = ["Example Observers", "Example Room Judge", "Example Operations Team", "WCComps Room Judge"]
+    for pk, name in enumerate(names):
+        guests[name] = MagicMock(spec=discord.Role, id=5800 + pk)
+        guests[name].name = name
+        guild.roles.append(guests[name])
+
+    await setup_team_infrastructure(guild, team)
+
+    kwargs = guild.create_category.await_args.kwargs
+    overwrites = kwargs["overwrites"]
+    assert overwrites[guests["Example Observers"]].send_messages is False
+    assert overwrites[guests["Example Room Judge"]].read_messages is True
+    assert overwrites[guests["Example Operations Team"]].speak is True
+    assert guests["WCComps Room Judge"] not in overwrites
+    assert kwargs["reason"] == "Example team category"
+    assert guild.create_role.await_args.kwargs["reason"] == "Example team role"
+
+
+@pytest.mark.parametrize(("setting", "talks"), [("Example Owners", True), ("", False)])
+def test_the_server_owner_role_comes_from_its_setting(monkeypatch, setting, talks):
+    """The configured server owner role talks in every team category; unset, no role by that name gets in."""
+    monkeypatch.setattr(settings, "DISCORD_SERVER_OWNER_ROLE", setting)
+    roles = guest_role_permissions()
+    assert ("Example Owners" in roles) is talks
+    assert "WRCCDC Server Owners" not in roles
+    if talks:
+        assert roles["Example Owners"]["send_messages"] is True
+
+
 @pytest_asyncio.fixture
 async def threaded_ticket(db):
     from ticketing.models import Ticket, TicketCategory
@@ -631,18 +668,12 @@ async def test_a_role_whose_position_edit_failed_is_placed_on_the_retry(mock_gui
 PANEL_BOT_USER = MagicMock(spec=discord.ClientUser, id=880088)
 
 
-def _panel_bot(posting_error: Exception | None = None) -> tuple[MagicMock, MagicMock]:
+def _panel_bot() -> MagicMock:
     from discord.ext import commands
 
-    from bot.cogs.help_panels import HelpPanelsCog
-
-    cog = MagicMock(spec=HelpPanelsCog)
-
-    cog.post_team_ticket_panel = AsyncMock(side_effect=posting_error)
     bot = MagicMock(spec=commands.Bot)
-    bot.get_cog.return_value = cog
     bot.user = PANEL_BOT_USER
-    return bot, cog
+    return bot
 
 
 def _history(*messages: MagicMock) -> MagicMock:
@@ -668,26 +699,53 @@ class TestTicketPanel:
     async def test_a_chat_channel_without_the_panel_gets_it(self, team, mock_guild_with_base_roles):
         chat = await self._chat(team, mock_guild_with_base_roles)
         chat.history = _history()
-        bot, cog = _panel_bot()
+        chat.send = AsyncMock()
 
-        await setup_team_infrastructure(mock_guild_with_base_roles, team, bot=bot)
+        await setup_team_infrastructure(mock_guild_with_base_roles, team, bot=_panel_bot())
 
-        cog.post_team_ticket_panel.assert_awaited_once_with(chat.id)
+        assert chat.send.await_args.kwargs["embed"].title == "Need Help?"
 
     async def test_a_chat_channel_with_the_bots_panel_is_left_alone(self, team, mock_guild_with_base_roles):
         chat = await self._chat(team, mock_guild_with_base_roles)
         button = MagicMock(custom_id="help_panel:ticket")
         chat.history = _history(MagicMock(author=PANEL_BOT_USER, components=[MagicMock(children=[button])]))
-        bot, cog = _panel_bot()
+        chat.send = AsyncMock()
 
-        await setup_team_infrastructure(mock_guild_with_base_roles, team, bot=bot)
+        await setup_team_infrastructure(mock_guild_with_base_roles, team, bot=_panel_bot())
 
-        cog.post_team_ticket_panel.assert_not_awaited()
+        chat.send.assert_not_awaited()
 
     async def test_a_failed_panel_post_fails_the_setup_so_it_is_retried(self, team, mock_guild_with_base_roles):
         chat = await self._chat(team, mock_guild_with_base_roles)
         chat.history = _history()
-        bot, _cog = _panel_bot(discord.HTTPException(MagicMock(status=500), "Internal Server Error"))
+        chat.send = AsyncMock(side_effect=discord.HTTPException(MagicMock(status=500), "Internal Server Error"))
 
         with pytest.raises(TeamInfrastructureError, match="ticket panel"):
-            await setup_team_infrastructure(mock_guild_with_base_roles, team, bot=bot)
+            await setup_team_infrastructure(mock_guild_with_base_roles, team, bot=_panel_bot())
+
+    async def test_the_panel_is_posted_by_a_bot_that_loaded_the_help_panels_extension(self, monkeypatch):
+        import sys
+
+        from discord.ext import commands
+
+        from bot.discord_manager import _post_ticket_panel
+
+        # load_extension replaces the module in sys.modules; put the original back for the tests that follow
+        monkeypatch.setitem(sys.modules, "bot.cogs.help_panels", sys.modules["bot.cogs.help_panels"])
+        bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
+        await bot.load_extension("bot.cogs.help_panels")
+        chat = MagicMock(spec=discord.TextChannel, id=4242)
+        chat.history = _history()
+        chat.send = AsyncMock()
+
+        await _post_ticket_panel(bot, 7, chat)
+
+        chat.send.assert_awaited_once()
+        assert chat.send.await_args.kwargs["embed"].title == "Need Help?"
+
+    async def test_no_panel_without_a_bot_is_logged(self, caplog):
+        from bot.discord_manager import _post_ticket_panel
+
+        await _post_ticket_panel(None, 7, MagicMock(spec=discord.TextChannel))
+
+        assert "No ticket panel posted to team 7's channel" in caplog.text

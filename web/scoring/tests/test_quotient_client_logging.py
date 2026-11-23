@@ -62,16 +62,35 @@ def test_bad_credentials_keep_traceback(monkeypatch, caplog):
     assert [r for r in caplog.records if r.levelno >= logging.ERROR and r.exc_info]
 
 
-def test_endpoint_503_after_login_logs_single_warning(monkeypatch, caplog):
+@pytest.mark.parametrize("status", [500, 503])
+def test_endpoint_5xx_after_login_logs_single_warning(monkeypatch, caplog, status):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/login":
             return httpx.Response(200, json={})
-        return httpx.Response(503)
+        return httpx.Response(status)
 
     client = _client_with(monkeypatch, handler)
 
     with caplog.at_level(logging.DEBUG, logger="quotient.client"):
         assert client.get_injects(force_refresh=True) is None
 
-    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert f"Server error '{status}" in warnings[0].getMessage()
     assert not _tracebacks(caplog)
+
+
+def test_unconfigured_url_is_unavailable_without_a_request(monkeypatch, settings):
+    """QUOTIENT_API_URL defaults to empty: the client answers unavailable and never builds a relative request."""
+    settings.QUOTIENT_API_URL = ""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"requested {request.url}")
+
+    real_client = httpx.Client
+    monkeypatch.setattr(client_module.httpx, "Client", lambda: real_client(transport=httpx.MockTransport(refuse)))
+    client = QuotientClient()
+
+    assert client.get_infrastructure(force_refresh=True) is None
+    with pytest.raises(client_module.QuotientAPIError, match="QUOTIENT_API_URL is not configured"):
+        client._get_client()

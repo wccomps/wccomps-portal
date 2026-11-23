@@ -5,19 +5,51 @@ prefix (e.g. aclear_all_tickets) made with _make_async().
 """
 
 import functools
+import re
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import F
+from django.urls import reverse
 from django.utils import timezone
 
-from core.discord_tasks import TicketCreatedWeb
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import TicketCreated
+from core.utils import split_message
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
+
+# What create_ticket_atomic numbers a ticket: T, the team's number and the team's ticket count, each at least 3 digits
+TICKET_NUMBER_RE = re.compile(r"T\d{3,}-\d{3,}")
+
+# The most messages a ticket's comment or update takes in a chat; the ticket's page shows the rest
+RELAY_MAX_PARTS = 2
+
+
+def storable(text: str) -> str:
+    """A chat message's text as a comment stores it: without NUL characters, which PostgreSQL text can't hold. The
+    message is already in chat, so it is kept rather than refused."""
+    return text.replace("\x00", "")
+
+
+def ticket_url(ticket_number: str) -> str:
+    """The ticket's page, as a link in chat (BASE_URL)."""
+    return settings.BASE_URL.rstrip("/") + reverse("ticket_detail", args=[ticket_number])
+
+
+def relay_parts(text: str, limit: int, full_text_at: str) -> list[str]:
+    """text as a chat relays it: in messages of at most limit characters (core.utils.split_message), at most
+    RELAY_MAX_PARTS of them. Text that takes more is cut short in the last, which ends with full_text_at, the page that
+    shows all of it, so one long text can't hold up the queue with message after message."""
+    parts = split_message(text, limit)
+    if len(parts) <= RELAY_MAX_PARTS:
+        return parts
+    pointer = f"\n[...] The rest is on the portal: {full_text_at}"
+    return [*parts[: RELAY_MAX_PARTS - 1], parts[RELAY_MAX_PARTS - 1][: limit - len(pointer)] + pointer]
 
 
 def _make_async[**P, T](fn: Callable[P, T]) -> Callable[P, Awaitable[T]]:
@@ -116,7 +148,7 @@ def create_ticket_atomic(
             action="created",
             details={"created_by": actor_username},
         )
-        DiscordTask.enqueue(TicketCreatedWeb(ticket_id=ticket.id))
+        QueuedTask.enqueue(TicketCreated(ticket_id=ticket.id))
 
     return ticket
 

@@ -1,16 +1,19 @@
 from typing import cast
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
-from core.discord_tasks import BroadcastMessage, SyncRoles, SyncRolesResult
+from core.broadcast import queue_broadcast
 from core.errors import json_endpoint
 from core.forms import BroadcastForm, SyncRolesForm
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
+from core.queued_tasks import SyncRoles, SyncRolesResult
+from core.task_backends import discord_enabled
 from core.utils import role_sync_summary
 from team.models import Team
 
@@ -33,41 +36,31 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
     if not form.is_valid():
         raise BadRequest(" ".join(str(error) for errors in form.errors.values() for error in errors))
 
-    target = form.cleaned_data["target"]
-    message = form.cleaned_data["message"]
-
-    DiscordTask.enqueue(BroadcastMessage(target=target, message=message, sender=authentik_username))
-
-    AuditLog.objects.create(
-        action="broadcast_message",
-        admin_user=authentik_username,
-        target_entity="broadcast",
-        target_id=0,
-        details={
-            "target": target,
-            "message_preview": message[:200],
-        },
-    )
+    queue_broadcast(form.cleaned_data["target"], form.cleaned_data["message"], authentik_username)
 
     return JsonResponse({"success": True, "message": "Broadcast task queued for Discord bot"})
 
 
 @require_permission("admin", "gold_team")
 def admin_sync_roles(request: HttpRequest) -> HttpResponse:
-    return render(request, "admin/sync_roles.html")
+    if not discord_enabled():
+        raise Http404("Discord is not configured")
+    return render(request, "admin/sync_roles.html", {"example_group": settings.PORTAL_GOLD_GROUP})
 
 
 @json_endpoint
 @require_POST
 @require_permission("admin", "gold_team")
 def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
+    if not discord_enabled():
+        raise Http404("Discord is not configured")
     user = cast(User, request.user)
     authentik_username = user.username
 
     form = SyncRolesForm(request.POST)
     dry_run = form.cleaned_data["dry_run"] if form.is_valid() else True
 
-    task = DiscordTask.enqueue(SyncRoles(requested_by=authentik_username, dry_run=dry_run))
+    [task] = QueuedTask.enqueue(SyncRoles(requested_by=authentik_username, dry_run=dry_run))
 
     AuditLog.objects.create(
         action="role_sync_started",
@@ -89,7 +82,7 @@ def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
 @json_endpoint
 @require_permission("admin", "gold_team")
 def admin_task_status(request: HttpRequest, task_id: int) -> HttpResponse:
-    task = get_object_or_404(DiscordTask, id=task_id)
+    task = get_object_or_404(QueuedTask, id=task_id)
 
     response: dict[str, object] = {
         "status": task.status,

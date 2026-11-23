@@ -1,7 +1,7 @@
 {% extends "admin/ops_base.html" %}
 {% load cotton %}
 {% block title %}
-    Team Management - WCComps Portal
+    Team Management - {{ SITE_NAME }}
 {% endblock title %}
 {% block admin_content %}
     <div x-data="teamsAdmin">
@@ -32,7 +32,9 @@
                             class="vTextField">
                         <option value="activate">Activate</option>
                         <option value="deactivate">Deactivate</option>
-                        <option value="recreate">Recreate Channels</option>
+                        {% if discord_enabled %}
+                            <option value="recreate">Recreate Channels</option>
+                        {% endif %}
                     </select>
                 </c-filter_field>
                 <c-button type="submit" variant="default" ::disabled="loading">
@@ -54,15 +56,17 @@
                                 {% if filters.status == "inactive" %}selected{% endif %}>Inactive</option>
                     </select>
                 </c-filter_field>
-                <c-filter_field label="Discord" id="id_discord">
-                    <select name="discord" id="id_discord" aria-label="Filter by Discord status">
-                        <option value="" {% if not filters.discord %}selected{% endif %}>All</option>
-                        <option value="configured"
-                                {% if filters.discord == "configured" %}selected{% endif %}>Configured</option>
-                        <option value="not_set"
-                                {% if filters.discord == "not_set" %}selected{% endif %}>Not Set</option>
-                    </select>
-                </c-filter_field>
+                {% if discord_enabled %}
+                    <c-filter_field label="Discord" id="id_discord">
+                        <select name="discord" id="id_discord" aria-label="Filter by Discord status">
+                            <option value="" {% if not filters.discord %}selected{% endif %}>All</option>
+                            <option value="configured"
+                                    {% if filters.discord == "configured" %}selected{% endif %}>Configured</option>
+                            <option value="not_set"
+                                    {% if filters.discord == "not_set" %}selected{% endif %}>Not Set</option>
+                        </select>
+                    </c-filter_field>
+                {% endif %}
                 <c-filter_field label="Search" id="id_search">
                     <input type="text"
                            name="search"

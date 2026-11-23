@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load cotton %}
 {% block title %}
-    Admin - WCComps Portal
+    Admin - {{ SITE_NAME }}
 {% endblock title %}
 {% block content %}
     <c-nav>
@@ -15,7 +15,9 @@
         <c-nav_item name="registrations" href="{% url 'registration_review_list' %}">Registrations</c-nav_item>
         <c-nav_item name="broadcast" href="{% url 'admin_broadcast' %}">Broadcast</c-nav_item>
         <c-nav_item name="categories" href="{% url 'admin_categories' %}">Ticket Categories</c-nav_item>
-        <c-nav_item name="sync" href="{% url 'admin_sync_roles' %}">Sync Roles</c-nav_item>
+        {% if discord_enabled %}
+            <c-nav_item name="sync" href="{% url 'admin_sync_roles' %}">Sync Roles</c-nav_item>
+        {% endif %}
     </c-nav>
     <c-module>
         {% block admin_content %}

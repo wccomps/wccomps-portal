@@ -1,7 +1,7 @@
 """Incident/red-team evidence files are never rendered as pages on the portal's origin (stored XSS).
 
 Any file type is still accepted (teams upload PDFs, text, CSV, archives as evidence); only real
-images and PDFs are shown inline, decided from the file's bytes rather than the client's claim.
+raster images are shown inline, decided from the file's bytes rather than the client's claim.
 """
 
 import io
@@ -12,7 +12,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from core.stored_files import UploadError
+from core.stored_files import MAX_SCREENSHOTS, UploadError
 from scoring.models import IncidentReport, IncidentScreenshot, RedTeamScore, RedTeamScreenshot
 from team.models import Team
 
@@ -21,6 +21,10 @@ pytestmark = pytest.mark.django_db
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 PDF = b"%PDF-1.7\n" + b"\x00" * 64
+WEBP = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 64
+SHORTEST_WEBP = b"RIFF\x04\x00\x00\x00WEBP"
+WAV = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 64
+WEBP_NOT_RIFF = b"RIFX\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 64
 HTML = b"<html><script>fetch('/ops/admin/competition/action/',{method:'POST'})</script></html>"
 SVG = b'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'
 TEXT = b"team01 pii dump\n"
@@ -36,6 +40,10 @@ def _upload(data: bytes, name: str = "shot.png", content_type: str = "image/png"
         (PNG, "text/html", "image/png"),
         (JPEG, "image/jpeg", "image/jpeg"),
         (PDF, "application/pdf", "application/pdf"),
+        (WEBP, "image/webp", "image/webp"),
+        (SHORTEST_WEBP, "image/webp", "image/webp"),
+        (WAV, "image/webp", "application/octet-stream"),
+        (WEBP_NOT_RIFF, "image/webp", "application/octet-stream"),
         (HTML, "image/png", "application/octet-stream"),
         (SVG, "image/svg+xml", "application/octet-stream"),
         (TEXT, "text/plain", "application/octet-stream"),
@@ -59,6 +67,19 @@ def test_upload_reads_are_bounded():
     upload.size = None
     with pytest.raises(UploadError):
         RedTeamScreenshot.from_upload(upload)
+    # Read no further than one byte past the limit, which is how it knows the file is too big
+    assert upload.file.tell() == RedTeamScreenshot.MAX_SIZE + 1
+
+
+@pytest.mark.parametrize("size", [None, RedTeamScreenshot.MAX_SIZE + 1])
+@pytest.mark.parametrize(("name", "named"), [("big.png", "big.png"), ("\u202e", "screenshot.png")])
+def test_an_oversize_upload_is_refused_naming_it_or_the_default_when_its_name_cleans_away(size, name, named):
+    upload = SimpleUploadedFile(name, b"", content_type="image/png")
+    upload.file = io.BytesIO(PNG + b"\x00" * RedTeamScreenshot.MAX_SIZE)
+    upload.size = size
+    with pytest.raises(UploadError) as refused:
+        RedTeamScreenshot.from_upload(upload)
+    assert str(refused.value) == f"{named}: File too large (max 10MB)"
 
 
 # --- download views (also cover rows stored before the fix) ----------------------------------------
@@ -110,13 +131,17 @@ def test_png_still_displays_inline(incident, gold_team_user):
     assert "sandbox" in response["Content-Security-Policy"]
 
 
-def test_pdf_still_displays_inline(incident, gold_team_user):
+def test_a_pdf_downloads_sandboxed(incident, gold_team_user):
+    """A browser's PDF viewer runs the file's own script and links, so a team's PDF is never shown on the origin."""
     shot = IncidentScreenshot.objects.create(incident=incident, file_data=PDF, filename="IR.pdf", mime_type="x")
 
     response = _get(gold_team_user, reverse("scoring:incident_screenshot", args=[shot.id]))
 
     assert response["Content-Type"] == "application/pdf"
-    assert response["Content-Disposition"].startswith("inline")
+    assert response["Content-Disposition"].startswith("attachment")
+    assert "sandbox" in response["Content-Security-Policy"]
+    assert response["Cross-Origin-Resource-Policy"] == "same-origin"
+    assert response["X-Content-Type-Options"] == "nosniff"
 
 
 def test_stored_svg_red_file_is_downloaded_not_rendered(red_team_user, gold_team_user):
@@ -210,16 +235,23 @@ def test_rejected_incident_upload_shows_the_error(team, blue_team_user, mock_quo
     assert not IncidentReport.objects.exists()
 
 
-@pytest.mark.parametrize("problem", ["too_many", "too_big"])
-def test_rejected_red_team_upload_shows_the_error(team, red_team_user, mock_quotient_client, problem, monkeypatch):
-    uploads = [_upload(PNG, f"s{n}.png") for n in range(21)] if problem == "too_many" else [_upload(PNG)]
+@pytest.mark.parametrize(
+    ("problem", "error"),
+    [("too_many", b"Maximum 20 screenshots allowed per submission"), ("too_big", b"shot.png: File too large")],
+)
+def test_rejected_red_team_upload_shows_the_error(
+    team, red_team_user, mock_quotient_client, problem, error, monkeypatch
+):
+    uploads = (
+        [_upload(PNG, f"s{n}.png") for n in range(MAX_SCREENSHOTS + 1)] if problem == "too_many" else [_upload(PNG)]
+    )
     if problem == "too_big":
         monkeypatch.setattr(RedTeamScreenshot, "MAX_SIZE", 10)
 
     response = _submit_red(red_team_user, uploads)
 
     assert response.status_code == 200
-    assert b"File upload failed" in response.content
+    assert b"File upload failed: " + error in response.content
     assert not RedTeamScore.objects.exists()
 
 
@@ -228,6 +260,13 @@ def test_red_team_finding_with_screenshots_is_saved(team, red_team_user, mock_qu
 
     assert response.status_code == 302
     assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2
+
+
+def test_a_finding_with_the_most_screenshots_allowed_is_saved(team, red_team_user, mock_quotient_client):
+    response = _submit_red(red_team_user, [_upload(PNG, f"s{n}.png") for n in range(MAX_SCREENSHOTS)])
+
+    assert response.status_code == 302
+    assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == MAX_SCREENSHOTS
 
 
 def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, mock_quotient_client, monkeypatch):
@@ -239,15 +278,30 @@ def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, moc
     assert not RedTeamScore.objects.exists()
 
 
-def test_total_submission_size_is_bounded(team, red_team_user, mock_quotient_client, monkeypatch):
+def test_a_submission_one_byte_past_the_total_size_allowed_is_refused_naming_the_limit(
+    team, red_team_user, mock_quotient_client, monkeypatch
+):
     import core.stored_files
 
-    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", len(PNG) + 1)
-    response = _submit_red(red_team_user, [_upload(PNG, "first.png"), _upload(PNG, "second.png")])
+    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", 2 * 1024 * 1024)
+    half = PNG + b"\x00" * (1024 * 1024 - len(PNG))
+    response = _submit_red(red_team_user, [_upload(half, "first.png"), _upload(half + b"\x00", "second.png")])
 
     assert response.status_code == 200
-    assert b"Total upload size cannot exceed" in response.content
+    assert b"File upload failed: Total upload size cannot exceed 2MB" in response.content
     assert not RedTeamScore.objects.exists()
+
+
+def test_a_submission_of_exactly_the_total_size_allowed_is_saved(
+    team, red_team_user, mock_quotient_client, monkeypatch
+):
+    import core.stored_files
+
+    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", 2 * len(PNG))
+    response = _submit_red(red_team_user, [_upload(PNG, "first.png"), _upload(PNG, "second.png")])
+
+    assert response.status_code == 302
+    assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2
 
 
 def test_review_incidents_counts_evidence_without_fetching_file_bytes(incident, gold_team_user):

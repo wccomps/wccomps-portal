@@ -15,8 +15,8 @@ import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
 
-from bot.heartbeat import beat
-from core.discord_tasks import SyncRolesResult
+from core.heartbeat import beat
+from core.queued_tasks import SyncRolesResult
 from core.utils import role_sync_summary
 
 logger = logging.getLogger(__name__)

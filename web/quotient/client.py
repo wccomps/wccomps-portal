@@ -96,6 +96,12 @@ def _timestamp(value: object, what: str) -> datetime | None:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
+def _fraction(value: object, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
+        raise ValueError(f"{what} isn't a fraction from 0 to 1: {value!r:.80}")
+    return float(value)
+
+
 def _object(value: object, what: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{what} isn't an object: {value!r:.80}")
@@ -162,7 +168,8 @@ class ServiceExportEntry:
     service_name: str
     service_points: int
     sla_violations: int
-    max_points: int | None  # what every check passing would have earned; None when the export doesn't say
+    sla_penalty: int
+    max_points: int | None = None  # what every check passing would have earned
 
 
 @dataclass
@@ -171,6 +178,14 @@ class TeamServiceExport:
     services: list[ServiceExportEntry]
     gross_points: int
     total_sla_penalty: int
+    quotient_team_id: int | None = None
+
+
+@dataclass
+class TeamUptime:
+    team_name: str
+    team_number: int
+    uptimes: dict[str, float]  # service_name -> uptime (0.0-1.0)
 
 
 @dataclass
@@ -194,6 +209,27 @@ class ServiceCheck:
     error: str
 
 
+@dataclass
+class RoundCheck:
+    team_id: int
+    service_name: str
+    passed: bool
+
+
+@dataclass
+class EngineStatus:
+    """Quotient's engine status: whether it is running, and its last round, the latest preflight round while preflight
+    is true (before the competition starts, when no round has been scored). round_id is 0 when no such round has run.
+    preflight is None when the answer has no such field: a Quotient build older than its preflight status.
+    """
+
+    running: bool
+    preflight: bool | None
+    round_id: int
+    round_start: datetime | None
+    checks: list[RoundCheck]
+
+
 class QuotientAPIError(Exception):
     """Raised when Quotient API returns an error."""
 
@@ -211,6 +247,8 @@ class QuotientClient:
 
     def _get_client(self, force_reauth: bool = False) -> httpx.Client:
         if self.client is None or force_reauth:
+            if not self.base_url:
+                raise QuotientAPIError("QUOTIENT_API_URL is not configured")
             self.client = httpx.Client()
 
             username = getattr(settings, "QUOTIENT_USERNAME", "")
@@ -302,6 +340,10 @@ class QuotientClient:
         """Fetch per-service score breakdown from Quotient, or None if unavailable."""
         return self._fetch("/api/engine/export/scores", _service_export, "the service export")
 
+    def get_uptimes(self) -> list[TeamUptime] | None:
+        """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
+        return self._fetch("/api/graphs/uptimes", _uptimes, "uptimes")
+
     def get_service_checks(
         self,
         team_number: int,
@@ -322,6 +364,10 @@ class QuotientClient:
             _service_checks,
             "service checks",
         )
+
+    def get_engine_status(self) -> EngineStatus | None:
+        """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
+        return self._fetch("/api/engine", _engine_status, "the engine status")
 
 
 def _infrastructure(data: object) -> QuotientInfrastructure:
@@ -364,12 +410,15 @@ def _service_entry(s: dict[str, object]) -> ServiceExportEntry:
     """One service of a team's export; ValueError when its max_points couldn't hold the points it says were earned."""
     points = _whole(_field(s, "service_points", "a service"), "a service's points")
     max_points = _whole(s["max_points"], "a service's max points") if "max_points" in s else None
-    if max_points is not None and max_points < max(points, 0):
+    if max_points is not None and max_points < 0:
+        raise ValueError(f"a service's max points ({max_points}) are negative")
+    if max_points is not None and max_points < points:
         raise ValueError(f"a service's max points ({max_points}) are below its points ({points})")
     return ServiceExportEntry(
         service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
         service_points=points,
         sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
+        sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
         max_points=max_points,
     )
 
@@ -378,17 +427,32 @@ def _service_export(data: object) -> list[TeamServiceExport]:
     exports = []
     for team_data in _objects(data, "the export"):
         services = [_service_entry(s) for s in _objects(team_data.get("services", []), "a team's services")]
-        team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
         exports.append(
             TeamServiceExport(
-                team_number=_team_number(team_name),
+                team_number=_team_number(_text(_field(team_data, "team_name", "a team"), "a team's name")),
                 services=services,
                 gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
                 total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
+                quotient_team_id=_whole(team_data["team_id"], "a team's ID") if "team_id" in team_data else None,
             )
         )
     logger.info(f"Fetched service export for {len(exports)} teams")
     return exports
+
+
+def _uptimes(data: object) -> list[TeamUptime]:
+    result = []
+    for team_data in _objects(_object(data, "the uptimes").get("series", []), "the uptimes"):
+        team_name = _text(_field(team_data, "Name", "a team"), "a team's name")
+        uptimes = {
+            _text(_field(entry, "Service", "an uptime"), "a service"): _fraction(
+                _field(entry, "Uptime", "an uptime"), "an uptime"
+            )
+            for entry in _objects(team_data.get("Data", []), "a team's uptimes")
+        }
+        result.append(TeamUptime(team_name=team_name, team_number=_team_number(team_name), uptimes=uptimes))
+    logger.info(f"Fetched uptimes for {len(result)} teams")
+    return result
 
 
 def _service_checks(data: object) -> list[ServiceCheck]:
@@ -410,6 +474,29 @@ def _service_checks(data: object) -> list[ServiceCheck]:
         old_check.debug = ""
         old_check.error = ""
     return checks
+
+
+def _engine_status(data: object) -> EngineStatus:
+    # /api/engine returns {"running": bool, "preflight": bool, "last_round": {"ID": int, "StartTime": str,
+    # "Checks": [{"TeamID": int, "ServiceName": str, "Result": bool, ...}] or null, ...}, ...}
+    status = _object(data, "the engine status")
+    last_round = _object(_field(status, "last_round", "the engine status"), "the last round")
+    preflight = status.get("preflight")
+    checks = last_round.get("Checks")
+    return EngineStatus(
+        running=_boolean(_field(status, "running", "the engine status"), "whether the engine is running"),
+        preflight=None if preflight is None else _boolean(preflight, "whether the engine is in preflight"),
+        round_id=_whole(_field(last_round, "ID", "the last round"), "a round number"),
+        round_start=_timestamp(last_round.get("StartTime", ""), "a round's start time"),
+        checks=[
+            RoundCheck(
+                team_id=_whole(_field(entry, "TeamID", "a check"), "a check's team"),
+                service_name=_text(_field(entry, "ServiceName", "a check"), "a check's service"),
+                passed=_boolean(_field(entry, "Result", "a check"), "a check's result"),
+            )
+            for entry in ([] if checks is None else _objects(checks, "the last round's checks"))
+        ],
+    )
 
 
 @lru_cache(maxsize=1)

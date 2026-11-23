@@ -11,6 +11,7 @@ from discord.ext import commands
 from django.conf import settings
 from django.utils import timezone
 
+from bot.utils import DISCORD_SHORT_TEXT_CHAR_LIMIT, fit, org_named
 from team.models import DiscordLink, LinkRateLimit, LinkToken
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_MAX = 5
 RATE_LIMIT_WINDOW_HOURS = 1
 TOKEN_EXPIRY_MINUTES = 15
+LINK_DESCRIPTION = fit(f"Link your Discord account to your {org_named('team')}", DISCORD_SHORT_TEXT_CHAR_LIMIT)
 
 
 @dataclass
@@ -87,7 +89,7 @@ class LinkingCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="link", description="Link your Discord account to your WCComps team")
+    @app_commands.command(name="link", description=LINK_DESCRIPTION)
     async def link_command(self, interaction: discord.Interaction) -> None:
         user_id = interaction.user.id
 

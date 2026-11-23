@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from bot.cogs.ticketing import TicketingCog
-from core.models import DiscordTask, UserGroups
+from core.models import QueuedTask, UserGroups
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketComment, TicketHistory
 
@@ -223,9 +223,12 @@ class TestTicketingCog:
             discord_thread_id=5555666777,
         )
 
-        # Create existing comment
+        # Create existing comment, written by a member of the ticket's team
+        author = await User.objects.acreate(username="editor")
+        await UserGroups.objects.acreate(user=author, authentik_id="editor-uid", groups=[team.authentik_group])
         comment = await TicketComment.objects.acreate(
             ticket=ticket,
+            author=author,
             comment_text="Original text",
             discord_message_id=8888999000,
         )
@@ -381,6 +384,78 @@ class TestTicketingCog:
         assert comment.author.username == "comment_author"
         assert comment.comment_text == "This is a test message"
         assert comment.discord_message_id == 999888777666
+
+        # With only Discord configured the thread already shows it: nothing is queued
+        assert not await QueuedTask.objects.aexists()
+
+    async def test_on_message_queues_the_comment_for_zulip_only(
+        self, cog: TicketingCog, team: Team, scoring_check_category: TicketCategory, zulip_configured: None
+    ) -> None:
+        ticket = await Ticket.objects.acreate(
+            ticket_number="T042-102",
+            team=team,
+            category=scoring_check_category,
+            title="Mirrored",
+            description="Test",
+            status="open",
+            discord_thread_id=7777888111,
+        )
+        member = await User.objects.acreate(username="mirrored_author")
+        await DiscordLink.objects.acreate(
+            discord_id=123456789, discord_username="x", user=member, team=team, is_active=True
+        )
+        message = AsyncMock(spec=discord.Message)
+        message.author = Mock()
+        message.author.bot = False
+        message.author.id = 123456789
+        message.id = 999888777555
+        message.content = "Seen in Zulip too"
+        message.channel = Mock(spec=discord.Thread)
+        message.channel.id = ticket.discord_thread_id
+        message.attachments = []
+
+        await cog.on_message(message)
+
+        comment = await TicketComment.objects.aget(discord_message_id=message.id)
+        tasks = [task async for task in QueuedTask.objects.all()]
+        assert [(t.task_type, t.backend, t.ticket_id) for t in tasks] == [("post_comment", "zulip", ticket.id)]
+        assert tasks[0].payload == {"ticket_id": ticket.id, "comment_id": comment.id}
+
+    async def test_a_message_whose_link_ended_after_the_check_is_ignored(
+        self, cog: TicketingCog, team: Team, scoring_check_category: TicketCategory
+    ) -> None:
+        """may_write_to_ticket passed, then the link ended: nothing is saved or counted, and no one is answered."""
+        from ticketing.models import CommentRateLimit, TicketAttachment
+
+        ticket = await Ticket.objects.acreate(
+            ticket_number="T042-103",
+            team=team,
+            category=scoring_check_category,
+            title="Unlinked",
+            description="Test",
+            status="open",
+            discord_thread_id=7777888222,
+        )
+        attachment = AsyncMock(spec=discord.Attachment)
+        attachment.filename = "shot.png"
+        attachment.size = 24
+        message = AsyncMock(spec=discord.Message)
+        message.author = Mock()
+        message.author.bot = False
+        message.author.id = 123456780
+        message.id = 999888777444
+        message.content = "Sent as the link ended"
+        message.channel = AsyncMock(spec=discord.Thread)
+        message.channel.id = ticket.discord_thread_id
+        message.attachments = [attachment]
+
+        await cog.on_message(message)
+
+        assert not await TicketComment.objects.aexists()
+        assert not await TicketAttachment.objects.aexists()
+        assert not await CommentRateLimit.objects.aexists()
+        message.channel.send.assert_not_called()
+        attachment.read.assert_not_called()
 
     async def test_on_message_prevents_duplicate_comments(
         self, cog: TicketingCog, team: Team, scoring_check_category: TicketCategory
@@ -605,8 +680,25 @@ class TestTicketCommand:
         assert ticket.ip_address == "10.0.0.5"
 
         # The queue gives it its thread
-        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        thread_tasks = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
         assert await thread_tasks.acount() == 1
+
+    async def test_create_ticket_queues_its_thread_and_its_zulip_topic(
+        self,
+        cog: TicketingCog,
+        team: Team,
+        discord_link: DiscordLink,
+        interaction: AsyncMock,
+        box_reset_category: TicketCategory,
+        zulip_configured: None,
+    ) -> None:
+        await cog.create_ticket.callback(
+            cog, interaction, category="2", description="reset please", hostname="web01", ip_address="10.0.0.5"
+        )
+
+        ticket = await Ticket.objects.aget(team=team)
+        created = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        assert sorted([task.backend async for task in created]) == ["discord", "zulip"]
 
     async def test_create_ticket_defers_first_and_queues_the_thread_even_if_the_reply_fails(
         self,
@@ -628,7 +720,7 @@ class TestTicketCommand:
         assert interaction.mock_calls[0] == call.response.defer(ephemeral=True)
         interaction.response.send_message.assert_not_called()
         ticket = await Ticket.objects.aget(team=team)
-        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        thread_tasks = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
         assert await thread_tasks.acount() == 1
 
     async def test_create_ticket_auto_populates_ip_from_hostname(
@@ -700,19 +792,24 @@ class TestRateLimiting:
             discord_thread_id=1234567890123,
         )
 
-    async def test_rate_limit_per_ticket_enforced(self, cog: TicketingCog, ticket: Ticket) -> None:
+    async def test_rate_limit_per_ticket_enforced(self, cog: TicketingCog, ticket: Ticket, team: Team) -> None:
         """Test rate limit: 5 comments per minute per ticket."""
         from ticketing.models import CommentRateLimit
 
         # Create 5 rate limit entries for this ticket (at the limit)
         for i in range(5):
-            await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=111222333 + i)
+            await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=f"user:{900000 + i}")
+        member = await User.objects.acreate(username="other25")
+        await DiscordLink.objects.acreate(
+            discord_id=999888777, discord_username="x", user=member, team=team, is_active=True
+        )
 
         # Create message from a user
         message = AsyncMock(spec=discord.Message)
         message.author = Mock()
         message.author.bot = False
         message.author.id = 999888777  # Different user
+        message.id = 444555666888
         message.author.mention = "<@999888777>"
         message.channel = Mock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
@@ -731,33 +828,36 @@ class TestRateLimiting:
         args = message.channel.send.call_args
         assert "rate limit" in args[0][0].lower()
 
-    async def test_rate_limit_per_user_enforced(self, cog: TicketingCog, ticket: Ticket, team: Team) -> None:
-        """Test rate limit: 10 comments per minute per user."""
+    async def test_the_linked_accounts_web_posts_share_its_budget(
+        self, cog: TicketingCog, ticket: Ticket, team: Team
+    ) -> None:
+        """The team's shared account gets one budget on every surface: its web posts count against its Discord ones."""
         from ticketing.models import CommentRateLimit
 
-        # Create 10 rate limit entries for same user (user-level limit is 10/min)
-        user_id = 555444333
-        for _i in range(10):
-            await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=user_id)
-
-        # Try to comment on the original ticket
+        member = await User.objects.acreate(username="member25")
+        await DiscordLink.objects.acreate(
+            discord_id=555444333, discord_username="x", user=member, team=team, is_active=True
+        )
+        for _ in range(CommentRateLimit.ACTOR_LIMIT):
+            await CommentRateLimit.objects.acreate(ticket=None, actor_key=CommentRateLimit.user_key(member))
         message = AsyncMock(spec=discord.Message)
         message.author = Mock()
         message.author.bot = False
-        message.author.id = user_id
-        message.id = 444555666777  # Add message ID
-        message.author.mention = f"<@{user_id}>"
+        message.author.id = 555444333
+        message.id = 444555666999
+        message.author.mention = "<@555444333>"
         message.channel = Mock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
         message.channel.send = AsyncMock()
-        message.content = "User rate limited"
+        message.content = "From Discord after ten from the web"
         message.attachments = []
         message.delete = AsyncMock()
 
         await cog.on_message(message)
 
-        # Message should be deleted due to user-level rate limit
         message.delete.assert_called_once()
+        assert "User rate limit exceeded" in message.channel.send.call_args.args[0]
+        assert not await TicketComment.objects.aexists()
 
 
 @pytest.mark.asyncio
@@ -785,6 +885,15 @@ class TestAttachmentHandling:
             team_name="Attachment Team",
             authentik_group="WCComps_BlueTeam35",
         )
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def member(self, team: Team) -> User:
+        """The portal account the messages' author (123456789) is linked to."""
+        member = await User.objects.acreate(username="member35")
+        await DiscordLink.objects.acreate(
+            discord_id=123456789, discord_username="x", user=member, team=team, is_active=True
+        )
+        return member
 
     @pytest_asyncio.fixture
     async def ticket(self, team: Team, scoring_check_category: TicketCategory) -> Ticket:
@@ -816,7 +925,6 @@ class TestAttachmentHandling:
         message.author.bot = False
         message.author.id = 123456789
         message.id = 777888999000  # Add message ID
-        message.author.__str__ = Mock(return_value="user#1234")
         message.channel = Mock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
         message.content = "Here's the screenshot"
@@ -854,6 +962,7 @@ class TestAttachmentHandling:
         message.author.bot = False
         message.author.id = 123456789
         message.author.mention = "<@123456789>"
+        message.id = 777888999111
         message.channel = AsyncMock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
         message.content = ""
@@ -870,6 +979,66 @@ class TestAttachmentHandling:
         args = message.channel.send.call_args
         assert "too large" in args[0][0].lower()
         assert "10mb" in args[0][0].lower()
+
+    def _message_with(self, ticket: Ticket, attachment: AsyncMock, author_id: int = 123456789) -> AsyncMock:
+        message = AsyncMock(spec=discord.Message)
+        message.author = Mock()
+        message.author.bot = False
+        message.author.id = author_id
+        message.author.mention = f"<@{author_id}>"
+        message.author.__str__ = Mock(return_value="discordname#1234")
+        message.id = 777888999222
+        message.channel = AsyncMock(spec=discord.Thread)
+        message.channel.id = ticket.discord_thread_id
+        message.content = ""
+        message.attachments = [attachment]
+        return message
+
+    def _png(self) -> AsyncMock:
+        attachment = AsyncMock(spec=discord.Attachment)
+        attachment.filename = "shot.png"
+        attachment.size = 24
+        attachment.read = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        return attachment
+
+    async def test_attachment_is_credited_to_the_linked_portal_account(self, cog: TicketingCog, ticket: Ticket) -> None:
+        """As a Zulip upload is: never the Discord name, which anyone can set."""
+        from ticketing.models import TicketAttachment
+
+        await cog.on_message(self._message_with(ticket, self._png()))
+
+        assert [a.uploaded_by async for a in TicketAttachment.objects.all()] == ["member35"]
+
+    @pytest.mark.parametrize("status", [Ticket.STATUS_RESOLVED, Ticket.STATUS_CANCELLED])
+    async def test_attachment_on_a_closed_ticket_is_refused(
+        self, cog: TicketingCog, ticket: Ticket, status: str
+    ) -> None:
+        from ticketing.models import TicketAttachment
+
+        await Ticket.objects.filter(pk=ticket.pk).aupdate(status=status)
+        message = self._message_with(ticket, self._png())
+
+        await cog.on_message(message)
+
+        assert not await TicketAttachment.objects.aexists()
+        assert f"Ticket is {status}" in message.channel.send.call_args.args[0]
+        message.add_reaction.assert_not_called()
+
+    async def test_attachments_past_the_tickets_cap_are_refused_once(self, cog: TicketingCog, ticket: Ticket) -> None:
+        from ticketing.models import TicketAttachment
+
+        for n in range(TicketAttachment.MAX_PER_TICKET - 1):
+            await TicketAttachment.objects.acreate(
+                ticket=ticket, file_data=b"x", filename=f"{n}.txt", mime_type="text/plain", uploaded_by="x"
+            )
+        message = self._message_with(ticket, self._png())
+        message.attachments = [self._png(), self._png(), self._png()]
+
+        await cog.on_message(message)
+
+        assert await TicketAttachment.objects.acount() == TicketAttachment.MAX_PER_TICKET
+        message.channel.send.assert_called_once()
+        assert "maximum of 20 attachments" in message.channel.send.call_args.args[0]
 
 
 @pytest.mark.asyncio

@@ -5,12 +5,12 @@ from datetime import timedelta
 from typing import TypedDict
 
 from django.contrib.auth.models import User
-from django.db import connection, models, transaction
+from django.db import models, transaction
 from django.db.models.functions import Now
 from django.utils import timezone
 from django_stubs_ext import WithAnnotations
 
-from core.utils import IPAddress
+from core.utils import IPAddress, advisory_xact_lock
 
 from .locks import school_list_lock
 
@@ -95,21 +95,58 @@ class TeamRegistration(models.Model):
         contacts = sorted(self.contacts.all(), key=lambda contact: (contact.role != "captain", contact.pk))
         return contacts[0] if contacts else None
 
+    @transaction.atomic
     def approve(self, user: User) -> bool:
-        """Approve it if it is still pending; False when it no longer is."""
-        return self._decide(status="approved", approved_at=timezone.now(), approved_by=user)
+        """Approve it if it is still pending; False when it no longer is. Refused with SchoolApprovedError while
+        another registration for the same school is approved for one of its events still to come."""
+        school_list_lock()
+        pending = TeamRegistration.objects.filter(pk=self.pk, status="pending").exists()
+        if pending and (approved := self.approved_same_school()) is not None:
+            raise SchoolApprovedError(self, approved)
+        return self._decide(models.Q(status="pending"), status="approved", approved_at=timezone.now(), approved_by=user)
 
+    @transaction.atomic
     def reject(self, reason: str) -> bool:
-        """Reject it if it is still pending; False when it no longer is."""
-        return self._decide(status="rejected", rejection_reason=reason)
+        """Reject it if it is pending, or approved with no team while another approved registration names its school
+        for one of its events (both approved before approve checked, say); False otherwise."""
+        school_list_lock()  # Not while assign_teams gives it a team, or the other is rejected
+        rejectable = models.Q(status="pending")
+        if self.approved_same_school() is not None:
+            rejectable |= models.Q(status="approved", team_assignments__isnull=True)
+        return self._decide(rejectable, status="rejected", rejection_reason=reason)
 
-    def _decide(self, **fields: object) -> bool:
+    def approved_same_school(self) -> TeamRegistration | None:
+        """Another approved registration of this school (by normalize_school_name) for one of this one's events
+        still to come, else None. A school registers again each season, so earlier seasons' don't count."""
+        events = self.event_enrollments.filter(event__is_finalized=False).values("event")
+        others = (
+            TeamRegistration.objects.filter(status="approved", event_enrollments__event__in=events)
+            .exclude(pk=self.pk)
+            .distinct()
+            .prefetch_related("contacts")
+        )
+        key = normalize_school_name(self.school_name)
+        return next((other for other in others if normalize_school_name(other.school_name) == key), None)
+
+    def _decide(self, allowed: models.Q, **fields: object) -> bool:
         # One conditional update, so two reviews racing on the same registration can't both take
-        decided = TeamRegistration.objects.filter(pk=self.pk, status="pending").update(**fields) == 1
+        decided = TeamRegistration.objects.filter(allowed, pk=self.pk).update(**fields) == 1
         if decided:
             for name, value in fields.items():
                 setattr(self, name, value)
         return decided
+
+
+class SchoolApprovedError(Exception):
+    """Approve refused: another registration of the same school is already approved for one of its events."""
+
+    def __init__(self, registration: TeamRegistration, approved: TeamRegistration) -> None:
+        contact = approved.primary_contact
+        by = f", from {contact.email}," if contact else ""
+        super().__init__(
+            f"Registration for {registration.school_name} was not approved: another registration for that school"
+            f"{by} is already approved for one of its events. First reject whichever of the two isn't the school's."
+        )
 
 
 class SeasonManager(models.Manager["Season"]):
@@ -354,8 +391,7 @@ class RegistrationRateLimit(models.Model):
         widest = min(prefix for prefix, _ in cls.TIERS[ip.version])
         key = f"registration_rate:{ipaddress.ip_network((ip, widest), strict=False)}"
         with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", [key])
+            advisory_xact_lock(key)
             yield cls.over_limit(ip)
 
     @classmethod

@@ -39,7 +39,7 @@ def test_an_error_answer_of_any_shape_reads_as_an_authentik_error(answers: list[
         with contextlib.suppress(AuthentikAPIError):
             assert isinstance(authentik().get_application_by_slug("netbird"), dict | None)
         with contextlib.suppress(AuthentikAPIError):
-            assert isinstance(authentik().get_blueteam_binding("app-1"), dict | None)
+            assert isinstance(authentik().app_bindings("app-1"), list)
 
 
 @example(answers=[answer({**PROVIDERS, "pagination": {"next": 2}})])

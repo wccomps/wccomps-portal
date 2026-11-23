@@ -64,14 +64,39 @@ def test_a_new_event_is_created_and_opened(season):
 
 def test_opening_an_event_queues_the_teardown_of_what_earlier_events_left_in_discord(season):
     """Once, when the import opens the event: a second import into the open event opens nothing."""
-    from core.models import DiscordTask
+    from core.models import QueuedTask
 
     import_school_list(new_event("New", date(2026, 11, 7), "qualifier"), _rows(), "gold")
     opened = Event.objects.get(name="New")
     import_school_list(opened, [SchoolListRow(1, "Example University", "c@example.edu")], "gold")
 
-    tasks = [task.payload for task in DiscordTask.objects.filter(task_type="reconcile_teams")]
+    tasks = [task.payload for task in QueuedTask.objects.filter(task_type="reconcile_teams")]
     assert tasks == [{"requested_by": "gold", "open_event_id": opened.pk}]
+
+
+def test_opening_an_event_queues_the_discord_and_nextcloud_reconciles_together(season):
+    from core.models import QueuedTask
+
+    import_school_list(new_event("New", date(2026, 11, 7), "qualifier"), _rows(), "gold")
+    opened = Event.objects.get(name="New")
+
+    queued = QueuedTask.objects.filter(task_type__startswith="reconcile_").order_by("pk")
+    rows = queued.values_list("task_type", "backend", "payload__open_event_id")
+    assert list(rows) == [("reconcile_teams", "discord", opened.pk), ("reconcile_nextcloud", "worker", opened.pk)]
+
+
+def test_opening_an_event_without_discord_queues_only_the_worker_tasks(season, settings):
+    from core.models import QueuedTask
+
+    settings.DISCORD_BOT_TOKEN = ""
+    import_school_list(new_event("New", date(2026, 11, 7), "qualifier"), _rows(), "gold")
+    opened = Event.objects.get(name="New")
+
+    queued = QueuedTask.objects.order_by("pk").values_list("task_type", "backend", "payload")
+    assert list(queued) == [
+        ("reconcile_nextcloud", "worker", {"requested_by": "gold", "open_event_id": opened.pk}),
+        ("reset_nextcloud_team", "worker", {"team_number": 1}),  # team 1's new school
+    ]
 
 
 def test_a_row_for_a_team_that_no_longer_exists_blocks_the_import(season):
@@ -124,15 +149,16 @@ def test_opening_an_event_drops_announcements_queued_for_the_last_one(season):
     assert not QueuedAnnouncement.objects.exists()
 
 
-def test_re_importing_the_list_keeps_a_teams_channels_while_its_school_stays(season):
-    """Only a team given another school has its Discord role and category removed."""
-    from core.models import DiscordTask
+def test_re_importing_the_list_keeps_a_teams_channels_and_files_while_its_school_stays(season):
+    """Only a team given another school has its Discord role and category removed and its Nextcloud account reset."""
+    from core.models import QueuedTask
 
     event = _event(season, "Open", active=True)
     rows = _rows()
     Team.objects.create(team_number=2, team_name="Team 02")
     rows.append(SchoolListRow(team_number=2, school_name="Other College", contact_email="c@example.edu"))
     import_school_list(event, rows, "gold")
+    QueuedTask.objects.update(status="completed")  # the first schools' resets
     Team.objects.update(discord_role_id=5, discord_category_id=6)
 
     rows[1] = SchoolListRow(team_number=2, school_name="Third College", contact_email="c@example.edu")
@@ -140,7 +166,8 @@ def test_re_importing_the_list_keeps_a_teams_channels_while_its_school_stays(sea
 
     marked = Team.objects.filter(channels_need_clearing=True).values_list("team_number", flat=True)
     assert list(marked) == [2]
-    assert list(DiscordTask.objects.values_list("payload__team_number", flat=True)) == [2]
+    queued = QueuedTask.objects.filter(status="pending").order_by("pk").values_list("task_type", "payload__team_number")
+    assert list(queued) == [("clear_team_channels", 2), ("reset_nextcloud_team", 2)]
 
 
 def test_re_importing_the_list_drops_the_announcements_queued_for_a_team_given_another_school(season):

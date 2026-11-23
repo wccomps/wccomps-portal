@@ -1,7 +1,8 @@
-"""Request text can't forge a log line or a field: the access, error and legacy-host lines under any path and header."""
+"""Request text can't forge a log line or a field: the access and error lines under any path and header."""
 
 import logging
 
+import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -80,13 +81,9 @@ def _assert_one_line_one_quoted_field(messages: list[str], fields: int) -> None:
         assert _fields(message) == fields, message
 
 
-@given(path=FORGED, host=FORGED, raises=st.booleans(), status=st.sampled_from([200, 500]))
-@example(path='x" 200 1ms [0q 0ms]\nINFO "GET /ops/', host="h", raises=False, status=200)
-@example(path="x", host="h - forged", raises=False, status=200)
-def test_an_access_log_line_is_one_line_whatever_the_path_and_host(
-    path: str, host: str, raises: bool, status: int
-) -> None:
-    """A line break or quote in a path or Host header would otherwise forge a field or a whole line."""
+def _access_logged(path: str = "/", *, host: str | None = None, raises: bool = False, status: int = 200) -> list[str]:
+    """The lines an anonymous GET of this path (with this Host header, if any) logs, its view answering this status
+    or raising."""
     from django.contrib.auth.models import AnonymousUser
     from django.http import HttpResponse
     from django.test import RequestFactory
@@ -99,46 +96,44 @@ def test_an_access_log_line_is_one_line_whatever_the_path_and_host(
         return HttpResponse(status=status)
 
     request = RequestFactory().get("/")
-    request.path = "/" + path
-    request.META["HTTP_HOST"] = host
+    request.path = path
+    if host is not None:
+        request.META["HTTP_HOST"] = host
     request.user = AnonymousUser()
+    return _logged(lambda: AccessLoggingMiddleware(view)(request))
+
+
+@given(path=FORGED, host=FORGED, raises=st.booleans(), status=st.sampled_from([200, 500]))
+@example(path='x" 200 1ms [0q 0ms]\nINFO "GET /ops/', host="h", raises=False, status=200)
+@example(path="x", host="h - forged", raises=False, status=200)
+def test_an_access_log_line_is_one_line_whatever_the_path_and_host(
+    path: str, host: str, raises: bool, status: int
+) -> None:
+    """A line break or quote in a path or Host header would otherwise forge a field or a whole line."""
     # client_ip user host "method path" status duration [queries time], or (unhandled exception) at the end
-    _assert_one_line_one_quoted_field(_logged(lambda: AccessLoggingMiddleware(view)(request)), fields=8)
-
-
-@given(path=FORGED, referer=FORGED)
-def test_a_legacy_host_log_line_is_one_line_whatever_the_path_and_referer(path: str, referer: str) -> None:
-    from django.http import HttpResponse
-    from django.test import RequestFactory, override_settings
-
-    from core.middleware import SubdomainRedirectMiddleware
-
-    request = RequestFactory().get("/", HTTP_HOST="ticket.example.org", HTTP_REFERER=referer)
-    request.path = "/" + path
-    with override_settings(
-        ALLOWED_HOSTS=["*"], CANONICAL_HOST="portal.example.org", LEGACY_HOSTS=["ticket.example.org"]
-    ):
-        middleware = SubdomainRedirectMiddleware(lambda r: HttpResponse())
-        # event host "method path" status referer
-        _assert_one_line_one_quoted_field(_logged(lambda: middleware(request)), fields=5)
+    _assert_one_line_one_quoted_field(_access_logged("/" + path, host=host, raises=raises, status=status), fields=8)
 
 
 def test_a_logged_newline_and_a_literal_backslash_n_stay_distinct() -> None:
-    from django.contrib.auth.models import AnonymousUser
-    from django.http import HttpResponse
-    from django.test import RequestFactory
+    (newline,) = _access_logged("/a\nb")
+    (backslash_n,) = _access_logged("/a\\nb")
+    assert '"GET /a\\nb"' in newline
+    assert '"GET /a\\\\nb"' in backslash_n
 
-    from core.middleware import AccessLoggingMiddleware
 
-    def logged_path(path: str) -> str:
-        request = RequestFactory().get("/")
-        request.path = path
-        request.user = AnonymousUser()
-        (message,) = _logged(lambda: AccessLoggingMiddleware(lambda r: HttpResponse())(request))
-        return message
+@pytest.mark.parametrize("raises", [False, True])
+def test_a_logged_path_keeps_its_spaces_inside_its_quotes(raises: bool) -> None:
+    """The path is the one quoted field, so a space in it is written as is (an unquoted field escapes it)."""
+    messages = _access_logged("/a b/", raises=raises)
 
-    assert '"GET /a\\nb"' in logged_path("/a\nb")
-    assert '"GET /a\\\\nb"' in logged_path("/a\\nb")
+    assert all('"GET /a b/"' in message for message in messages), messages
+
+
+def test_a_request_without_a_host_header_logs_a_dash_for_it() -> None:
+    (message,) = _access_logged()
+
+    # client_ip user host "method path" ...
+    assert message.split()[1:4] == ["-", "-", '"GET']
 
 
 def test_an_unhandled_exception_keeps_its_traceback() -> None:

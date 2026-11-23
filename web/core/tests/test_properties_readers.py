@@ -7,10 +7,11 @@ fails on one without a case in READERS. A case serves each of the reader's reque
 that request gets (external_json), calls the reader, and checks what comes back.
 """
 
+import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -24,15 +25,26 @@ from django.test import Client, override_settings
 from hypothesis import example, given
 from hypothesis import strategies as st
 from quotient.client import (
+    EngineStatus,
     Inject,
     QuotientBox,
     QuotientClient,
     QuotientInfrastructure,
     QuotientService,
+    RoundCheck,
     ServiceCheck,
     TeamServiceExport,
+    TeamUptime,
 )
 
+from chat.zulip.client import ZulipClient, ZulipError
+from chat.zulip.incoming import (
+    IncomingMessage,
+    deleted_message_ids,
+    edited_message,
+    parse_message_event,
+    renamed_topic,
+)
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
@@ -65,13 +77,17 @@ AUTHENTIK_USER = {
     "attributes": {"discord_id": "1"},
 }
 USERS = {"results": [AUTHENTIK_USER], "pagination": PAGE}
+FOLDER_USERS = {"results": [{**AUTHENTIK_USER, "username": "team01a", "path": "blue-users"}], "pagination": PAGE}
+SYSTEM_SETTINGS = {"default_user_change_username": False, "default_user_change_name": True, "avatars": "initials"}
+OAUTH2_PROVIDERS = {"results": [{"pk": 1, "client_id": "portal", "sub_mode": "hashed_user_id"}], "pagination": PAGE}
 GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}], "pagination": PAGE}
 SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
 BINDINGS = {
     "results": [
-        {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}
+        {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}},
+        {"pk": "b-2", "target": "app-1", "enabled": True, "policy": "p1", "policy_obj": {"name": "BlueTeam access"}},
     ]
 }
 ERROR = {"detail": "Not allowed"}
@@ -81,6 +97,7 @@ METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["http", "ss
 INJECTS = [{"ID": 1, "Title": "Inject 01 - Web (100 pts)", "Description": "Build a page"}]
 EXPORT = [
     {
+        "team_id": 11,
         "team_name": "team01",
         "services": [
             {
@@ -96,6 +113,7 @@ EXPORT = [
         "total_points": 95,
     }
 ]
+UPTIMES = {"series": [{"Name": "team01", "Data": [{"Service": "web-http", "Uptime": 0.95}]}]}
 SERVICE_CHECKS = [
     {
         "Round": {"ID": 12, "StartTime": "2026-10-18T19:30:00Z"},
@@ -104,6 +122,35 @@ SERVICE_CHECKS = [
         "Error": "unexpected status code",
     }
 ]
+# GET /api/engine as Quotient answers an admin: snake_case keys around records with Go's field names
+ENGINE = {
+    "last_round": {
+        "ID": 4,
+        "StartTime": "2026-11-21T16:30:00Z",
+        "Checks": [
+            {
+                "TeamID": 1,
+                "RoundID": 4,
+                "Round": {"ID": 0, "StartTime": "0001-01-01T00:00:00Z", "Checks": None, "SLAs": None},
+                "ServiceName": "web-http",
+                "Points": 5,
+                "Result": False,
+                "Error": "unexpected status code",
+                "Debug": "HTTP 503",
+            }
+        ],
+        "SLAs": None,
+    },
+    "current_round_time": "2026-11-21T16:30:00Z",
+    "next_round_time": "2026-11-21T16:31:00Z",
+    "running": True,
+    "competition_started": False,
+    "scheduled_start_time": "2026-11-21T17:00:00Z",
+    "scheduled_end_time": "2026-11-22T01:00:00Z",
+    "schedule_source": "config",
+    "preflight": True,
+    "competition_timezone": "America/Los_Angeles",
+}
 PROXMOX_POOL = {
     "data": {
         "members": [
@@ -120,6 +167,44 @@ PROXMOX_SNAPSHOTS = {
 PROXMOX_UPID = {"data": "UPID:pve01:00001A2B:00000001:65000000:qmrollback:10105:user@pam!token:"}
 PROXMOX_TASK_STATUS = {"data": {"status": "stopped", "exitstatus": "OK"}}
 NEXTCLOUD_USER = {"ocs": {"meta": {"status": "ok", "statuscode": 200}, "data": {"user_id": "team01"}}}
+ZULIP_DONE = {"result": "success", "msg": ""}
+ZULIP_SENT = {**ZULIP_DONE, "id": 42}
+ZULIP_QUEUE = {**ZULIP_DONE, "queue_id": "1517975029:0", "last_event_id": -1}
+ZULIP_USER = {
+    **ZULIP_DONE,
+    "user": {"user_id": 9, "email": "user9@zulip.test", "delivery_email": "member@example.org", "full_name": "Member"},
+}
+ZULIP_EVENTS = {
+    **ZULIP_DONE,
+    "events": [
+        {
+            "type": "message",
+            "id": 0,
+            "message": {
+                "id": 77,
+                "type": "stream",
+                "display_recipient": "team03",
+                "subject": "T003-001 Web",
+                "sender_id": 9,
+                "sender_email": "member@example.org",
+                "sender_full_name": "Member",
+                "content": "hi",
+            },
+        },
+        {"type": "update_message", "id": 1, "message_id": 77, "content": "edited"},
+        {"type": "delete_message", "id": 2, "message_id": 77, "message_ids": [77, 78]},
+        {"type": "heartbeat", "id": 3},
+        {
+            "type": "update_message",
+            "id": 4,
+            "message_id": 77,
+            "stream_name": "team03",
+            "orig_subject": "T003-001 Web",
+            "subject": "✔ T003-001 Web",
+            "propagate_mode": "change_all",
+        },
+    ],
+}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -156,6 +241,21 @@ def check_users(result: object) -> None:
         ),
         "users with a pk, username, uid, is_active and group pks",
     )
+
+
+def check_folder_users(*, in_folder_only: bool) -> Callable[[object], None]:
+    """check_users, each user with its path too (in the team folder, for the folder's listing)."""
+
+    def check(result: object) -> None:
+        check_users(result)
+        wanted = (lambda p: p == "blue-users") if in_folder_only else is_str
+        outcome(
+            result,
+            lambda r: isinstance(r, list) and all(wanted(u["path"]) for u in r),
+            "users with their path" + (" in the team folder" if in_folder_only else ""),
+        )
+
+    return check
 
 
 def check_groups(result: object) -> None:
@@ -218,10 +318,13 @@ def check_export(result: object) -> None:
             and all(
                 isinstance(t, TeamServiceExport)
                 and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty))
+                and (t.quotient_team_id is None or is_int(t.quotient_team_id))
                 and all(
                     is_str(s.service_name)
-                    and all(is_int(n) for n in (s.service_points, s.sla_violations))
-                    and (s.max_points is None or is_int(s.max_points))
+                    and all(is_int(n) for n in (s.service_points, s.sla_violations, s.sla_penalty))
+                    and (
+                        s.max_points is None or (is_int(s.max_points) and s.max_points >= max(s.service_points, 0))
+                    )
                     for s in t.services
                 )
                 for t in r
@@ -229,6 +332,26 @@ def check_export(result: object) -> None:
         )
 
     outcome(result, ok, "None or teams' services with whole numbers (max_points may be None)")
+
+
+def check_uptimes(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, list)
+                and all(
+                    isinstance(t, TeamUptime)
+                    and is_str(t.team_name)
+                    and is_int(t.team_number)
+                    and all(is_str(k) and type(v) is float and 0 <= v <= 1 for k, v in t.uptimes.items())
+                    for t in r
+                )
+            )
+        ),
+        "None or teams' uptimes as fractions",
+    )
 
 
 def check_service_checks(result: object) -> None:
@@ -249,6 +372,30 @@ def check_service_checks(result: object) -> None:
             )
         ),
         "None or service checks with a round, timestamp, pass/fail, debug and error",
+    )
+
+
+def check_engine_status(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, EngineStatus)
+                and type(r.running) is bool
+                and (r.preflight is None or type(r.preflight) is bool)
+                and is_int(r.round_id)
+                and (r.round_start is None or isinstance(r.round_start, datetime))
+                and all(
+                    isinstance(c, RoundCheck)
+                    and is_int(c.team_id)
+                    and is_str(c.service_name)
+                    and type(c.passed) is bool
+                    for c in r.checks
+                )
+            )
+        ),
+        "None or the engine status with its last round's team checks",
     )
 
 
@@ -330,6 +477,19 @@ def nextcloud() -> NextcloudManager:
     return NextcloudManager(base_url="https://nextcloud.test", username="admin", password="secret")
 
 
+def zulip[T](method: Callable[[ZulipClient], Awaitable[T]]) -> Callable[[], T]:
+    """Calls a ZulipClient method with a client of its own, outside any event loop (as the reader tests run)."""
+
+    async def run() -> T:
+        client = ZulipClient("https://zulip.test", "portal-bot@zulip.test", "key")
+        try:
+            return await method(client)
+        finally:
+            await client.aclose()
+
+    return lambda: asyncio.run(run())
+
+
 def error_from_answer() -> object:
     """_handle_response_error reads an error answer's body: it gets the first answer served, as is."""
 
@@ -341,6 +501,41 @@ def check_bool(result: object) -> None:
     outcome(result, lambda r: type(r) is bool, "a bool")
 
 
+def zulip_events_read() -> object:
+    """A poll's events, each through the readers chat.zulip.incoming handles it with."""
+    events = zulip(lambda c: c.get_events("1517975029:0", -1))()
+    return [(parse_message_event(e), edited_message(e), deleted_message_ids(e), renamed_topic(e)) for e in events]
+
+
+def _zulip_id(value: object) -> bool:
+    return type(value) is int and 0 < value < 2**63
+
+
+def check_zulip_events_read(result: object) -> None:
+    def message_ok(m: object) -> bool:
+        return m is None or (
+            isinstance(m, IncomingMessage)
+            and _zulip_id(m.message_id)
+            and _zulip_id(m.sender_id)
+            and all(is_str(v) for v in (m.stream, m.topic, m.sender_name, m.content))
+        )
+
+    def renamed_ok(r: object) -> bool:
+        return r is None or (isinstance(r, tuple) and len(r) == 3 and all(is_str(v) for v in r))
+
+    def ok(r: object) -> bool:
+        return isinstance(r, list) and all(
+            message_ok(message)
+            and (edit is None or (_zulip_id(edit[0]) and is_str(edit[1])))
+            and isinstance(deleted, list)
+            and all(_zulip_id(i) for i in deleted)
+            and renamed_ok(renamed)
+            for message, edit, deleted, renamed in r
+        )
+
+    outcome(result, ok, "each event's message, edit, deleted ids and renamed topic, or None")
+
+
 AM = "web/core/authentik_manager.py:AuthentikManager"
 NC = "web/core/nextcloud.py:NextcloudManager"
 QC = "web/quotient/client.py:QuotientClient"
@@ -348,6 +543,7 @@ QJ = "web/quotient/client.py:_json"
 PX = "web/core/proxmox.py:ProxmoxClient"
 PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
+ZC = "chat/zulip/client.py:ZulipClient"
 USER = (f"{AM}.find_user", *READ)
 NC_USER = (f"{NC}._user_id", f"{NC}._json")
 READERS = [
@@ -375,11 +571,15 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "get_blueteam_binding",
-        lambda: authentik().get_blueteam_binding("app-1"),
+        "app_bindings",
+        lambda: authentik().app_bindings("app-1"),
         (BINDINGS,),
-        lambda r: outcome(r, lambda b: b is None or (isinstance(b, dict) and is_str(b.get("pk"))), "None or a binding"),
-        (f"{AM}.get_blueteam_binding", f"{AM}._list_all", *READ),
+        lambda r: outcome(
+            r,
+            lambda bs: isinstance(bs, list) and all(isinstance(b, dict) and b.get("target") == "app-1" for b in bs),
+            "the app's bindings",
+        ),
+        (f"{AM}.app_bindings", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(
@@ -392,7 +592,7 @@ READERS = [
     ),
     Reader(
         "set_application_enabled",
-        lambda: authentik().set_application_enabled("netbird", False),
+        lambda: authentik().set_application_enabled("netbird", False, ("policy", "group")),
         (APPLICATION, BINDINGS, DONE),
         lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.set_application_enabled",),
@@ -456,6 +656,38 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
+        "list_all_users_team_folder",
+        lambda: authentik().list_all_users(with_path=True),
+        (FOLDER_USERS,),
+        check_folder_users(in_folder_only=False),
+        (f"{AM}.list_all_users", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "team_folder_pages",
+        lambda: [user for page in authentik().team_folder_pages("blue-users") for user in page],
+        (FOLDER_USERS,),
+        check_folder_users(in_folder_only=True),
+        (f"{AM}.team_folder_pages", f"{AM}._pages", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "users_may_change_username",
+        lambda: authentik().users_may_change_username(),
+        (SYSTEM_SETTINGS,),
+        check_bool,
+        (f"{AM}.users_may_change_username", f"{AM}._check", f"{AM}._json"),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "oauth2_sub_mode",
+        lambda: authentik().oauth2_sub_mode("portal"),
+        (OAUTH2_PROVIDERS,),
+        lambda r: outcome(r, lambda m: m is None or is_str(m), "None or a sub mode"),
+        (f"{AM}.oauth2_sub_mode", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
         "list_all_groups",
         lambda: authentik().list_all_groups(),
         (GROUPS,),
@@ -493,11 +725,25 @@ READERS = [
         (f"{QC}.get_service_export", f"{QC}._fetch", QJ),
     ),
     Reader(
+        "get_uptimes",
+        lambda: quotient().get_uptimes(),
+        (DONE, UPTIMES),
+        check_uptimes,
+        (f"{QC}.get_uptimes", f"{QC}._fetch", QJ),
+    ),
+    Reader(
         "get_service_checks",
         lambda: quotient().get_service_checks(1, "web:http", force_refresh=True),
         (DONE, SERVICE_CHECKS),
         check_service_checks,
         (f"{QC}.get_service_checks", f"{QC}._cached", QJ),
+    ),
+    Reader(
+        "get_engine_status",
+        lambda: quotient().get_engine_status(),
+        (DONE, ENGINE),
+        check_engine_status,
+        (f"{QC}.get_engine_status", f"{QC}._fetch", QJ),
     ),
     Reader(
         "proxmox_list_team_vms",
@@ -552,6 +798,58 @@ READERS = [
         check_bool,
         (f"{NC}.delete_team_user", *NC_USER),
         raises=(NextcloudAPIError,),
+    ),
+    Reader(
+        "zulip_send_stream_message",
+        zulip(lambda c: c.send_stream_message("team03", "T003-001 Web", "hi")),
+        (ZULIP_SENT,),
+        lambda r: outcome(r, is_int, "a message id"),
+        (f"{ZC}.send_stream_message", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_add_reaction",
+        zulip(lambda c: c.add_reaction(77, "paperclip")),
+        (ZULIP_DONE,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{ZC}.add_reaction", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_register_queue",
+        zulip(lambda c: c.register_queue()),
+        (ZULIP_QUEUE,),
+        lambda r: outcome(
+            r,
+            lambda q: isinstance(q, tuple) and is_str(q[0]) and bool(q[0]) and is_int(q[1]),
+            "a queue id and event id",
+        ),
+        (f"{ZC}.register_queue", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_get_events",
+        zulip(lambda c: c.get_events("1517975029:0", -1)),
+        (ZULIP_EVENTS,),
+        lambda r: outcome(r, lambda e: isinstance(e, list) and all(isinstance(v, dict) for v in e), "a list of events"),
+        (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_get_user_email",
+        zulip(lambda c: c.get_user_email(9)),
+        (ZULIP_USER,),
+        lambda r: outcome(r, lambda e: is_str(e) and bool(e), "an email"),
+        (f"{ZC}.get_user_email", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_events_read",
+        zulip_events_read,
+        (ZULIP_EVENTS,),
+        check_zulip_events_read,
+        (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
     ),
 ]
 
@@ -647,7 +945,7 @@ def _fix_groups() -> object:
 
 CALLERS = [
     Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, PROXMOX_POOL, INJECTS), (ValueError,)),
-    Caller("sync_service_scores", _sync_scores, (DONE, EXPORT), (ValueError,)),
+    Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
     Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
@@ -669,7 +967,19 @@ SERVICES = {
 
 
 HUGE_EXPORT = [
-    {**EXPORT[0], "gross_points": 10**30, "services": [{**EXPORT[0]["services"][0], "service_points": 10**30}]}
+    {
+        **EXPORT[0],
+        "gross_points": 10**30,
+        "services": [{**EXPORT[0]["services"][0], "service_points": 10**30, "max_points": 10**30}],
+    }
+]
+# PostgreSQL's jsonb can't hold a NUL character or a lone surrogate
+NUL_METADATA = {"boxes": [{"name": "\x00", "ip": "10.0.0.5", "services": []}]}
+SURROGATE_METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["\ud800"]}]}
+# Each fits its own column, but the maximum worked out from it doesn't fit ScoringTemplate's
+HUGE_INJECTS = [{**INJECTS[0], "Title": "Inject 01 - Web (100,000,000 pts)"}]
+STRETCHED_EXPORT = [
+    {**EXPORT[0], "services": [{**EXPORT[0]["services"][0], "max_points": 100_000_000}]}
 ]
 
 
@@ -677,14 +987,37 @@ HUGE_EXPORT = [
 @pytest.mark.parametrize("caller", CALLERS, ids=repr)
 @views_profile()
 @given(data=st.data())
-@example(data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode())])
+@example(
+    data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode()), Answer(200, json.dumps(UPTIMES).encode())]
+)
+@example(data=[Answer(200, b"{}"), Answer(200, json.dumps(NUL_METADATA).encode())])
+@example(data=[Answer(200, b"{}"), Answer(200, json.dumps(SURROGATE_METADATA).encode())])
+@example(
+    data=[
+        Answer(200, b"{}"),
+        Answer(200, json.dumps(METADATA).encode()),
+        Answer(200, json.dumps(PROXMOX_POOL).encode()),
+        Answer(200, json.dumps(HUGE_INJECTS).encode()),
+    ]
+)
+@example(
+    data=[
+        Answer(200, b"{}"),
+        Answer(200, json.dumps(STRETCHED_EXPORT).encode()),
+        Answer(200, json.dumps(UPTIMES).encode()),
+    ]
+)
 def test_callers_answer_or_log_whatever_the_service_says(caller: Caller, data: st.DataObject | list[Answer]) -> None:
     """The caller returns, or raises only its documented error (refresh_user_groups: anything, as its callers catch
     every error), and leaves the database usable: a database error it swallowed would break the transaction."""
+    from scoring.models import ScoringTemplate
+
     from team.models import Team
 
     if not Team.objects.filter(team_number=1).exists():
         Team.objects.create(team_number=1, team_name="Team 01", authentik_group="WCComps_BlueTeam01")
+    if not ScoringTemplate.objects.exists():
+        ScoringTemplate.objects.create()  # the syncs store the maximums they work out only on a template
     answers = data if isinstance(data, list) else data.draw(answer_lists(*caller.examples), label="answers")
     with rolled_back(), override_settings(**SERVICES), serving(answers):
         cache.clear()

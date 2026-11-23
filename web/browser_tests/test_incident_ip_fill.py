@@ -42,7 +42,7 @@ def test_a_box_fills_the_ip_and_a_typed_ip_stays(page):
 
 def test_after_a_failed_submit_a_box_change_still_replaces_the_filled_ip(page):
     box(page, "web").click()
-    page.evaluate("document.querySelector('form[method=post]').noValidate = true")
+    page.evaluate("document.getElementById('incidentForm').noValidate = true")
     # nothing else filled in: the server sends the form back
     with page.expect_navigation():
         page.get_by_role("button", name="Submit Report").click()

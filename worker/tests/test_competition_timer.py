@@ -1,0 +1,559 @@
+"""The worker's competition timer: enables and disables the competition at its scheduled times."""
+
+import asyncio
+import contextlib
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from asgiref.sync import sync_to_async
+from django.utils import timezone
+
+from core.models import AuditLog, CompetitionConfig, QueuedTask
+from core.queued_tasks import CompetitionStatusChanged, LogToChannel
+from core.services import competition
+from core.services.competition import Attempt, CompetitionRunResult
+from worker import jobs
+from worker.tests.loops import one_pass
+
+
+async def _queued() -> tuple[list[str], int]:
+    """The ops notices queued, in order, each beside its audit row, and how many status refreshes were queued."""
+    payloads = [t.typed_payload() async for t in QueuedTask.objects.order_by("pk")]
+    posts = [p.message for p in payloads if isinstance(p, LogToChannel)]
+    audited = [a.details["message"] async for a in AuditLog.objects.filter(action="ops_notice").order_by("pk")]
+    assert audited == posts
+    return posts, sum(isinstance(p, CompetitionStatusChanged) for p in payloads)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+class TestCompetitionTimer:
+    """Test competition timer functionality."""
+
+    async def test_check_competition_times_no_enable_needed(self) -> None:
+        """Test check_competition_times when applications should not be enabled."""
+        # Use update_or_create with pk=1 to match get_config() singleton pattern
+        config, _ = await CompetitionConfig.objects.aupdate_or_create(
+            pk=1,
+            defaults={
+                "competition_start_time": timezone.now() + timedelta(hours=1),
+                "applications_enabled": False,
+                "controlled_applications": ["app1", "app2"],
+            },
+        )
+
+        await jobs.check_competition_times()
+
+        await config.arefresh_from_db()
+        assert config.applications_enabled is False
+
+    async def test_check_competition_times_calls_start_competition(self) -> None:
+        """Test check_competition_times calls start_competition when scheduled."""
+        # Use update_or_create with pk=1 to match get_config() singleton pattern
+        await CompetitionConfig.objects.aupdate_or_create(
+            pk=1,
+            defaults={
+                "competition_start_time": timezone.now() - timedelta(minutes=5),
+                "applications_enabled": False,
+                "controlled_applications": ["app1"],
+            },
+        )
+
+        with patch("worker.jobs.arun_competition", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = CompetitionRunResult(enable=True, controlled_apps=["app1"], apps_ok=["app1"])
+            await jobs.check_competition_times()
+
+            mock_start.assert_called_once()
+            assert mock_start.call_args.args == (True,)
+            assert mock_start.call_args.kwargs["actor"] == "timer"
+
+    async def test_check_competition_times_exception_handling(self) -> None:
+        """Test check_competition_times handles exceptions."""
+        # Use update_or_create with pk=1 to match get_config() singleton pattern
+        await CompetitionConfig.objects.aupdate_or_create(
+            pk=1,
+            defaults={
+                "competition_start_time": timezone.now() - timedelta(minutes=5),
+                "applications_enabled": False,
+                "controlled_applications": ["app1"],
+            },
+        )
+
+        with patch("worker.jobs.arun_competition", new_callable=AsyncMock) as mock_start:
+            mock_start.side_effect = Exception("Start error")
+
+            # Should not raise exception
+            await jobs.check_competition_times()
+
+        assert await _queued() == (["**Error in competition timer:** Start error"], 0)
+
+    async def test_check_competition_times_with_no_config(self) -> None:
+        """Test check_competition_times handles missing config."""
+        # Should not raise exception - get_config creates if missing
+        await jobs.check_competition_times()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("work_fails", [False, True])
+async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeypatch) -> None:
+    """A failed pass is logged and skips the liveness heartbeat; the loop goes on."""
+    from core import heartbeat
+
+    calls: list[str] = []
+
+    async def work() -> None:
+        calls.append("work")
+        if work_fails:
+            raise RuntimeError("db down")
+
+    async def recycle() -> None:
+        calls.append("recycle")
+
+    monkeypatch.setattr(jobs, "recycle_db_connection", recycle)
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: calls.append(f"beat:{name}"))
+    monkeypatch.setattr(jobs, "check_competition_times", work)
+
+    await one_pass(jobs.competition_timer_loop, monkeypatch)
+
+    assert calls == ["recycle", "work"] if work_fails else ["recycle", "work", "beat:timer"]
+
+
+@pytest.mark.asyncio
+async def test_config_read_failing_on_the_db_skips_the_beat(monkeypatch) -> None:
+    """The real work must let a DB error through, or the liveness probe never sees it."""
+    from core import heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(jobs, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
+
+    with patch("core.models.CompetitionConfig.get_config", side_effect=RuntimeError("db down")):
+        await one_pass(jobs.competition_timer_loop, monkeypatch)
+
+    assert beats == []
+
+
+@pytest.mark.asyncio
+async def test_the_loop_checks_at_once_then_every_minute(monkeypatch) -> None:
+    passes: list[str] = []
+    sleeps: list[float] = []
+
+    async def timer_pass() -> None:
+        passes.append("pass")
+
+    async def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(jobs, "timer_pass", timer_pass)
+    monkeypatch.setattr(jobs.asyncio, "sleep", sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await jobs.competition_timer_loop()
+
+    assert passes == ["pass", "pass"]
+    assert all(59 < s <= jobs.TIMER_SECONDS for s in sleeps)
+
+
+def _run(failed_accounts: int | None) -> CompetitionRunResult:
+    if failed_accounts is None:
+        return CompetitionRunResult(enable=True, error="No controlled applications configured")
+    result = CompetitionRunResult(enable=True, controlled_apps=["scoring"], apps_ok=["scoring"], accounts_total=3)
+    result.accounts_ok, result.accounts_failed = 3 - failed_accounts, failed_accounts
+    return result
+
+
+async def _start_due() -> None:
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={"competition_start_time": timezone.now() - timedelta(minutes=1), "applications_enabled": False},
+    )
+
+
+async def _series(
+    enable: bool | None, attempt: int = 0, started: datetime | None = None, schedule: datetime | None = None
+) -> None:
+    await CompetitionConfig.objects.filter(pk=1).aupdate(
+        timer_series_enable=enable,
+        timer_series_attempt=attempt,
+        timer_series_started=started,
+        timer_series_schedule=schedule,
+    )
+
+
+def _fake_runs(outcomes: list[int | None | str]):
+    """Stand-in for run_competition that leaves the config as the real one does, status refresh included: a count of
+    accounts left unchanged, None for a run that errors, "raise" for one that raises."""
+    calls = iter(outcomes)
+
+    async def run(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
+        outcome = next(calls)
+        if outcome is None or outcome == "raise":
+            await _series(enable, timer.number, timer.first_started, timer.schedule)
+            if outcome == "raise":
+                raise RuntimeError("Authentik timed out")
+            return _run(None)
+        assert not isinstance(outcome, str)
+        await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=enable, competition_start_time=None)
+        await sync_to_async(QueuedTask.enqueue)(CompetitionStatusChanged())
+        if outcome:
+            await _series(enable, timer.number, timer.first_started, timer.schedule)
+        else:
+            await _series(None)
+        return _run(outcome)
+
+    return run
+
+
+async def _ticks(count: int, runs: list[int | None | str], *, ops_raise=False):
+    """Tick the timer count times; the run mock, the ops notices queued and the status refreshes queued. The timer
+    keeps nothing between ticks but what the database holds, so these ticks stand for any number of restarts."""
+    with (
+        patch("worker.jobs.arun_competition", new=AsyncMock(side_effect=_fake_runs(runs))) as start,
+        patch("worker.jobs.notify_ops", side_effect=RuntimeError("queue down"))
+        if ops_raise
+        else contextlib.nullcontext(),
+    ):
+        for _tick in range(count):
+            with contextlib.suppress(RuntimeError):
+                await jobs.check_competition_times()
+    posts, status = await _queued()
+    return start, posts, status
+
+
+GAVE_UP = (
+    "**Competition Auto-Start Incomplete:** the timer stopped retrying, as still incomplete after 4 attempts. "
+    "Run Start again from the competition page."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_an_incomplete_first_attempt_is_announced_and_a_later_one_completes() -> None:
+    await _start_due()
+
+    start, posts, status = await _ticks(4, [1, 0])
+
+    assert start.await_count == 2
+    assert [p.split("**")[1] for p in posts] == ["Competition Auto-Started, Incomplete:", "Competition Auto-Started!"]
+    assert posts[1].endswith("Completed on attempt 2.")
+    assert status == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_giving_up_is_reported_once_with_a_status_update() -> None:
+    await _start_due()
+
+    start, posts, status = await _ticks(8, [2, 2, 1, 1])
+
+    assert start.await_count == 4
+    assert posts[1:] == [GAVE_UP]
+    # One refresh for each run's change and one for giving up
+    assert status == 5
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
+    assert await AuditLog.objects.filter(action="competition_timer_gave_up").acount() == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("failure", [None, "raise"], ids=["errors", "raises"])
+async def test_a_retry_that_errors_counts_as_an_attempt(failure) -> None:
+    await _start_due()
+
+    start, posts, _status = await _ticks(9, [2, failure, failure, failure, 0])
+
+    assert start.await_count == 4
+    assert posts[1:] == [GAVE_UP]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("failure", [None, "raise"], ids=["errors", "raises"])
+async def test_a_first_attempt_that_keeps_failing_is_reported_once_and_given_up_after_four(failure) -> None:
+    await _start_due()
+
+    start, posts, _status = await _ticks(9, [failure] * 4 + [0])
+
+    assert start.await_count == 4
+    first = (
+        "**Competition Auto-Start Failed:** No controlled applications configured"
+        if failure is None
+        else "**Error in competition timer:** Authentik timed out"
+    )
+    assert posts == [first, GAVE_UP]
+    assert (await CompetitionConfig.objects.aget(pk=1)).competition_start_time is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_slow_series_past_a_quarter_hour_still_retries_and_reports() -> None:
+    """A stop of 50 slow team accounts can take a quarter of an hour by itself."""
+    await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": True})
+    await _series(False, 1, timezone.now() - timedelta(minutes=20))
+
+    start, posts, _status = await _ticks(2, [0])
+
+    assert start.await_count == 1
+    assert posts[-1].endswith("Completed on attempt 2.")
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_restart_past_the_window_reports_giving_up_once_and_runs_nothing() -> None:
+    await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": True})
+    await _series(True, 1, timezone.now() - timedelta(hours=2))
+
+    start, posts, _status = await _ticks(3, [0])
+
+    start.assert_not_awaited()
+    assert len(posts) == 1
+    assert "its first attempt was over 60 minutes ago" in posts[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_giving_up_on_a_series_ended_meanwhile_reports_nothing() -> None:
+    """A run by hand or a new time ended the series between the timer's plan and its give-up; nothing stopped."""
+    from core.services.competition import end_timer_series, give_up_timer_series
+
+    await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": False})
+    await _series(True, 4, timezone.now() - timedelta(minutes=10))
+
+    def ended_first(plan):
+        end_timer_series(True)
+        return give_up_timer_series(plan)
+
+    with patch("worker.jobs.give_up_timer_series", ended_first):
+        start, posts, status = await _ticks(1, [])
+
+    start.assert_not_awaited()
+    assert posts == []
+    assert status == 0
+    assert not await AuditLog.objects.filter(action="competition_timer_gave_up").aexists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_run_by_hand_after_an_incomplete_auto_start_ends_the_retries() -> None:
+    """A run by hand that finishes clears the timer's series, whatever it changed."""
+    await _start_due()
+    await _ticks(1, [2])
+    await _series(None)
+    # Only what the second run queues counts
+    await QueuedTask.objects.all().adelete()
+    await AuditLog.objects.filter(action="ops_notice").adelete()
+
+    start, posts, _status = await _ticks(3, [2])
+
+    start.assert_not_awaited()
+    assert posts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_complete_auto_start_runs_once_even_when_reporting_it_fails() -> None:
+    await _start_due()
+
+    start, posts, _status = await _ticks(3, [0], ops_raise=True)
+
+    assert posts == []
+
+    start.assert_awaited_once()
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> None:
+    """A start can take longer than the timer's budget when Authentik is slow; each finished step beats."""
+    from core import heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
+    monkeypatch.setattr(jobs, "recycle_db_connection", AsyncMock())
+    during: list[int] = []
+
+    def steps(enable: bool, actor: str, timer: object = None):
+        for n in range(5):
+            during.append(len(beats))
+            yield n
+        return CompetitionRunResult(enable=enable)
+
+    monkeypatch.setattr(competition, "run_competition", steps)
+
+    async def check() -> None:
+        await competition.arun_competition(True, "timer")
+
+    monkeypatch.setattr(jobs, "check_competition_times", check)
+
+    await one_pass(jobs.competition_timer_loop, monkeypatch)
+
+    assert during == [0, 1, 2, 3, 4]
+    assert beats == ["timer"] * 6
+
+
+@pytest.mark.asyncio
+async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
+    """A step stuck on a half-open socket must let the timer go stale, not keep it looking alive."""
+    import threading
+
+    from core import heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
+    monkeypatch.setattr(jobs, "recycle_db_connection", AsyncMock())
+    release = threading.Event()
+
+    def steps(enable: bool, actor: str, timer: object = None):
+        yield 1
+        release.wait(5)
+        return CompetitionRunResult(enable=enable)
+
+    monkeypatch.setattr(competition, "run_competition", steps)
+
+    async def check() -> None:
+        await competition.arun_competition(True, "timer")
+
+    monkeypatch.setattr(jobs, "check_competition_times", check)
+    wait = asyncio.sleep  # one_pass patches asyncio.sleep once the loop starts
+    loop = asyncio.ensure_future(one_pass(jobs.competition_timer_loop, monkeypatch))
+    await wait(0.5)
+    wedged = list(beats)
+    release.set()
+    await loop
+
+    assert wedged == ["timer"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_timer_clears_a_missed_window_and_says_so() -> None:
+    """The worker was down through the whole window: the start can never fire, so the timer drops the schedule."""
+    now = timezone.now()
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": now - timedelta(hours=9),
+            "competition_end_time": now - timedelta(hours=1),
+        },
+    )
+    with patch("worker.jobs.arun_competition", new_callable=AsyncMock) as run:
+        await jobs.check_competition_times()
+        await jobs.check_competition_times()
+
+    run.assert_not_awaited()
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+    posts, status = await _queued()
+    assert len(posts) == 1
+    assert "Schedule cleared" in posts[0]
+    assert status == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_timer_clears_a_missed_window_that_ends_before_it_starts() -> None:
+    """A pair that ended before it started is a missed window too; clearing it must not fail at every tick."""
+    now = timezone.now()
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": now - timedelta(hours=1),
+            "competition_end_time": now - timedelta(hours=2),
+        },
+    )
+    await jobs.check_competition_times()
+
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_an_end_passing_after_a_manual_stop_is_not_called_a_missed_window() -> None:
+    now = timezone.now()
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": None,
+            "competition_end_time": now - timedelta(hours=1),
+            "started_this_window": True,
+        },
+    )
+    await jobs.check_competition_times()
+
+    assert await _queued() == (["**Schedule cleared:** the scheduled end passed after a manual stop."], 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_an_end_with_no_start_that_passed_is_a_missed_window() -> None:
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": None,
+            "competition_end_time": timezone.now() - timedelta(hours=1),
+        },
+    )
+    await jobs.check_competition_times()
+
+    [post], _status = await _queued()
+    assert "would have refused a new start time" in post
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> None:
+    from core.queued_tasks import BroadcastMessage
+    from core.services.competition import COMPETITION_COUNTDOWN_QUEUED, COUNTDOWN_SENDER
+
+    now = datetime(2026, 10, 3, 23, 0, tzinfo=timezone.UTC)
+    end_time = now + timedelta(hours=1)
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": True,
+            "competition_start_time": None,
+            "competition_end_time": end_time,
+        },
+    )
+    broadcasts = QueuedTask.objects.filter(task_type="broadcast_message")
+    with patch("worker.jobs.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now:
+        await jobs.check_competition_times()
+        assert await broadcasts.acount() == 0
+
+        mock_now.return_value = end_time - timedelta(minutes=59)
+        await jobs.check_competition_times()
+        await jobs.check_competition_times()
+        assert await broadcasts.acount() == 1
+
+        mock_now.return_value = end_time - timedelta(minutes=45)
+        await jobs.check_competition_times()
+        assert await broadcasts.acount() == 1
+
+        mock_now.return_value = end_time - timedelta(minutes=29)
+        await jobs.check_competition_times()
+        await jobs.check_competition_times()
+        assert await broadcasts.acount() == 2
+
+    payloads = [t.typed_payload() async for t in broadcasts.order_by("pk")]
+    assert len(payloads) == 2
+    assert all(
+        isinstance(b, BroadcastMessage) and b.target == "all-teams" and b.sender == COUNTDOWN_SENDER for b in payloads
+    )
+    assert isinstance(payloads[0], BroadcastMessage) and "1 hour remaining" in payloads[0].message
+    assert "Oct 3, 2026, 5:00 PM PDT" in payloads[0].message
+    assert isinstance(payloads[1], BroadcastMessage) and "30 minutes remaining" in payloads[1].message
+    assert await AuditLog.objects.filter(action=COMPETITION_COUNTDOWN_QUEUED).acount() == 2
+    posts, status = await _queued()
+    assert len(posts) == 2
+    assert all(p.startswith("**Competition Countdown:** queued the ") for p in posts)
+    assert status == 0

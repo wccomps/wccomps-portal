@@ -303,6 +303,19 @@ class TestSendScorecardEmail:
         assert "Hardening warning message" in html_content
         assert 'class="advisory"' in html_content
 
+    @pytest.mark.parametrize(("org", "expected"), [(None, "WCComps"), ("Example", "Example")])
+    @patch("django.core.mail.EmailMultiAlternatives")
+    def test_subject_and_footer_name_the_organization(self, mock_email_cls, settings, org, expected):
+        from scoring.views.export import _send_scorecard_email
+
+        if org:
+            settings.ORG_SHORT_NAME = org
+        _send_scorecard_email(["a@test.com"], {"school_name": "Test School"}, 1, b"pdf-bytes")
+
+        assert mock_email_cls.call_args[1]["subject"] == f"{expected} Score Card - Test School"
+        assert f"{expected} Competition" in mock_email_cls.call_args[1]["body"]
+        assert f"<p>{expected} Competition</p>" in mock_email_cls.return_value.attach_alternative.call_args[0][0]
+
     @patch("django.core.mail.EmailMultiAlternatives")
     def test_returns_false_on_send_failure(self, mock_email_cls):
         from scoring.views.export import _send_scorecard_email

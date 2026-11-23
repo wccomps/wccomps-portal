@@ -11,32 +11,41 @@ from django.contrib.auth.models import User
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 
-from team.models import MAX_TEAMS, SchoolInfo, Team, team_username
+from team.models import MAX_TEAMS, SchoolInfo, Team, single_account, team_username
 
 from .auth_utils import lock_account, sign_out_everywhere
 from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
-from .discord_tasks import LogToChannel, SetupTeamInfrastructure
-from .models import AuditLog, CredentialsReset, DiscordTask
+from .models import AuditLog, CredentialsReset, QueuedTask
+from .queued_tasks import SetupTeamInfrastructure
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
+from .services.ops import notify_ops
+from .team_accounts import SEVERAL_ACCOUNTS, folder_team_number, team_folder
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
-    """The team's Authentik account; AuthentikAPIError saying why when there is none."""
+    """A single-account team's Authentik account, in team folder mode only one in the team folder; AuthentikAPIError
+    saying why when there is none."""
     if team_number < 1 or team_number > MAX_TEAMS:
         raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
     user = manager.find_user(username)
     if user is None:
         raise AuthentikAPIError(f"User {username} not found")
+    if team_folder() and folder_team_number(user) != team_number:
+        raise AuthentikAPIError(f"User {username} is not in the team folder")
     return user
 
 
-def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> None:
-    """Enable or disable the team's Authentik account; AuthentikAPIError when it can't."""
-    manager.set_user_active(_team_user(manager, team_number), is_active)
+def set_team_account_active(manager: AuthentikManager, username: str, is_active: bool) -> None:
+    """Enable or disable a team account (one of core.team_accounts.accounts_by_team's matched); AuthentikAPIError when
+    it can't."""
+    user = manager.find_user(username)
+    if user is None:
+        raise AuthentikAPIError(f"User {username} not found")
+    manager.set_user_active(user, is_active)
 
 
 # The portal refuses a sign-in from before the reset, but the team's other Authentik apps don't
@@ -235,7 +244,10 @@ def _store_password(team_number: int, password: str) -> None:
 
 
 def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
-    """A new random password for the team account, leaving its sessions alone; audited."""
+    """A new random password for the team account, leaving its sessions alone; audited. Refused, changing nothing,
+    when teams have several accounts."""
+    if not single_account():
+        return None, SEVERAL_ACCOUNTS
     with AuthentikManager() as manager:
         try:
             password, error = generate_blueteam_password(), ""
@@ -253,6 +265,30 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
         details={"password_set": password is not None, "error": error or None},
     )
     return password, error
+
+
+def enable_team_account(team_number: int, actor: str) -> None:
+    """Turn an active team's account on; audited when it does or can't. Nothing with several accounts per team, or for
+    a team that isn't active (as the start enables only active teams' accounts)."""
+    if not single_account() or not Team.objects.filter(team_number=team_number, is_active=True).exists():
+        return
+    with AuthentikManager() as manager:
+        try:
+            user = _team_user(manager, team_number)
+            if user.get("is_active") is True:
+                return
+            manager.set_user_active(user, True)
+            error = ""
+        except AuthentikAPIError as e:
+            logger.warning(f"Failed to enable the account of team {team_number}: {e}")
+            error = reason_for(e)
+    AuditLog.objects.create(
+        action="team_account_enabled",
+        admin_user=actor,
+        target_entity="team",
+        target_id=team_number,
+        details={"enabled": not error, "error": error or None},
+    )
 
 
 # Told a team's new password as soon as Authentik has it
@@ -339,7 +375,10 @@ def _reset_credentials(
 
 def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
     """A new password, then the account's sessions and its members' Discord links ended once it took. The audit row
-    and ops note can't fail the reset: the new password must reach the caller."""
+    and ops note can't fail the reset: the new password must reach the caller. Refused, doing nothing, when teams have
+    several accounts."""
+    if not single_account():
+        return Refused(SEVERAL_ACCOUNTS)
     with AuthentikManager() as manager:
         reset = _reset_credentials(manager, team_number, actor, CREDENTIALS_RESET, unlink_on_failure=False)
 
@@ -352,7 +391,7 @@ def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
             details=reset.audit_details(),
         )
         message = f"Credentials reset for team {team_number} by {actor}: {reset.describe()}"
-        DiscordTask.enqueue(LogToChannel(message=message))
+        notify_ops(message, actor=actor)
 
     _in_own_transaction(f"Recording the credentials reset of team {team_number}", record)
     return reset
@@ -365,14 +404,16 @@ class TeamReset(NamedTuple):
 
 def reset_team(team_number: int, actor: str, *, recreate_channels: bool) -> TeamReset:
     """Reset Team: unlinked even when the password change fails, channels recreated when asked (queued), audited and
-    told to ops once; the record can't fail the reset."""
+    told to ops once; the record can't fail the reset. Refused, doing nothing, when teams have several accounts."""
+    if not single_account():
+        return TeamReset(Refused(SEVERAL_ACCOUNTS), recreation_queued=False)
     team = Team.objects.get(team_number=team_number)
     with AuthentikManager() as manager:
         reset = _reset_credentials(manager, team_number, actor, TEAM_RESET, unlink_on_failure=True)
 
     def record() -> None:
         if recreate_channels:
-            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
+            QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
         AuditLog.objects.create(
             action="team_reset",
             admin_user=actor,
@@ -387,7 +428,7 @@ def reset_team(team_number: int, actor: str, *, recreate_channels: bool) -> Team
         )
         channels = "the role and channels are being recreated" if recreate_channels else "channels kept"
         message = f"Team reset of {team.team_name} by {actor}: {reset.describe()}; {channels}"
-        DiscordTask.enqueue(LogToChannel(message=message))
+        notify_ops(message, actor=actor)
 
     recorded = _in_own_transaction(f"Recording the reset of team {team_number}", record) is None
     return TeamReset(reset, recreate_channels and recorded)
@@ -468,7 +509,14 @@ def reset_teams_credentials(
 ) -> Generator[BulkPasswordResetResult, None, BulkPasswordResetResult]:
     """Reset passwords and end sessions RESET_BATCH_SIZE teams at a time, yielding each audited batch; returns them
     combined when run to the end. A batch is handed over when the caller asks for the next (hand_over_each False: at
-    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset."""
+    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset. When teams
+    have several accounts, one batch refusing every team (none for no teams, like a reset of none), changing nothing
+    and telling ops nothing."""
+    if not single_account():
+        refused = BulkPasswordResetResult([(n, Refused(SEVERAL_ACCOUNTS)) for n in team_numbers])
+        if team_numbers:
+            yield refused
+        return refused
     batches: list[BulkPasswordResetResult] = []
     handed_over = 0
     partial: list[tuple[int, str, str]] = []  # The batch under way's resets so far
@@ -487,9 +535,7 @@ def reset_teams_credentials(
         if partial:
             batches.append(_partial_batch(partial, actor))
         note = _bulk_reset_note(actor, team_numbers, batches, handed_over)
-        _in_own_transaction(
-            "Queueing the bulk credentials reset note", lambda: DiscordTask.enqueue(LogToChannel(message=note))
-        )
+        _in_own_transaction("Queueing the bulk credentials reset note", lambda: notify_ops(note, actor=actor))
     return _combined(batches)
 
 
@@ -522,7 +568,7 @@ def _combined(batches: list[BulkPasswordResetResult]) -> BulkPasswordResetResult
 def _bulk_reset_note(
     actor: str, team_numbers: list[int], batches: list[BulkPasswordResetResult], handed_over: int
 ) -> str:
-    """Lost and unreached teams first: a long note is cut at Discord's limit, and those are what ops must act on."""
+    """Lost and unreached teams first: those are what ops must act on."""
     parts = []
     if lost := [username for batch in batches[handed_over:] for _num, username, _pw in batch.password_list]:
         parts.append(f"the new passwords of {', '.join(lost)} were never handed over: reset them again")
@@ -573,29 +619,16 @@ def generate_blueteam_password() -> str:
     """Generate a readable blue team password like "Correct-Horse-742!" or "Battery-@199-Staple"."""
     from xkcdpass import xkcd_password as xp
 
-    # Get EFF long wordlist (7,776 words)
-    wordlist = xp.generate_wordlist(wordfile=xp.locate_wordfile())
-
-    words = xp.generate_xkcdpassword(wordlist, numwords=2, delimiter="-", case="capitalize")
+    # The EFF long wordlist, letters only, so each word is one part of the password (no t-shirt or yo-yo)
+    wordlist = xp.generate_wordlist(valid_chars="[a-z]")
+    parts = [secrets.choice(wordlist).capitalize() for _ in range(2)]
 
     number = secrets.randbelow(900) + 100
-
-    special_chars = "!@#$%&*+"
-    special_char = secrets.choice(special_chars)
-
+    special_char = secrets.choice("!@#$%&*+")
     insert_value = f"{number}{special_char}" if secrets.choice([True, False]) else f"{special_char}{number}"
+    parts.insert(secrets.randbelow(3), insert_value)
 
-    position = secrets.randbelow(3)
-
-    word_parts = words.split("-")
-    if position == 0:
-        result = f"{insert_value}-{words}"
-    elif position == 1:
-        result = f"{word_parts[0]}-{insert_value}-{word_parts[1]}"
-    else:  # position == 2
-        result = f"{words}-{insert_value}"
-
-    return result
+    return "-".join(parts)
 
 
 def parse_team_range(range_str: str) -> list[int]:

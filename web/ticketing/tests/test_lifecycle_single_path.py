@@ -4,7 +4,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from core.models import DiscordTask
+from core.models import QueuedTask
 from team.models import DiscordLink
 from ticketing import lifecycle
 from ticketing.models import Ticket, TicketCategory, TicketHistory
@@ -33,7 +33,7 @@ def _ticket(team, status, number="T001-001", **extra):
 
 def _effects(ticket):
     """(history actions, post_ticket_update actions, discord ids invited to the thread)."""
-    tasks = DiscordTask.objects.filter(ticket=ticket).order_by("pk")
+    tasks = QueuedTask.objects.filter(ticket=ticket).order_by("pk")
     return (
         list(TicketHistory.objects.filter(ticket=ticket).order_by("pk").values_list("action", flat=True)),
         [t.payload["action"] for t in tasks if t.task_type == "post_ticket_update"],
@@ -108,7 +108,7 @@ def test_assign_view(ticketing_admin_user, create_user_with_groups, team, status
     _post(ticketing_admin_user, "ticket_reassign", ticket, {"new_assignee_username": helper.username})
 
     assert _effects(ticket) == ([history], ["assigned"], [_discord_id(helper)])
-    assert DiscordTask.objects.get(task_type="post_ticket_update").payload["assignee"] == helper.username
+    assert QueuedTask.objects.get(task_type="post_ticket_update").payload["assignee"] == helper.username
 
 
 def test_resolve_view(ticketing_support_user, team):
