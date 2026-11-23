@@ -84,6 +84,16 @@ GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}]
 SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
+TOKEN_IDENTITY = {"user": {"is_superuser": False, "roles": [{"pk": "portal-role"}]}}
+BINDING_GRANTS = {
+    "results": [
+        {
+            "role_pk": "portal-role",
+            "model_permissions": [{"app_label": "authentik_policies", "codename": "view_policybinding"}],
+        },
+    ],
+    "pagination": PAGE,
+}
 BINDINGS = {
     "results": [
         {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}},
@@ -568,6 +578,26 @@ READERS = [
             "the app's bindings",
         ),
         (f"{AM}.app_bindings", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "all_app_bindings",
+        lambda: authentik().app_bindings("app-1", require_complete=True),
+        ({**BINDINGS, "pagination": PAGE},),
+        lambda r: outcome(
+            r,
+            lambda bs: isinstance(bs, list) and all(isinstance(b, dict) and b.get("target") == "app-1" for b in bs),
+            "the app's bindings",
+        ),
+        (f"{AM}.app_bindings", f"{AM}._pages", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "require_global_binding_view",
+        lambda: authentik().require_global_binding_view(),
+        (TOKEN_IDENTITY, BINDING_GRANTS),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{AM}.require_global_binding_view", f"{AM}._pages", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(

@@ -155,8 +155,9 @@ Nor change on all users, except as the team folder section below allows, an acce
 | Authenticated sessions | view, delete | global | Ending a team account's sessions when its credentials are reset (`user_sessions`, `end_sessions`, `sees_any_sessions`); see below |
 | Applications | view | global | Finding each controlled application by slug (`get_application_by_slug`) |
 | Providers | view (`authentik_core.view_provider`) | global | Listing applications to choose controlled applications from (`list_applications`) |
-| Policy bindings | view | global | Finding each controlled application's blue team binding (`app_bindings`) |
+| Policy bindings | view | global | Finding the BlueTeam binding and verifying the full binding list before activating a packet's shared team account (`app_bindings`, `require_global_binding_view`) |
 | Policy bindings | change | object: each controlled application's blue team binding | Enabling and disabling it at a start and stop (`update_binding_enabled`) |
+| Roles | view | object: the service account role that grants global policy binding view | Reading that role's model grants to distinguish global from object-only binding visibility (`require_global_binding_view`) |
 | System settings | view (`authentik_rbac.view_system_settings`) | global | Team folder mode only: the readiness check that users can't change their usernames (`users_may_change_username`) |
 | OAuth2/OpenID providers | view | object: the portal's sign-in provider | Team folder mode only: the readiness check of its subject mode (`oauth2_sub_mode`) |
 
@@ -222,11 +223,17 @@ Django's admin). An active team's group grants blue team access to its members.
   team's accounts the members of its group whose username fully matches it. The portal's password resets and the
   packet's credentials are off; manage passwords in Authentik.
 
-A packet carrying a team's credentials turns its account on when it is sent, before the start; a competition start
-enables each active team's accounts and opens the controlled applications, and a stop disables every team's accounts
-and closes them. So each controlled application needs an enabled binding besides its blue team one (the readiness
-checks fail one without), and any other application team accounts mustn't reach before the start needs a binding
-that keeps them out. Create the accounts in Authentik before the event; the readiness checks list the missing ones.
+A credential-bearing packet can enable a disabled shared account before SMTP, for the open event it belongs to,
+only before a Start or Stop reaches Authentik and while no scores exist. The event remembers that transition even
+if Stop clears the timer window and there are no scores. Events already recorded at upgrade have unknown start
+history and aren't eligible for packet activation; newly created events are eligible until they run or close.
+Start still enables each active team's accounts, and Stop still attempts to disable every team's accounts.
+
+If the portal cannot verify that every controlled application denies this account (see below), or if Authentik
+returns an error during activation, the refusal is logged and audited and SMTP still goes ahead. Delivery does
+not confirm that the credentials work. Creating the accounts and granting the token access to them are separate
+steps. An eligible send can wait for several Authentik requests plus its turn on the competition lock, but SMTP
+does not hold that lock.
 
 ### Teams without Authentik groups (team folder)
 
@@ -279,11 +286,8 @@ TEAM_GROUP_PATTERN=Team-Blue-{number:02d}
   ```
 
   A start enables that binding and a stop disables it, as with a group binding. Keep only one blue team binding: a
-  start and stop toggle only one (a policy one before a group one), and the readiness check "App bindings configured"
-  fails an app with more, naming the extra ones to remove. Authentik lets every user into an
-  application with no enabled binding, and the recreated team accounts are enabled before the event, so disabling a
-  lone blue team binding would open the app to everyone. Give each controlled application a second binding that isn't
-  a blue team one, such as to the staff group: the readiness check fails an app without one enabled.
+  start and stop toggle only one (a policy one before a group one). The other enabled bindings must exclude team
+  accounts, including those recreated enabled before the event. See the binding check below.
 - **Not available:** the readiness fix that puts accounts in their team groups. Password resets and the packet's
   credentials work only with one account per team, as without the folder.
 
@@ -293,9 +297,26 @@ The Authentik applications teams get only while the competition runs (a VPN, a r
 controlled applications, chosen on the Competition setup page (`/ops/admin/competition/setup/`, "Team access"). Each
 one needs a policy binding to a group whose name contains `blueteam` (any case), such as a group holding the team
 groups, or in team folder mode to a policy whose name contains it (see the team folder above); a start enables that
-binding and a stop disables it. A start is refused while the list is empty, and the readiness check "App bindings
-configured" fails for an application without such a binding or without a second enabled binding (team accounts are
-on before the start), and in team folder mode for one with more than one blue team binding.
+binding and a stop disables it. Keep exactly one BlueTeam binding. A start is refused while the list is empty.
+
+For early packet activation the BlueTeam binding must already be disabled. Authentik can admit everyone when
+there is no enforcing binding. Configure at least one enabled, non-expiring, non-negated group binding that isn't
+a dry run, and ensure **none** of the other enabled bindings admits the team's account. The portal can prove this
+for group-only bindings, using the account's direct and inherited group membership. It does not try to predict
+expression policies or accept a binding merely because it isn't named BlueTeam. It also needs an Authentik API
+that exposes the binding flags and global policy-binding view grant. If any check can't be made, it doesn't
+activate the account.
+
+The readiness check "App bindings configured" uses the same rule for the configured applications and the active
+teams' shared accounts. While the competition is running, it checks the expected binding layout after Stop. If
+there are no shared accounts to check, it reports only the binding layout. In particular, if you provision
+multiple accounts already enabled, check those accounts' memberships yourself.
+
+The portal never edits bindings during packet activation. The check covers only the controlled applications
+listed in the portal and the Authentik configuration visible at the time of the check. Keep separate applications
+that teams mustn't reach behind their own bindings, and don't change Authentik bindings or group memberships
+out of band while packet activation is in progress. A timed-out Authentik write may leave the remote state
+unknown; inspect it in Authentik before relying on it.
 
 ## Optional integrations
 

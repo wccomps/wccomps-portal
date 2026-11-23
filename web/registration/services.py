@@ -24,7 +24,7 @@ from core.queued_tasks import (
     ReconcileTeams,
     ResetNextcloudTeam,
 )
-from core.services.competition import run_lock
+from core.services.competition import run_lock, try_run_xact_lock
 from core.services.linking import COMPETITION_CLEANUP, unlink_teams
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
@@ -457,6 +457,8 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     go ahead.
     """
     school_list_lock()
+    if not try_run_xact_lock():
+        raise ImportBlockedError("A competition transition or packet activation is running. Try again.")
     if problem := import_problem(event):
         raise ImportBlockedError(problem)
     teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
@@ -979,6 +981,8 @@ def cancel_event(target: Event, actor: str) -> Event:
         return _stale_target(target, stage) or cancel_event_problem(stage)
 
     with _locked_transition(problem) as (config, _):
+        if not try_run_xact_lock():
+            raise CloseOutError("A competition transition or packet activation is running. Try again.")
         event = Event.objects.select_for_update().get(pk=target.pk)
         assignments, _ = event.team_assignments.all().delete()
         event.close()

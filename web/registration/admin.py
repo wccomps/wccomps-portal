@@ -122,8 +122,8 @@ class EventAdmin(PortalModelAdmin[Event]):
         if not change:
             super().save_model(request, obj, form, change)
             return
-        # A full save would write back the flags read with the page, undoing an open, close or close-out made since
-        kept = ("id", "is_active", "is_finalized")
+        # Don't overwrite lifecycle fields read before a concurrent transition.
+        kept = ("id", "is_active", "is_finalized", "packet_activation_blocked")
         obj.save(update_fields=[f.name for f in Event._meta.concrete_fields if f.name not in kept])
 
 

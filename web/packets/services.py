@@ -10,10 +10,10 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from registration.locks import school_list_lock
 from registration.models import Event
-from registration.stage import ACTIONS, Action, Stage, event_stage
+from registration.stage import ACTIONS, Action
 
-from core.authentik_utils import enable_team_account, set_team_password
-from core.models import CompetitionConfig
+from core.authentik_utils import set_team_password
+from core.services.competition import activate_for_packet, competition_schedule_context
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, single_account, team_username
@@ -175,8 +175,6 @@ class PacketDistributionService:
         recipients: list[str],
         subject: str,
     ) -> EmailMultiAlternatives:
-        from core.services.competition import competition_schedule_context
-
         # Only a single-account team's credentials go in the email; with several, the region hands them out itself
         username, password = (
             (team_username(team.team_number), self._team_password(team)) if single_account() else (None, None)
@@ -212,11 +210,8 @@ class PacketDistributionService:
     def send_packet_email(self, distribution: PacketDistribution, override_emails: list[str] | None = None) -> None:
         """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses.
 
-        While the open event has no scores and no start has run in the current window, a packet carrying credentials
-        first turns the team account on, so they work when it arrives; the controlled applications stay closed until
-        the start. Not once the competition runs, ran or was played: a stop turns the accounts off, and a resend
-        before Close Out mustn't turn one back on. A failure to turn it on is logged and audited and doesn't hold the
-        email."""
+        Before SMTP, the lifecycle service may enable the shared account for the packet's open event. An Authentik
+        error or a failed app-access check is logged and audited without stopping the email."""
         packet = distribution.packet
         team = distribution.team
 
@@ -230,9 +225,7 @@ class PacketDistributionService:
             recipients,
             f"{settings.ORG_SHORT_NAME}: {packet.title}",
         )
-        stage = event_stage()
-        if stage.stage == Stage.READY and not stage.running and not CompetitionConfig.get_config().started_this_window:
-            enable_team_account(team.team_number, actor="packet distribution")
+        activate_for_packet(packet.event_id, team.team_number)
         email.send(fail_silently=False)
 
         sent_to = ", ".join(recipients)

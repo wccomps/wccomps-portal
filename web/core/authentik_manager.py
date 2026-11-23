@@ -195,7 +195,9 @@ class AuthentikManager:
                 f"{context}: the answer isn't JSON", response.status_code, url=str(response.url)
             ) from None
 
-    def _results(self, response: httpx.Response, context: str) -> tuple[list[dict[str, object]], bool]:
+    def _results(
+        self, response: httpx.Response, context: str, *, expected_page: int | None = None
+    ) -> tuple[list[dict[str, object]], bool]:
         """A list endpoint's results (objects only) and whether another page follows; AuthentikAPIError for an
         answer other than 2xx (a redirect too) or of any other shape."""
         self._check(response, context)
@@ -204,8 +206,10 @@ class AuthentikManager:
         if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
             raise AuthentikAPIError(f"{context}: the answer has no list of results", url=str(response.url))
         pagination = data.get("pagination") if isinstance(data, dict) else None
-        has_next = bool(pagination.get("next")) if isinstance(pagination, dict) else False
-        return results, has_next
+        next_page = pagination.get("next") if isinstance(pagination, dict) else None
+        if expected_page is not None and (type(next_page) is not int or next_page not in (0, expected_page + 1)):
+            raise AuthentikAPIError(f"{context}: invalid pagination")
+        return results, bool(next_page)
 
     def list_applications(self) -> list[str]:
         """App slugs for the add-app picker, via /providers/all/.
@@ -239,12 +243,51 @@ class AuthentikManager:
         logger.info(f"Found application '{slug}' with pk={app['pk']}")
         return cast(AuthentikApplication, app)
 
-    def app_bindings(self, app_pk: str) -> list[AuthentikBinding]:
-        """The application's policy bindings, each with its ``pk``, ``target`` and, as Authentik answers them,
-        ``enabled`` and the bound ``group_obj`` or ``policy_obj``."""
-        bindings = self._list_all("/api/v3/policies/bindings/", {"target": app_pk}, {"pk": str, "target": str})
+    def require_global_binding_view(self) -> None:
+        """A binding list alone cannot prove completeness: object grants can silently hide bindings."""
+        context = "Read Authentik token identity"
+        response = self._request("get", f"{self.base_url}/api/v3/core/users/me/")
+        self._check(response, context)
+        data = self._json(response, context)
+        user = data.get("user") if isinstance(data, dict) else None
+        if isinstance(user, dict) and user.get("is_superuser") is True:
+            return
+        roles = user.get("roles") if isinstance(user, dict) else None
+        role_ids = (
+            {role["pk"] for role in roles if isinstance(role, dict) and isinstance(role.get("pk"), str)}
+            if isinstance(roles, list)
+            else set()
+        )
+        model = "authentik_policies.policybinding"
+        for page in self._pages("/api/v3/rbac/permissions/assigned_by_roles/", {"model": model}, {"role_pk": str}):
+            for role in page:
+                grants = role.get("model_permissions")
+                if (
+                    role["role_pk"] in role_ids
+                    and isinstance(grants, list)
+                    and any(
+                        isinstance(grant, dict)
+                        and grant.get("app_label") == "authentik_policies"
+                        and grant.get("codename") == "view_policybinding"
+                        for grant in grants
+                    )
+                ):
+                    return
+        raise AuthentikAPIError("Can't confirm the token has global view on policy bindings")
+
+    def app_bindings(self, app_pk: str, *, require_complete: bool = False) -> list[AuthentikBinding]:
+        """The application's policy bindings visible to the token. For access checks require complete pagination
+        as well as calling require_global_binding_view()."""
+        pages = self._pages(
+            "/api/v3/policies/bindings/",
+            {"target": app_pk},
+            {"pk": str, "target": str},
+            require_complete=require_complete,
+        )
         # Guard: an ignored filter would answer every binding the token may view
-        return cast(list[AuthentikBinding], [binding for binding in bindings if binding["target"] == app_pk])
+        return cast(
+            list[AuthentikBinding], [binding for page in pages for binding in page if binding["target"] == app_pk]
+        )
 
     def update_binding_enabled(self, binding: AuthentikBinding, enabled: bool) -> None:
         """Set a binding's enabled state; an enabled binding allows the group access."""
@@ -374,13 +417,15 @@ class AuthentikManager:
         MAX_PAGES."""
         return [result for page in self._pages(path, params, fields) for result in page]
 
-    def _pages(self, path: str, params: dict[str, str], fields: dict[str, type]) -> Iterator[list[dict[str, object]]]:
+    def _pages(
+        self, path: str, params: dict[str, str], fields: dict[str, type], *, require_complete: bool = False
+    ) -> Iterator[list[dict[str, object]]]:
         """_list_all a page at a time, so a caller can stop reading once it has what it wants."""
         for page in range(1, MAX_PAGES + 1):
             response = self._request(
                 "get", f"{self.base_url}{path}", params={**params, "page": str(page), "page_size": "100"}
             )
-            found, has_next = self._results(response, f"List {path}")
+            found, has_next = self._results(response, f"List {path}", expected_page=page if require_complete else None)
             for result in found:
                 if not all(_holds(result.get(name), kind) for name, kind in fields.items()):
                     raise AuthentikAPIError(f"List {path}: a result without {', '.join(fields)}", url=str(response.url))

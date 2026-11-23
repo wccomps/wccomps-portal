@@ -87,6 +87,8 @@ class FakeAuthentik:
                 pk = int(path.rstrip("/").rsplit("/", 1)[1])
                 next(u for u in self.users if u["pk"] == pk)["is_active"] = body["is_active"]
             return httpx.Response(200, json={})
+        if path == "/api/v3/core/users/me/":
+            return httpx.Response(200, json={"user": {"is_superuser": True}})
         if path == "/api/v3/core/users/":
             # path= ignored, as Authentik ignores a filter it doesn't know; username= honoured (find_user checks it too)
             users = [u for u in self.users if "username" not in params or u["username"] == params["username"][0]]
@@ -98,7 +100,7 @@ class FakeAuthentik:
         if path == "/api/v3/core/groups/":
             return httpx.Response(200, json={"results": self.groups, "pagination": {"next": 0}})
         if path == "/api/v3/core/applications/vpn/":
-            return httpx.Response(200, json={"pk": "app-1", "slug": "vpn"})
+            return httpx.Response(200, json={"pk": "app-1", "slug": "vpn", "policy_engine_mode": "any"})
         if path == "/api/v3/policies/bindings/":
             return httpx.Response(200, json={"results": self.bindings, "pagination": {"next": 0}})
         if path == "/api/v3/admin/settings/":
@@ -334,7 +336,18 @@ GROUP_BINDING = {
     "group": "g1",
     "group_obj": {"name": "Portal_BlueTeam"},
 }
-STAFF_BINDING = {"pk": "b-3", "target": "app-1", "enabled": True, "group": "g9", "group_obj": {"name": "Staff"}}
+STAFF_BINDING = {
+    "pk": "b-3",
+    "target": "app-1",
+    "enabled": True,
+    "group": "g9",
+    "group_obj": {"name": "Staff"},
+    "policy": None,
+    "user": None,
+    "negate": False,
+    "dry_run": False,
+    "expiring": False,
+}
 
 
 def _binding(fake: FakeAuthentik) -> dict[str, object] | None:
@@ -382,7 +395,7 @@ def test_readiness_fails_a_lone_blue_team_binding_in_the_folder_mode(team_folder
     fake = FakeAuthentik([], [dict(POLICY_BINDING), {**STAFF_BINDING, "enabled": False}])
     with _readiness(fake):
         severity, detail, _ = _check_blueteam_bindings()
-        assert severity == "fail" and "vpn" in detail and "second binding" in detail
+        assert severity == "fail" and "vpn" in detail and "excludes team accounts" in detail
         fake.bindings[1]["enabled"] = True
         assert _check_blueteam_bindings()[0] == "pass"
 
@@ -399,13 +412,13 @@ def test_readiness_fails_more_than_one_blue_team_binding_in_the_folder_mode(team
     with _readiness(fake):
         severity, detail, _ = _check_blueteam_bindings()
 
-    assert severity == "fail" and "vpn (extra b-2)" in detail and "remove the extra ones" in detail
+    assert severity == "fail" and "'vpn' has more than one BlueTeam binding" in detail and "remove extras" in detail
 
 
 def test_a_lone_blue_team_group_binding_fails_without_the_folder_too(controlled_vpn):
     """Team accounts are on from the packet send, so an app whose only binding is the closed blue team one would let
     them in before the start."""
-    with _readiness(FakeAuthentik([], [dict(GROUP_BINDING)])):
+    with _readiness(FakeAuthentik([], [{**GROUP_BINDING, "enabled": False}])):
         severity, detail, _ = _check_blueteam_bindings()
     assert severity == "fail" and "vpn" in detail
 

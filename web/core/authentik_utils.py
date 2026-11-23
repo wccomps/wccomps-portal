@@ -17,6 +17,7 @@ from .auth_utils import lock_account, sign_out_everywhere
 from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .models import AuditLog, CredentialsReset, QueuedTask
 from .queued_tasks import SetupTeamInfrastructure
+from .services.app_access import check_prestart_app_access
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
 from .services.ops import notify_ops
 from .team_accounts import SEVERAL_ACCOUNTS, folder_team_number, team_folder
@@ -267,24 +268,22 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
     return password, error
 
 
-def enable_team_account(team_number: int, actor: str) -> None:
-    """Turn an active team's account on; audited when it does or can't. Nothing with several accounts per team, or for
-    a team that isn't active (as the start enables only active teams' accounts)."""
-    if not single_account() or not Team.objects.filter(team_number=team_number, is_active=True).exists():
-        return
+def enable_packet_team_account(team_number: int, controlled_apps: list[str]) -> None:
+    """Attempt one eligible packet activation, auditing a change or refusal."""
     with AuthentikManager() as manager:
         try:
             user = _team_user(manager, team_number)
             if user.get("is_active") is True:
                 return
+            check_prestart_app_access(manager, controlled_apps, [user])
             manager.set_user_active(user, True)
             error = ""
         except AuthentikAPIError as e:
-            logger.warning(f"Failed to enable the account of team {team_number}: {e}")
             error = reason_for(e)
+            logger.warning("Packet account activation for team %s skipped: %s", team_number, error)
     AuditLog.objects.create(
         action="team_account_enabled",
-        admin_user=actor,
+        admin_user="packet distribution",
         target_entity="team",
         target_id=team_number,
         details={"enabled": not error, "error": error or None},

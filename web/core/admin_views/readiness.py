@@ -24,22 +24,21 @@ from core.authentik_manager import (
     AuthentikGroupEntry,
     AuthentikManager,
     AuthentikUserEntry,
-    blueteam_binding,
-    is_blueteam_binding,
     reason_for,
 )
 from core.models import AuditLog, CompetitionConfig
+from core.services.app_access import check_prestart_app_access
 from core.services.user_groups import with_ancestors
 from core.task_backends import discord_enabled
 from core.team_accounts import (
     accounts_by_team,
-    blueteam_kinds,
+    folder_team_number,
     require_single_account,
     team_folder,
     team_folder_users,
 )
 from core.utils import ndjson_done
-from team.models import Team, single_account, team_username
+from team.models import Team, active_team_numbers, single_account, team_username
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -265,59 +264,35 @@ def _configure_apps_link() -> dict[str, str]:
 
 
 def _check_blueteam_bindings() -> CheckResult:
-    """Verify BlueTeam group or policy bindings exist on all controlled apps (core.authentik_manager.blueteam_binding),
-    each beside an enabled binding that isn't a blue team one: Authentik lets everyone into an app with no enabled
-    binding, and team accounts can be on while the blue team bindings are off (a packet send turns a single-account
-    team's on before the start, and team folder accounts are recreated enabled). In team folder mode an app may also
-    have only one blue team binding of either kind, as a start and stop toggle only the one they prefer."""
+    """Authentik may admit everyone if disabling the BlueTeam binding leaves no enforcing bindings.
+    Keep just one BlueTeam binding: Start and Stop toggle only one."""
     config = CompetitionConfig.get_config()
     apps = config.controlled_applications
     if not apps:
         return ("warn", "No controlled apps configured", _configure_apps_link())
 
-    missing: list[str] = []
-    several: list[str] = []
-    lone: list[str] = []
-    kinds = blueteam_kinds()
-    with AuthentikManager() as mgr:
-        for slug in apps:
-            app = mgr.get_application_by_slug(slug)
-            if not app:
-                missing.append(f"{slug} (not found)")
-                continue
-            bindings = mgr.app_bindings(app["pk"])
-            toggled = blueteam_binding(bindings, kinds)
-            if not toggled:
-                missing.append(slug)
-            else:
-                blue = [b for b in bindings if any(is_blueteam_binding(b, kind) for kind in kinds)]
-                if team_folder() and (others := [b["pk"] for b in blue if b is not toggled]):
-                    several.append(f"{slug} (extra {', '.join(others)})")
-                if not any(b.get("enabled") is True for b in bindings if all(b is not x for x in blue)):
-                    lone.append(slug)
+    try:
+        with AuthentikManager() as mgr:
+            # Only shared-account packet sends can enable an account. For other modes check the binding layout.
+            numbers = active_team_numbers() if single_account() else []
+            names = {team_username(number) for number in numbers}
+            users = []
+            if names:
+                in_folder = team_folder()
+                users = [
+                    user
+                    for user in mgr.list_all_users(with_path=in_folder)
+                    if user["username"] in names and (not in_folder or folder_team_number(user) in numbers)
+                ]
+            check_prestart_app_access(mgr, apps, users, closing=config.applications_enabled)
+    except AuthentikAPIError as e:
+        return ("fail", reason_for(e), _configure_apps_link())
 
-    if missing:
-        return (
-            "fail",
-            f"Missing bindings: {', '.join(missing)}",
-            _configure_apps_link(),
-        )
-    if several:
-        return (
-            "fail",
-            f"More than one blue team binding: {', '.join(several)}. A start and stop toggle only one, so remove the "
-            "extra ones.",
-            _configure_apps_link(),
-        )
-    if lone:
-        return (
-            "fail",
-            f"Only a blue team binding: {', '.join(lone)}. It is off until the start and after a stop, while team "
-            "accounts can be on, and Authentik lets every user into an app with no enabled binding; add a second "
-            "binding, such as to the staff group.",
-            _configure_apps_link(),
-        )
-    return ("pass", f"Bindings exist for all {len(apps)} apps", None)
+    if len(users) != len(names) or {user["username"] for user in users} != names:
+        return ("fail", "Some active teams' shared accounts could not be checked", _configure_apps_link())
+    if not users:
+        return ("pass", "Static off-state bindings verified; no shared accounts checked", None)
+    return ("pass", f"Off-state bindings for all {len(apps)} apps exclude the {len(users)} shared team accounts", None)
 
 
 def _check_packets_distributed() -> CheckResult:

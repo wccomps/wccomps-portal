@@ -228,6 +228,7 @@ class Event(models.Model):
     registration_deadline = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=False)
     is_finalized = models.BooleanField(default=False)
+    packet_activation_blocked = models.BooleanField(default=False, editable=False)
     max_teams = models.IntegerField(default=50)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -251,7 +252,7 @@ class Event(models.Model):
     def open(self) -> None:
         """Make this the only active event, under the school list lock. With close, the only writer of is_active."""
         school_list_lock()
-        Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+        Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False, packet_activation_blocked=True)
         if not self.is_active:
             self.is_active = True
             self.save(update_fields=["is_active", "updated_at"])
@@ -261,7 +262,8 @@ class Event(models.Model):
         """Make this event inactive, under the school list lock."""
         school_list_lock()
         self.is_active = False
-        self.save(update_fields=["is_active", "updated_at"])
+        self.packet_activation_blocked = True
+        self.save(update_fields=["is_active", "packet_activation_blocked", "updated_at"])
 
 
 class RegistrationContact(models.Model):

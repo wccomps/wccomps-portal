@@ -12,15 +12,17 @@ from typing import ClassVar
 from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
+from registration.locks import school_list_held, school_list_lock
+from registration.models import Event
 
-from core.authentik_utils import set_team_account_active
+from core.authentik_utils import enable_packet_team_account, set_team_account_active
 from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
 from core.services.ops import notify_ops
 from core.team_accounts import accounts_by_team, blueteam_kinds, team_folder
 from core.utils import BlockingSteps, advisory_lock, format_competition_time
-from team.models import MAX_TEAMS, active_team_numbers, team_username
+from team.models import MAX_TEAMS, Team, active_team_numbers, single_account, team_username
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ PREFLIGHT_REPORT_MINUTES = (30, 10)
 
 # Arbitrary, but fixed; CLAUDE.md says how to free it from a stuck holder
 COMPETITION_RUN_LOCK_ID = 7_261_640_003
-RUN_IN_PROGRESS = "A close out or another start or stop is running. Try again when it finishes."
+RUN_IN_PROGRESS = "A close out, packet activation or another start or stop is running. Try again when it finishes."
 RUN_SUPERSEDED = "The schedule or the timer's series changed since the timer planned this attempt"
 STEPPED_ACROSS_THREADS = "run_competition must be stepped on the thread that took the run lock"
 
@@ -206,15 +208,15 @@ def _locked_run(
 
 
 @contextmanager
-def run_lock() -> Iterator[bool]:
-    """Try the run lock for this thread's connection, outside any transaction; yields whether it was taken. It is
+def run_lock(*, wait: bool = False) -> Iterator[bool]:
+    """Take the run lock for this thread's connection, outside any transaction; yields whether it was taken. It is
     released on that connection even when a run is wrongly stepped to its end on another thread, which assumes the
     owning thread is idle meanwhile."""
     db = connections[DEFAULT_DB_ALIAS]
     owner = threading.get_ident()
     elsewhere = False
     try:
-        with advisory_lock(COMPETITION_RUN_LOCK_ID, conn=db) as locked:
+        with advisory_lock(COMPETITION_RUN_LOCK_ID, wait=wait, conn=db) as locked:
             try:
                 yield locked
             finally:
@@ -224,6 +226,31 @@ def run_lock() -> Iterator[bool]:
     finally:
         if elsewhere:
             db.dec_thread_sharing()
+
+
+def try_run_xact_lock() -> bool:
+    """Try the transition lock for the rest of the caller's transaction, without waiting under the school list lock."""
+    with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
+        cursor.execute("SELECT pg_try_advisory_xact_lock(%s)", [COMPETITION_RUN_LOCK_ID])
+        return bool(cursor.fetchone()[0])
+
+
+def activate_for_packet(event_id: int | None, team_number: int) -> None:
+    """Consider pre-start account activation; hold the lifecycle locks through Authentik, not SMTP."""
+    from registration.stage import scored_teams
+
+    if event_id is None or not single_account():
+        return
+    with run_lock(wait=True), school_list_held():
+        if not Event.objects.filter(
+            pk=event_id, is_active=True, is_finalized=False, packet_activation_blocked=False
+        ).exists():
+            return
+        config = CompetitionConfig.get_config()
+        if config.applications_enabled or scored_teams().exists():
+            return
+        if Team.objects.filter(team_number=team_number, is_active=True).exists():
+            enable_packet_team_account(team_number, config.controlled_applications)
 
 
 def end_timer_series(enable: bool) -> None:
@@ -320,6 +347,11 @@ def _run(
     if not result.controlled_apps:
         result.error = "No controlled applications configured"
         return result
+
+    with transaction.atomic():
+        school_list_lock()
+        # Persist before the first Authentik write: a partial run or a scoreless Stop must still bar resends.
+        Event.objects.filter(is_active=True, packet_activation_blocked=False).update(packet_activation_blocked=True)
 
     verb = "Enabled" if enable else "Disabled"
     # Inactive teams' accounts stay in their groups between events, so start must not enable them. Stop
@@ -737,14 +769,13 @@ MISSED_WINDOW = "missed_window"
 END_AFTER_STOP = "end_after_stop"
 
 
-@transaction.atomic
 def set_controlled_apps(change: Callable[[list[str]], list[str]], actor: str, **details: object) -> list[str]:
-    """Store change(the stored list of controlled app slugs), read under the row lock, and queue a status refresh;
-    returns the new list."""
-    config = CompetitionConfig.locked()
-    apps = change(list(config.controlled_applications or []))
-    config.controlled_applications = apps
-    config.save(update_fields=["controlled_applications", "updated_at"])
-    _audit_config("competition_apps_configured", actor, config, {"controlled_apps": apps, **details})
-    QueuedTask.enqueue(CompetitionStatusChanged())
+    """Edit the app list under the same lock that packet activation uses to read it."""
+    with run_lock(wait=True), transaction.atomic():
+        config = CompetitionConfig.locked()
+        apps = change(list(config.controlled_applications or []))
+        config.controlled_applications = apps
+        config.save(update_fields=["controlled_applications", "updated_at"])
+        _audit_config("competition_apps_configured", actor, config, {"controlled_apps": apps, **details})
+        QueuedTask.enqueue(CompetitionStatusChanged())
     return apps
