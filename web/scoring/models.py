@@ -710,6 +710,7 @@ class ServiceCorrectionBatch(models.Model):
     baseline_sha256 = models.CharField(max_length=64)
     portal_baseline_sha256 = models.CharField(max_length=64)
     service_modifier = models.CharField(max_length=64)
+    full_void = models.BooleanField(default=False, db_default=False)
     sync_conflict = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     revoked_at = models.DateTimeField(null=True)

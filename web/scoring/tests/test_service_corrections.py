@@ -11,6 +11,8 @@ from zipfile import ZipFile
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 from quotient.client import TeamUptime, _service_export
 from registration.services import close_out_event, close_out_problem, set_team_school
@@ -18,7 +20,7 @@ from registration.stage import event_stage
 
 from core.models import AuditLog, CompetitionConfig
 from core.services.competition import run_competition
-from scoring.calculator import compute_standings
+from scoring.calculator import calculate_team_score_detailed, compute_standings
 from scoring.models import ScoringTemplate, ServiceCorrection, ServiceCorrectionBatch, ServiceDetail
 from scoring.quotient_sync import sync_service_scores
 from scoring.service_corrections import MANIFEST_HEADER
@@ -35,21 +37,22 @@ def correction(current_event, tmp_path, request):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     team, _ = Team.objects.update_or_create(team_number=7, defaults={"team_name": "Team 07", "is_active": True})
     set_team_school(team, "Example University", contact_email="coach@example.edu")
+    service_points, manifest_row = getattr(request, "param", (100, b"742,4,5,9\n"))
     exports = _service_export(
         [
             {
                 "team_id": 742,
                 "team_name": "team07",
-                "gross_points": 100,
+                "gross_points": service_points,
                 "total_sla_penalty": 5,
                 "services": [
-                    {"service_name": SERVICE, "service_points": 100, "sla_violations": 1, "sla_penalty": 5},
+                    {"service_name": SERVICE, "service_points": service_points, "sla_violations": 1, "sla_penalty": 5},
                 ],
             },
         ]
     )
     uptimes = [TeamUptime("team07", 7, {SERVICE: 0.5})]
-    content = MANIFEST_HEADER + getattr(request, "param", b"742,4,5,9\n")
+    content = MANIFEST_HEADER + manifest_row
     manifest = tmp_path / "approved.csv"
     manifest.write_bytes(content)
     with (
@@ -173,6 +176,7 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
             "service_credit": 4,
             "sla_credit": 5,
             "service_modifier": Decimal(1),
+            "full_void": False,
         },
     ]
     service_detail = frozen["stats"]["service_stats"][0]
@@ -184,7 +188,7 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
     assert not next(s for s in compute_standings() if s.team.pk == team.pk).service_corrections
 
 
-@pytest.mark.parametrize("correction", [b"742,-100,5,-95\n"], indirect=True)
+@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n")], indirect=True)
 def test_full_void_preserves_import_and_can_be_revoked(correction):
     team, event, common, apply, _, _ = correction
     ScoringTemplate.objects.create(service_max=3388)
@@ -193,13 +197,15 @@ def test_full_void_preserves_import_and_can_be_revoked(correction):
         call_command("service_correction", "apply", *args, "--expect-service-max", "3389")
     assert not ServiceCorrectionBatch.objects.exists()
     call_command("service_correction", "apply", *args, "--expect-service-max", "3388")
+    with pytest.raises(CommandError, match="conflicting or revoked batch"):
+        call_command("service_correction", "apply", *apply, "--expect-composite", "-95")
     adjusted = next(s for s in compute_standings() if s.team.pk == team.pk)
     assert adjusted.service_points == adjusted.sla_penalties == adjusted.total_score == 0
     assert ScoringTemplate.objects.get().service_max == 3388
     detail = ServiceDetail.objects.get(team=team, service_name=SERVICE)
     assert (detail.points, detail.sla_violations) == (100, 1)
     receipt = AuditLog.objects.get(action="service_correction_applied", target_id=event.pk)
-    assert receipt.details["service_credit"] == -100
+    assert (receipt.details["full_void"], receipt.details["service_credit"]) == (True, -100)
     call_command("service_correction", "revoke", *common, "--actor", "operator")
     assert next(s for s in compute_standings() if s.team.pk == team.pk).total_score == 95
 
@@ -209,3 +215,138 @@ def test_full_void_rejects_credit_that_does_not_zero_both_source_components(corr
     with pytest.raises(CommandError, match="A full void must remove all service points"):
         call_command("service_correction", "apply", *apply, "--full-void", "--expect-composite", "9")
     assert not ServiceCorrectionBatch.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("correction", "delta", "composite", "full_void"),
+    [
+        pytest.param((-10, b"742,0,5,5\n"), 0, "5", False, id="sla-only"),
+        pytest.param((-10, b"742,4,5,9\n"), 4, "9", False, id="small-credit"),
+        pytest.param((-10, b"742,10,5,15\n"), 10, "15", True, id="full-void"),
+    ],
+    indirect=["correction"],
+)
+def test_correction_accepts_zero_and_positive_deltas_on_negative_earned_points(correction, delta, composite, full_void):
+    team, _, _, apply, _, _ = correction
+    mode = ["--full-void"] if full_void else []
+    output = StringIO()
+    call_command("service_correction", "verify", *apply[: apply.index("--baseline-sha256")], *mode, stdout=output)
+    assert f"full_void={str(full_void).lower()}" in output.getvalue()
+    call_command("service_correction", "apply", *apply, *mode, "--expect-composite", composite)
+    score = next(s for s in compute_standings() if s.team.pk == team.pk)
+    assert score.service_points == -10 + delta
+    assert score.sla_penalties == 0
+    assert ServiceCorrection.objects.get().service_credit == delta
+
+
+def test_correction_still_rejects_debits_over_earned_points(correction):
+    _, _, _, apply, _, _ = correction
+    manifest = Path(apply[apply.index("--manifest") + 1])
+    content = MANIFEST_HEADER + b"742,-101,5,-96\n"
+    manifest.write_bytes(content)
+    apply[apply.index("--manifest-sha256") + 1] = hashlib.sha256(content).hexdigest()
+    with pytest.raises(CommandError, match="Service debit exceeds points earned"):
+        call_command("service_correction", "apply", *apply, "--expect-composite", "-96")
+    assert not ServiceCorrectionBatch.objects.exists()
+
+
+@pytest.mark.parametrize("correction", [(100, b"742,-100,5,-95\n")], indirect=True)
+def test_full_void_stays_zero_after_sync_and_weight_changes_in_final_scores(correction):
+    team, event, _, apply, importer, exports = correction
+    template = ScoringTemplate.objects.create(service_max=400, inject_max=800)
+    args = [*apply, "--full-void", "--expect-composite", "-195"]
+    call_command("service_correction", "apply", *args)
+
+    other_team, _ = Team.objects.update_or_create(team_number=8, defaults={"team_name": "Team 08", "is_active": True})
+    set_team_school(other_team, "Example College", contact_email="coach@example.org")
+    other_service = replace(exports[0].services[0], service_name="Example-DNS")
+    other = replace(exports[0], team_number=8, team_name="team08", quotient_team_id=843, services=[other_service])
+    importer.get_service_export.return_value = [*exports, other]
+    importer.get_uptimes.return_value = [
+        TeamUptime("team07", 7, {SERVICE: 0.5}),
+        TeamUptime("team08", 8, {"Example-DNS": 0.25}),
+    ]
+    sync_service_scores()
+    template.refresh_from_db()
+    assert template.service_max == 600
+    after_sync = calculate_team_score_detailed(team)
+    assert after_sync["service_modifier"] == Decimal(4) / 3
+    assert after_sync["service_raw"] == 100
+    assert after_sync["total_score"] == 0
+
+    template.service_weight = Decimal(60)
+    template.inject_weight = Decimal(20)
+    template.save(update_fields=["service_weight", "inject_weight"])
+    output = StringIO()
+    call_command("service_correction", "apply", *args, stdout=output)
+    assert output.getvalue().startswith("already applied batch=")
+    assert "raw_service=-100 sla_credit=5 full_void=true" in output.getvalue()
+    standings = {s.team.pk: s for s in compute_standings()}
+    adjusted = standings[team.pk]
+    assert adjusted.service_points == adjusted.sla_penalties == adjusted.total_score == 0
+    assert adjusted.rank is None
+    assert standings[other_team.pk].service_points == 400
+    assert standings[other_team.pk].rank == 1
+    credit = ServiceCorrection.objects.get()
+    assert (credit.service_credit, credit.sla_credit) == (-100, 5)
+    assert credit.batch.full_void
+    assert Decimal(credit.batch.service_modifier) == 2
+    receipt = AuditLog.objects.get(action="service_correction_applied", target_id=event.pk)
+    assert (receipt.details["service_credit"], receipt.details["composite"]) == (-100, "-195.00")
+    assert not close_out_problem(event_stage())
+
+    close_out_event(event, "operator")
+    result = event.results.get(team_number=team.team_number)
+    assert result.total_score == 0
+    frozen = context_from_snapshot(result.scorecard)
+    assert frozen["score"]["service_corrections"] == [
+        {
+            "service_name": SERVICE,
+            "ruling": RULING,
+            "service_credit": -100,
+            "sla_credit": 5,
+            "service_modifier": Decimal(4),
+            "full_void": True,
+        },
+    ]
+    service_detail = frozen["stats"]["service_stats"][0]
+    assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)
+    with ZipFile(BytesIO(event.archive.data)) as archive:
+        rows = csv.DictReader(StringIO(archive.read("final_scores.csv").decode()))
+        row = next(row for row in rows if int(row["Team Number"]) == team.team_number)
+        assert row["Rank"] == ""
+        assert Decimal(row["Total Score"]) == Decimal(row["Service Points"]) == Decimal(row["SLA Penalties"]) == 0
+        assert (row["Raw Service Credit"], row["SLA Credit"]) == ("-100", "5")
+
+
+def test_full_void_migration_preserves_legacy_exact_offsets_as_pinned(correction):
+    team, event, _, _, _, _ = correction
+    before = [("scoring", "0052_signed_service_corrections")]
+    after = [("scoring", "0053_service_correction_full_void")]
+    executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes()
+    executor.migrate(before)
+    try:
+        old_apps = executor.loader.project_state(before).apps
+        old_batch = old_apps.get_model("scoring", "ServiceCorrectionBatch")
+        old_credit = old_apps.get_model("scoring", "ServiceCorrection")
+        batch = old_batch.objects.create(event_id=event.pk, service_name=SERVICE, ruling=RULING, service_modifier="1")
+        old_credit.objects.create(batch=batch, team_id=team.pk, quotient_team_id=742, service_credit=-100, sla_credit=5)
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(after)
+        persisted = ServiceCorrectionBatch.objects.get(pk=batch.pk)
+        assert (persisted.full_void, persisted.service_modifier) == (False, "1")
+        assert ServiceCorrection.objects.get(batch=persisted).service_credit == -100
+        # A pod on the previous schema can still insert without naming the new field.
+        overlap = old_batch.objects.create(
+            event_id=event.pk, service_name=SERVICE, ruling="revoked", service_modifier="1", revoked_at=timezone.now()
+        )
+        assert not ServiceCorrectionBatch.objects.get(pk=overlap.pk).full_void
+
+        ScoringTemplate.objects.create(service_max=400, inject_max=800)
+        score = next(s for s in compute_standings() if s.team.pk == team.pk)
+        assert score.service_points == 100  # 100 observed at 2, -100 pinned at 1.
+        assert score.sla_penalties == 0
+    finally:
+        MigrationExecutor(connection).migrate(latest)

@@ -215,8 +215,12 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 - **Upstream truth.** Quotient's scores and Proxmox's VM state are validated for shape, not for honesty.
 - **Service score corrections are operator-only.** The deployment-shell `manage.py service_correction` uses the
   existing Quotient admin credential and HTTPS policy. Approval supplies the CSV digest independently of the CSV.
-  Apply and revoke audit the operator and manifest digest; apply also records the baseline digest. Scorecards and
-  exports carry the score credits, never the manifest, Quotient IDs, or per-team baseline.
+  Only service and net deltas may be negative: a service debit cannot exceed the earned points, and nonnegative
+  SLA restoration cannot exceed the original service deduction. A full void checks exact raw service and SLA
+  offsets for every team in the service cohort. Apply can also check the expected service denominator
+  (`web/scoring/management/commands/service_correction.py`). Apply and revoke audit the operator and manifest
+  digest; apply also records the baseline digest and full-void mode. Scorecards and exports carry the credits,
+  never the manifest, Quotient IDs, or per-team baseline.
 - **The proxy's client address is trusted only when configured.** A deployment behind Cloudflare, or behind a proxy
   that overwrites `CF-Connecting-IP` with the client address and is the origin's only way in, sets
   `TRUST_CF_CONNECTING_IP=true`; the self-hosting `docker-compose.yml` leaves it off, so its limits key on the

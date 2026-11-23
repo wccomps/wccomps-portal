@@ -4,6 +4,7 @@
         {% for correction in score.service_corrections %}
             <li>
                 {{ correction.service_name }} ({{ correction.ruling }}):
+                {% if correction.full_void %}full void,{% endif %}
                 {{ correction.service_credit }} raw service points at a multiplier of {{ correction.service_modifier|floatformat:2 }},
                 +{{ correction.sla_credit }} SLA points restored.
             </li>

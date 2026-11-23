@@ -13,7 +13,7 @@ scorecard_correction = test_service_corrections.correction
 
 @pytest.mark.parametrize(
     ("scorecard_correction", "change", "composite", "mode"),
-    [(b"742,4,5,9\n", 4, "9", []), (b"742,-100,5,-95\n", -100, "-95", ["--full-void"])],
+    [((100, b"742,4,5,9\n"), 4, "9", []), ((100, b"742,-100,5,-95\n"), -100, "-95", ["--full-void"])],
     indirect=["scorecard_correction"],
 )
 def test_staff_scorecard_separates_correction_from_observed_history(
@@ -27,6 +27,7 @@ def test_staff_scorecard_separates_correction_from_observed_history(
         path = reverse("leaderboard_scorecard", args=[team.team_number])
         assert page.goto(f"{live_server.url}{path}").status == 200
         assert page.get_by_role("heading", name="Service scoring corrections").is_visible()
+        assert page.get_by_text("full void,", exact=False).count() == len(mode)
         assert page.get_by_text(
             f"{change} raw service points at a multiplier of 1.00, +5 SLA points restored.", exact=False
         ).is_visible()

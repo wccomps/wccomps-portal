@@ -91,7 +91,10 @@ class Command(BaseCommand):
                 raise ValueError("Manifest IDs do not match the complete Quotient service cohort.")
             if any(c.sla_credit > s.service_sla_deduction for c, s in zip(credits, sources, strict=True)):
                 raise ValueError("SLA credit exceeds the service's original deduction.")
-            if any(c.service_credit < -s.service_points for c, s in zip(credits, sources, strict=True)):
+            if any(
+                c.service_credit < 0 and -c.service_credit > s.service_points
+                for c, s in zip(credits, sources, strict=True)
+            ):
                 raise ValueError("Service debit exceeds points earned on the service.")
             if full_void and any(
                 (c.service_credit, c.sla_credit) != (-s.service_points, s.service_sla_deduction)
@@ -106,7 +109,7 @@ class Command(BaseCommand):
                     with connection.cursor() as cursor:
                         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                     self._checked_teams(event, service, sources)
-                self.stdout.write(self._receipt("verified", credits, manifest_sha256, source_sha))
+                self.stdout.write(self._receipt("verified", credits, manifest_sha256, source_sha, full_void=full_void))
                 return
             self.stdout.write(
                 self._apply(
@@ -121,6 +124,7 @@ class Command(BaseCommand):
                     expect_composite,
                     require_unchanged_ranks,
                     expect_service_max,
+                    full_void=full_void,
                 )
             )
         except (OSError, ValueError, ValidationError) as exc:
@@ -139,10 +143,11 @@ class Command(BaseCommand):
         return teams
 
     @staticmethod
-    def _receipt(status: str, credits: list[Credit], manifest_sha: str, source_sha: str) -> str:
+    def _receipt(status: str, credits: list[Credit], manifest_sha: str, source_sha: str, *, full_void: bool) -> str:
         return (
             f"{status}: teams={len(credits)} raw_service={sum(c.service_credit for c in credits)} "
             f"sla_credit={sum(c.sla_credit for c in credits)} "
+            f"full_void={str(full_void).lower()} "
             f"manifest_sha256={manifest_sha} baseline_sha256={source_sha}"
         )
 
@@ -159,6 +164,8 @@ class Command(BaseCommand):
         expect_composite: Decimal,
         unchanged_ranks: bool,
         expect_service_max: Decimal | None,
+        *,
+        full_void: bool,
     ) -> str:
         with school_list_held(), run_lock() as locked, transaction.atomic():
             if not locked:
@@ -171,7 +178,11 @@ class Command(BaseCommand):
                 raise ValueError("The portal service maximum does not match the expected denominator.")
             batches = ServiceCorrectionBatch.objects.filter(event_id=event_id)
             if batch := batches.filter(service_name=service, ruling=ruling).first():
-                same_input = (batch.manifest_sha256, batch.baseline_sha256) == (manifest_sha, source_sha)
+                same_input = (batch.manifest_sha256, batch.baseline_sha256, batch.full_void) == (
+                    manifest_sha,
+                    source_sha,
+                    full_void,
+                )
                 if batch.revoked_at is not None or not same_input:
                     raise ValueError("This ruling already has a conflicting or revoked batch.")
                 receipt = AuditLog.objects.get(
@@ -183,7 +194,9 @@ class Command(BaseCommand):
                 composite, moves = Decimal(receipt["composite"]), receipt["rank_changes"]
                 if composite != expect_composite or (unchanged_ranks and moves):
                     raise ValueError("Application expectations do not match the recorded batch outcome.")
-                return self._receipt(f"already applied batch={batch.pk}", credits, manifest_sha, source_sha)
+                return self._receipt(
+                    f"already applied batch={batch.pk}", credits, manifest_sha, source_sha, full_void=full_void
+                )
             if batches.filter(revoked_at__isnull=True).exists():
                 raise ValueError("An active service correction already exists for this event.")
             before = {s.team.pk: s for s in compute_standings()}
@@ -195,6 +208,7 @@ class Command(BaseCommand):
                 baseline_sha256=source_sha,
                 portal_baseline_sha256=expected_portal_digest(sources),
                 service_modifier=str(service_modifier()),
+                full_void=full_void,
             )
             ServiceCorrection.objects.bulk_create(
                 ServiceCorrection(
@@ -226,6 +240,7 @@ class Command(BaseCommand):
                     "teams": len(credits),
                     "manifest_sha256": manifest_sha,
                     "baseline_sha256": source_sha,
+                    "full_void": full_void,
                     "service_credit": sum(c.service_credit for c in credits),
                     "sla_credit": sum(c.sla_credit for c in credits),
                     "composite": str(composite),
@@ -233,7 +248,7 @@ class Command(BaseCommand):
                 },
             )
             status = f"applied batch={batch.pk} event={event_id} composite={composite} rank_changes={moves}"
-            return self._receipt(status, credits, manifest_sha, source_sha)
+            return self._receipt(status, credits, manifest_sha, source_sha, full_void=full_void)
 
     @staticmethod
     def _revoke(event_id: int, service: str, ruling: str, manifest_sha: str, actor: str) -> str:

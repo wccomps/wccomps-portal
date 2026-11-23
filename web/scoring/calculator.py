@@ -155,13 +155,20 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
 def _breakdown(
     raw: _RawScores,
     template: ScoringTemplate,
+    modifiers: tuple[Decimal, Decimal, Decimal],
     credits: list[CreditLine],
 ) -> DetailedScoreBreakdown:
-    service_mod, inject_mod, orange_mod = _get_modifiers(template)
-    sla = raw["sla"] + sum(line["sla_credit"] for line in credits)
-    scaled_service = raw["service"] * service_mod + sum(
-        line["service_credit"] * line["service_modifier"] for line in credits
-    )
+    service_mod, inject_mod, orange_mod = modifiers
+    service = raw["service"]
+    sla = raw["sla"]
+    pinned_service = Decimal(0)
+    for line in credits:
+        sla += line["sla_credit"]
+        if line["full_void"]:
+            service += line["service_credit"]
+        else:
+            pinned_service += line["service_credit"] * line["service_modifier"]
+    scaled_service = service * service_mod + pinned_service
     scaled_inject = raw["inject"] * inject_mod
     scaled_orange = raw["orange"] * orange_mod
 
@@ -199,13 +206,16 @@ def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
     """A team's score with its raw scores, modifiers and weights.
 
     Formula:
-        total = (service × service_modifier) + credits at their recorded service_modifier
+        total = ((raw service + raw full-void offsets) × service_modifier) + pinned credits
               + (inject × inject_modifier)
               + (orange × orange_modifier)
               + sla_violations + SLA credits + point_adjustments
               + red_deductions + incident_recovery
     """
-    return _breakdown(_raw_scores([team])[team.pk], _template(), current_credits([team.pk]).get(team.pk, []))
+    template = _template()
+    modifiers = _get_modifiers(template)
+    credits = current_credits([team.pk], modifiers[0])
+    return _breakdown(_raw_scores([team])[team.pk], template, modifiers, credits.get(team.pk, []))
 
 
 @dataclass
@@ -249,14 +259,15 @@ def compute_standings() -> list[Standing]:
     """
     teams = list(Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number"))
     raw = _raw_scores(teams)
-    credits = current_credits([team.pk for team in teams])
     template = _template()
+    modifiers = _get_modifiers(template)
+    credits = current_credits([team.pk for team in teams], modifiers[0])
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
 
     standings = []
     for team in teams:
         lines = credits.get(team.pk, [])
-        breakdown = _breakdown(raw[team.pk], template, lines)
+        breakdown = _breakdown(raw[team.pk], template, modifiers, lines)
         standings.append(
             Standing(
                 team=team,

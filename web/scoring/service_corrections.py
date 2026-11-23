@@ -30,9 +30,10 @@ class CreditLine(TypedDict):
     service_credit: int
     sla_credit: int
     service_modifier: Decimal
+    full_void: bool
 
 
-def current_credits(team_ids: list[int]) -> dict[int, list[CreditLine]]:
+def current_credits(team_ids: list[int], live_service_modifier: Decimal) -> dict[int, list[CreditLine]]:
     credits: dict[int, list[CreditLine]] = {}
     rows = (
         ServiceCorrection.objects.filter(
@@ -46,16 +47,18 @@ def current_credits(team_ids: list[int]) -> dict[int, list[CreditLine]]:
             "service_credit",
             "sla_credit",
             "batch__service_modifier",
+            "batch__full_void",
         )
     )
-    for team_id, service, ruling, service_credit, sla_credit, modifier in rows:
+    for team_id, service, ruling, service_credit, sla_credit, modifier, full_void in rows:
         credits.setdefault(team_id, []).append(
             CreditLine(
                 service_name=service,
                 ruling=ruling,
                 service_credit=service_credit,
                 sla_credit=sla_credit,
-                service_modifier=Decimal(modifier),
+                service_modifier=live_service_modifier if full_void else Decimal(modifier),
+                full_void=full_void,
             )
         )
     return credits

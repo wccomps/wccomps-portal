@@ -477,15 +477,26 @@ resolves each ID using the scored team's name and the event's portal team assign
 portal import. Keep its baseline digest with the decision record. Run `apply` with the same arguments plus
 `--baseline-sha256 BASELINE_SHA --actor OPERATOR --expect-composite POINTS`; add `--require-unchanged-ranks`
 when the ruling calls for it. A failed score or rank check rolls back the entire application.
-Use `--full-void` on both `verify` and `apply` to require exact removal of each team's earned service
-points and restoration of its entire SLA deduction. Use `--expect-service-max MAX` on `apply` to require the
-existing denominator. Neither flag rewrites the service or its checks, or changes the denominator.
+Use `--full-void` on both `verify` and `apply` when the approved ruling voids a service. Verification checks that
+each team's signed delta exactly offsets its raw service points and restores the entire SLA deduction. Apply
+records that mode: the offset is applied before scaling, so the cancelled points stay cancelled if the multiplier
+changes. Use `--expect-service-max MAX` on `apply` to check the current denominator. Applying a correction
+does not itself change the denominator, imported scores, or check history.
 
-One batch can be active per event; an identical application is a no-op. The raw service credit uses the multiplier
-recorded at application. A detected sync conflict rolls back the import and blocks Close Out until a matching
-sync or audited revocation. To revoke before Close Out, pass the event, service, ruling, manifest digest and
-revoking operator, without the manifest path. Frozen scorecards show the credit and unadjusted service detail;
-the close-out ZIP's final scores export carries the two credit columns.
+One batch can be active per event. An identical application, including its mode, is a no-op. Ordinary service
+credits and debits use the multiplier recorded at application. Upgrading keeps existing batches on their
+recorded multiplier: older batches and receipts did not record `--full-void`, and an exact raw offset alone
+does not identify the approved mode. Already frozen results and archives are unchanged. Use the original
+decision record to resolve historical intent; do not infer it from a signed delta.
+
+A detected sync conflict rolls back the import and blocks Close Out until a matching sync or audited revocation.
+To revoke before Close Out, pass the event, service, ruling, manifest digest and revoking operator, without the
+manifest path. Frozen scorecards show the applied correction and unadjusted service detail. The close-out ZIP's
+final scores export has effective scores alongside the raw service delta and SLA credit.
+
+Do not use an older image to finalize an event with a multiplier-aware full void: the older scorer uses the
+recorded multiplier. Images predating signed service corrections also cannot verify manifests containing negative
+deltas and can render saved negative deltas with a spurious `+` prefix, even though they can read the integers.
 
 ## Settings reference
 
