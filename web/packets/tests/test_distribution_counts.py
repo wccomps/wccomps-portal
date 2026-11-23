@@ -1,5 +1,3 @@
-"""The packet pages and the packet admin show each packet's distribution counts from with_distribution_stats()."""
-
 import re
 
 import pytest
