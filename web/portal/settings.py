@@ -361,7 +361,6 @@ BOX_RESET_CATEGORY_ID = int(os.environ.get("BOX_RESET_CATEGORY_ID", "2"))
 
 AWEFUL_PROXY_URL = os.environ.get("AWEFUL_PROXY_URL", "")
 AWEFUL_PROXY_TOKEN = os.environ.get("AWEFUL_PROXY_TOKEN", "")
-AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN = os.environ.get("AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN", "")
 
 # Settings among portal.required.HTTPS_SETTINGS (comma-separated) whose URL may be plain http: only for a service on a
 # network nobody else can read, such as an in-cluster address. Empty: every credentialed URL must be https.

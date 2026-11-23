@@ -3,6 +3,7 @@
 from datetime import date
 
 import pytest
+from django.urls import reverse
 
 from core.tests.roles import role_user
 
@@ -47,3 +48,21 @@ def test_seasons_and_events_pages(live_server, pw_browser):
         assert not errors, errors
     finally:
         context.close()
+
+
+def test_django_admin_edits_the_events_proxy_team_domain(live_server, pw_browser, current_event):
+    with create_session_context(pw_browser, live_server, role_user("admin")) as context:
+        page = context.new_page()
+        path = reverse("admin:registration_event_change", args=[current_event.pk])
+        assert page.goto(f"{live_server.url}{path}").status == 200
+        domain = page.get_by_label("Proxy team domain")
+        domain.fill("boxx.event.example..")
+        with page.expect_navigation():
+            page.get_by_role("button", name="Save", exact=True).click()
+        assert page.get_by_text("Enter a valid team DNS domain.", exact=True).is_visible()
+
+        domain.fill("boxx.event.example")
+        with page.expect_navigation():
+            page.get_by_role("button", name="Save", exact=True).click()
+        current_event.refresh_from_db()
+        assert current_event.proxy_team_domain == "boxx.event.example"

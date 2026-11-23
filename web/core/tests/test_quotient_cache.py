@@ -47,7 +47,7 @@ def _asked_twice(monkeypatch: pytest.MonkeyPatch, body: object, get: Callable[[Q
     client = QuotientClient(base_url="https://quotient.test")
     first = get(client)
     assert first == get(client)
-    assert first == QuotientInfrastructure(boxes=[]) or first == []
+    assert first == QuotientInfrastructure(boxes=[], service_inventory_complete=True) or first == []
     return asked
 
 

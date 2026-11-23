@@ -14,6 +14,7 @@ from registration.models import Event
 
 from core.models import CompetitionConfig
 from core.services.competition import run_lock
+from core.validators import validate_team_dns_domain
 from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
@@ -102,8 +103,13 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
         debug = check.debug or ""
         if not domain and (domain_match := _DNS_RECORD_DOMAIN_RE.search(debug)):
             fqdn = domain_match.group(1).lower()
-            if _is_host_name(fqdn):
-                domain = fqdn.split(".", 1)[1] if fqdn.count(".") >= 2 else fqdn
+            if "xx" not in fqdn:
+                try:
+                    validate_team_dns_domain(fqdn)
+                except ValidationError:
+                    pass
+                else:
+                    domain = fqdn.split(".", 1)[1] if fqdn.count(".") >= 2 else fqdn
         if not internal_mask and (ip_match := _DNS_ANSWER_IPV4_PREFIX_RE.search(debug)):
             try:
                 ipaddress.IPv4Address(f"{ip_match.group(1)}.1")
@@ -115,20 +121,7 @@ def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, 
     return domain, internal_mask
 
 
-def _is_host_name(fqdn: str) -> bool:
-    """Reject addresses, team templates and reverse-lookup names."""
-    labels = fqdn.split(".")
-    return (
-        len(fqdn) <= 253
-        and len(labels) >= 2
-        and all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
-        and labels[-1][0].isalpha()
-        and labels[-1] != "arpa"
-        and "xx" not in fqdn
-    )
-
-
-def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> None:
+def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData], *, service_inventory_complete: bool) -> None:
     proxy_url = settings.AWEFUL_PROXY_URL.strip().rstrip("/")
     if not proxy_url:
         return
@@ -138,26 +131,21 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
     if sample_teams:
         payload["number_of_teams"] = max(sample_teams)
 
-    has_dns_service = False
-
+    dns_boxes = []
     for box in boxes_data:
-        dns_service = next(
-            (
-                s
-                for s in box.get("services", [])
-                if s.get("name", "").upper() == "DNS" or s.get("display_name", "").upper() == "DNS"
-            ),
-            None,
-        )
-        if not dns_service:
-            continue
-        has_dns_service = True
-        if "external_mask" not in payload and (parsed := _parse_dns_box_ip_template(box.get("ip", ""))):
+        for service in box["services"]:
+            if "DNS" in (service["name"].upper(), service["display_name"].upper()):
+                dns_boxes.append((box, service["name"]))
+                break
+    for box, dns_service in dns_boxes:
+        if "external_mask" not in payload and (parsed := _parse_dns_box_ip_template(box["ip"])):
             payload["external_mask"], payload["team_dns_server_last_octet"] = parsed
         for sample_team in sample_teams[:3] or [1]:
+            if "team_domain_name" in payload and "internal_mask" in payload:
+                break
             checks = client.get_service_checks(
                 sample_team,
-                f"{box['name']}:{dns_service['name']}",
+                f"{box['name']}:{dns_service}",
                 force_refresh=True,
             )
             domain, internal_mask = _extract_dns_check_network(checks)
@@ -165,17 +153,19 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
                 payload["team_domain_name"] = domain
             if internal_mask and "internal_mask" not in payload:
                 payload["internal_mask"] = internal_mask
-            if "team_domain_name" in payload and "internal_mask" in payload:
-                break
         if "external_mask" in payload and "team_domain_name" in payload and "internal_mask" in payload:
             break
 
     # The proxy retains its configured domain when the update omits it.
-    if not has_dns_service and (domain := settings.AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN.strip().lower().rstrip(".")):
-        if _is_host_name(domain):
-            payload["team_domain_name"] = domain
-        else:
-            logger.warning("Ignoring invalid AWEFUL_PROXY_NO_DNS_TEAM_DOMAIN")
+    if not dns_boxes and service_inventory_complete:
+        event_domain = Event.objects.filter(is_active=True).values_list("proxy_team_domain", flat=True).first()
+        if event_domain:
+            try:
+                validate_team_dns_domain(event_domain)
+            except ValidationError:
+                logger.warning("Ignoring invalid proxy team domain for the open event")
+            else:
+                payload["team_domain_name"] = event_domain.lower().removesuffix(".")
 
     if not payload:
         return
@@ -243,7 +233,7 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     if injects:
         set_template_max("inject_max", inject_max_from_titles(injects))
 
-    _sync_aweful_proxy(client, boxes_data)
+    _sync_aweful_proxy(client, boxes_data, service_inventory_complete=infrastructure.service_inventory_complete)
 
     return metadata
 

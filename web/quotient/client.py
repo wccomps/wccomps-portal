@@ -159,6 +159,7 @@ class QuotientBox:
 @dataclass
 class QuotientInfrastructure:
     boxes: list[QuotientBox]
+    service_inventory_complete: bool = False
 
 
 @dataclass
@@ -373,8 +374,11 @@ class QuotientClient:
 
 def _infrastructure(data: object) -> QuotientInfrastructure:
     # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
+    metadata = _object(data, "the metadata")
+    complete = "boxes" in metadata
     boxes = []
-    for box_data in _objects(_object(data, "the metadata").get("boxes", []), "boxes"):
+    for box_data in _objects(metadata.get("boxes", []), "boxes"):
+        complete = complete and "services" in box_data
         svc_names = box_data.get("services", [])
         if not isinstance(svc_names, list):
             raise ValueError(f"a box's services aren't a list: {svc_names!r:.80}")
@@ -390,7 +394,7 @@ def _infrastructure(data: object) -> QuotientInfrastructure:
             )
         )
     logger.info(f"Fetched {len(boxes)} boxes from Quotient API")
-    return QuotientInfrastructure(boxes=boxes)
+    return QuotientInfrastructure(boxes=boxes, service_inventory_complete=complete)
 
 
 def _injects(data: object) -> list[Inject]:

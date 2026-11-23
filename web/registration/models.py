@@ -11,6 +11,7 @@ from django.utils import timezone
 from django_stubs_ext import WithAnnotations
 
 from core.utils import IPAddress, advisory_xact_lock
+from core.validators import validate_team_dns_domain
 
 from .locks import school_list_lock
 
@@ -229,6 +230,14 @@ class Event(models.Model):
     is_active = models.BooleanField(default=False)
     is_finalized = models.BooleanField(default=False)
     max_teams = models.IntegerField(default=50)
+    proxy_team_domain = models.CharField(
+        "proxy team domain",
+        max_length=254,
+        blank=True,
+        default="",
+        validators=[validate_team_dns_domain],
+        help_text="Exact team domain to send to aweful-proxy only if Quotient lists no DNS service.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

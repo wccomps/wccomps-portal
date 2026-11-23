@@ -25,6 +25,7 @@ def test_an_event_saves_in_the_admin():
     data.update(
         {
             "season": new.pk,
+            "proxy_team_domain": "boxx.event.example",
             "team_assignments-TOTAL_FORMS": "0",
             "team_assignments-INITIAL_FORMS": "0",
         }
@@ -35,3 +36,4 @@ def test_an_event_saves_in_the_admin():
     assert response.status_code == 302, response.context["adminform"].form.errors
     event.refresh_from_db()
     assert event.season == new
+    assert event.proxy_team_domain == "boxx.event.example"

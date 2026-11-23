@@ -58,12 +58,16 @@ def test_infrastructure_reads_each_box_its_ip_and_services() -> None:
                 services=[QuotientService("http", "http"), QuotientService("ssh", "ssh")],
             ),
             QuotientBox(name="db", ip="10.0.0.6", services=[]),
-        ]
+        ],
+        service_inventory_complete=False,
     )
 
 
-def test_metadata_without_boxes_reads_as_no_boxes() -> None:
-    assert _read({}, lambda c: c.get_infrastructure(force_refresh=True)) == QuotientInfrastructure(boxes=[])
+@pytest.mark.parametrize(("body", "complete"), [({}, False), ({"boxes": []}, True)])
+def test_empty_metadata_requires_an_explicit_boxes_list_to_confirm_absence(body, complete) -> None:
+    assert _read(body, lambda c: c.get_infrastructure(force_refresh=True)) == QuotientInfrastructure(
+        boxes=[], service_inventory_complete=complete
+    )
 
 
 def test_a_check_without_a_start_time_debug_or_error_reads_them_as_blank() -> None:
@@ -190,7 +194,10 @@ def test_an_expired_session_signs_in_again_and_asks_once_more() -> None:
 
     assert injects is not None
     assert [i.inject_id for i in injects] == [3]
-    assert requests == ["https://quotient.test/api/login", "https://quotient.test/api/injects"] * 2
+    assert [str(request.url) for request in requests] == [
+        "https://quotient.test/api/login",
+        "https://quotient.test/api/injects",
+    ] * 2
 
 
 def test_one_sign_in_serves_every_later_read() -> None:
@@ -198,10 +205,12 @@ def test_one_sign_in_serves_every_later_read() -> None:
     answers = [Answer(200, b"{}"), Answer(200, b'{"boxes": []}'), Answer(200, b"[]")]
     with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers) as requests:
         client = QuotientClient(base_url="https://quotient.test")
-        assert client.get_infrastructure(force_refresh=True) == QuotientInfrastructure(boxes=[])
+        assert client.get_infrastructure(force_refresh=True) == QuotientInfrastructure(
+            boxes=[], service_inventory_complete=True
+        )
         assert client.get_injects(force_refresh=True) == []
 
-    assert requests == [
+    assert [str(request.url) for request in requests] == [
         "https://quotient.test/api/login",
         "https://quotient.test/api/metadata",
         "https://quotient.test/api/injects",

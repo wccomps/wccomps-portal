@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 
 # PostgreSQL's jsonb refuses a NUL character and a lone UTF-16 surrogate, both of which JSON text can carry
 _JSONB_UNSTORABLE_RE = re.compile("[\x00\ud800-\udfff]")
+_DNS_LABEL_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
 def json_strings(value: object) -> Iterator[str]:
@@ -28,3 +29,16 @@ def validate_jsonb_storable(value: object) -> None:
                 "%(text)s holds a NUL character or a lone surrogate, which can't be stored.",
                 params={"text": f"{text!r:.80}"},
             )
+
+
+def validate_team_dns_domain(value: str) -> None:
+    domain = value.lower().removesuffix(".")
+    labels = domain.split(".")
+    if (
+        len(domain) > 253
+        or len(labels) < 2
+        or not all(_DNS_LABEL_RE.fullmatch(label) for label in labels)
+        or not labels[-1][0].isalpha()
+        or labels[-1] == "arpa"
+    ):
+        raise ValidationError("Enter a valid team DNS domain.")
