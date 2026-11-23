@@ -258,7 +258,9 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
             # A row is checked as the school info form checks one school: lengths, emails, no NUL characters.
             # A cell missing from a short row is None.
             # A cell may be the school info export's, so the formula guard's quote comes off first
-            form = SchoolInfoEditForm({name: unquote_cell(raw_row.get(raw) or "") for name, raw in bound_headers.items()})
+            form = SchoolInfoEditForm(
+                {name: unquote_cell(raw_row.get(raw) or "") for name, raw in bound_headers.items()}
+            )
             if form.is_valid():
                 rows.append(
                     {
