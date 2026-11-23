@@ -475,7 +475,7 @@ def test_bulk_note_lists_every_team_it_could_not_count(manager):
 
 
 def test_a_bulk_reset_out_of_room_returns_the_batches_it_did_and_names_the_rest(manager):
-    """The bot stops before a batch its reply window can't fit, then names the teams from the batches returned."""
+    """Return completed batches and name untouched teams in the ops note."""
     manager.find_user.side_effect = lambda username: {"pk": 9, "username": username, "uid": f"sub-{username}"}
     result = drain(reset_teams_credentials(list(range(1, 13)), "gold-admin", lambda: False))
 

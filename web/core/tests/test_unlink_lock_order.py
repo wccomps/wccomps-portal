@@ -5,7 +5,8 @@ The team lock leaves rows referencing the team writable, and linking waits for i
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from queue import Queue
 from unittest.mock import patch
 
 import pytest
@@ -138,24 +139,23 @@ def test_a_feedback_edit_holding_a_score_does_not_deadlock_the_wipe(team):
 
 
 @contextmanager
-def _another_transaction_holding(team: Team, signing_out: User | None = None) -> Iterator[None]:
+def _another_transaction_holding(team: Team, signing_out: User | None = None) -> Iterator[int]:
     """Another transaction holds the team's lock until the block ends, as an unlink or the wipe does. With signing_out,
     it first signs that account out everywhere, as a credentials reset does before its unlink."""
     errors: list[BaseException] = []
-    team_locked = threading.Event()
+    pid = Queue[int]()
     release = threading.Event()
 
     def hold() -> None:
         if signing_out is not None:
             sign_out_everywhere(User.objects.get(pk=signing_out.pk))
         assert Team.objects.filter(pk=team.pk).lock() == [team.pk]
-        team_locked.set()
-        release.wait(10)
+        pid.put(connection.connection.get_backend_pid())
+        assert release.wait(30)
 
     holding = _in_thread(hold, errors)
     try:
-        assert team_locked.wait(10)
-        yield
+        yield pid.get(timeout=10)
     finally:
         release.set()
         holding.join(30)
@@ -184,12 +184,28 @@ def test_a_link_confirmed_during_a_reset_waits_for_it_and_links_nothing(team):
     errors: list[BaseException] = []
     results: list[LinkResult | None] = []
 
-    with _another_transaction_holding(team, signing_out=account):
-        linker = _in_thread(lambda: results.append(execute_link(607, "j", account, team)), errors)
-        time.sleep(OVERLAP)
-        waited = linker.is_alive()
-    linker.join(30)
+    pid = Queue[int]()
 
-    assert waited
+    def link() -> None:
+        pid.put(connection.connection.get_backend_pid())
+        results.append(execute_link(607, "j", account, team))
+
+    with ExitStack() as workers, _another_transaction_holding(team, signing_out=account) as reset_pid:
+        linker = _in_thread(link, errors)
+        workers.callback(linker.join, 30)
+        link_pid = pid.get(timeout=10)
+        deadline = time.monotonic() + 10
+        with connection.cursor() as cursor:
+            while time.monotonic() < deadline:
+                cursor.execute("SELECT %s = ANY(pg_blocking_pids(%s))", [reset_pid, link_pid])
+                if cursor.fetchone()[0]:
+                    break
+                if not linker.is_alive():
+                    pytest.fail(f"Link finished without waiting for the reset: {errors or results}")
+                time.sleep(0.01)
+            else:
+                pytest.fail("PostgreSQL did not report the linker blocked by the reset")
+
+    assert not linker.is_alive()
     assert (errors, results) == ([], [SIGNED_OUT])
     assert not DiscordLink.objects.filter(discord_id=607).exists()
