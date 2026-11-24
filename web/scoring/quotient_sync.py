@@ -277,7 +277,7 @@ class ServiceSyncResult(TypedDict):
 
 
 def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
-    """Import Quotient scores and uptimes; store a service maximum only from a complete eligible cohort.
+    """Import Quotient scores and uptimes, and store the exported maximum for the competing teams.
 
     An unreadable export or out-of-range value fails the sync without changing scores or the maximum.
     """
@@ -294,7 +294,6 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
 
     total = 0
     competing: list[TeamServiceExport] = []
-    note = None
     with run_lock() as locked, guarded_service_sync(event_id):
         if not locked:
             raise ValueError("A competition transition or score sync is in progress.")
@@ -308,11 +307,8 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             team = teams.get(team_export.team_number)
             if team is None:
                 continue
-            ServiceDetail.objects.filter(team=team).delete()
-            if not team_export.services:
-                ServiceScore.objects.filter(team=team).delete()
-                continue
-
+            if team.is_active:
+                competing.append(team_export)
             score = ServiceScore(
                 team=team,
                 service_points=Decimal(team_export.gross_points),
@@ -332,6 +328,10 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             ]
             for row in (score, *details):
                 _check_storable(row, f"Quotient's scores for team {team.team_number}")
+            ServiceDetail.objects.filter(team=team).delete()
+            if not details:
+                ServiceScore.objects.filter(team=team).delete()
+                continue
             ServiceScore.objects.update_or_create(
                 team=team,
                 defaults={
@@ -342,34 +342,12 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             )
             ServiceDetail.objects.bulk_create(details)
             total += 1
-            if team.is_active:
-                competing.append(team_export)
 
-        # Absent teams keep their old scores, unlike explicitly exported teams with no services.
-        if ServiceScore.objects.filter(team__is_active=True).exclude(team__team_number__in=exported_numbers).exists():
-            note = (
-                "The service maximum was not updated: active teams missing from Quotient's export still have "
-                "stored service scores."
-            )
-        elif not competing:
-            if total:
-                note = (
-                    "The service maximum was not updated: no team Quotient scored is active in the portal, so scores "
-                    "still scale by the maximum already stored."
-                )
-        elif (service_max := service_max_from_export(competing)) is None:
-            note = (
-                "The service maximum was not updated: Quotient's export is missing max points for a service of "
-                "an active team, so scores still scale by the maximum already stored."
-            )
-        else:
+        service_max = service_max_from_export(competing)
+        if service_max:
             _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
-            # The maximum and score rows commit or roll back together.
-            if not set_template_max("service_max", service_max):
-                note = (
-                    "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, "
-                    "then sync again."
-                )
+        # The maximum and score rows commit or roll back together.
+        stored = bool(service_max) and set_template_max("service_max", service_max)
 
         if problem := correction_problem(event_id, check_sync_conflict=False):
             raise CorrectionConflictError(problem)
@@ -379,6 +357,20 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
                 revoked_at__isnull=True,
                 sync_conflict=True,
             ).update(sync_conflict=False)
+
+    note = None
+    if service_max is None:
+        note = (
+            "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by "
+            "the maximum already stored."
+        )
+    elif not competing and total:
+        note = (
+            "The service maximum was not updated: no team Quotient scored is active in the portal, so scores still "
+            "scale by the maximum already stored."
+        )
+    elif service_max and not stored:
+        note = "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, then sync again."
 
     return {"total": total, "service_max_note": note}
 

@@ -49,11 +49,18 @@ def test_inject_max_none_without_any_values() -> None:
 
 def _team_export(team_number: int, *services: tuple[str, int, int | None]) -> TeamServiceExport:
     entries = [
-        ServiceExportEntry(service_name=name, service_points=points, max_points=max_points, sla_violations=0)
+        ServiceExportEntry(service_name=name, service_points=points, max_points=max_points, sla_violations=0, sla_penalty=0)
         for name, points, max_points in services
     ]
     gross = sum(e.service_points for e in entries)
-    return TeamServiceExport(team_number=team_number, services=entries, gross_points=gross, total_sla_penalty=0)
+    return TeamServiceExport(
+        team_name=f"team{team_number:02}",
+        team_number=team_number,
+        services=entries,
+        gross_points=gross,
+        total_sla_penalty=0,
+        total_points=gross,
+    )
 
 
 def test_service_max_sums_each_services_max_points_even_where_no_team_scored() -> None:

@@ -60,7 +60,8 @@ def test_start_streams_progress_and_posts_to_ops(admin_client):
     assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
-def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin_user):
+@pytest.mark.parametrize("note", [None, "The service maximum was not updated."])
+def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin_user, note):
     CompetitionConfig.objects.update_or_create(
         pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": True}
     )
@@ -72,13 +73,15 @@ def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
         patch("core.services.user_groups.refresh_user_groups") as refresh,
         patch(
-            "scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "service_max_note": None}
+            "scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "service_max_note": note}
         ) as sync_scores,
     ):
         response = _post(admin_client, "stop_competition")
         lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
 
-    assert lines[-2]["step"] == "Quotient service scores synced"
+    step = "Quotient service scores synced"
+    assert lines[-2]["step"] == (f"{step}. {note}" if note else step)
+    assert lines[-2]["ok"] is (note is None)
     assert lines[-1]["done"] and lines[-1]["success"]
     refresh.assert_called_once()
     sync_scores.assert_called_once_with(admin_user)
@@ -86,6 +89,9 @@ def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin
     log = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert "Competition Stopped" in log
     assert "Quotient service scores: synced" in log
+    if note is not None:
+        assert note in lines[-1]["message"]
+        assert note in log
 
 
 def test_setting_a_start_time_mid_competition_keeps_it_running(admin_client):

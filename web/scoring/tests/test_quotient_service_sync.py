@@ -1,4 +1,4 @@
-"""Service sync matches Quotient's export to portal teams by the number in the team name."""
+"""Service sync matches Quotient's export and uptime series to portal teams by the number in the team name."""
 
 from decimal import Decimal
 from unittest.mock import Mock
@@ -27,6 +27,12 @@ EXPORT = [
         "total_points": 35,
     }
 ]
+UPTIMES = {
+    "series": [
+        {"Name": "team01", "Data": [{"Service": "web", "Uptime": 0.1}]},
+        {"Name": "team03", "Data": [{"Service": "web", "Uptime": 0.9}]},
+    ]
+}
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +45,8 @@ def _quotient(settings, monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/engine/export/scores":
             return httpx.Response(200, json=EXPORT)
+        if request.url.path == "/api/graphs/uptimes":
+            return httpx.Response(200, json=UPTIMES)
         return httpx.Response(200, json={})
 
     real_client = httpx.Client
@@ -48,7 +56,7 @@ def _quotient(settings, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_sync_attaches_scores_to_the_named_team() -> None:
+def test_sync_attaches_scores_and_uptimes_to_the_named_team() -> None:
     Team.objects.create(team_number=1, team_name="One")
     team3 = Team.objects.create(team_number=3, team_name="Three")
 
@@ -58,6 +66,7 @@ def test_sync_attaches_scores_to_the_named_team() -> None:
     assert ServiceScore.objects.get().team == team3
     detail = ServiceDetail.objects.get()
     assert detail.team == team3
+    assert detail.uptime == Decimal("0.9000")
     assert detail.sla_violations == 1
 
 
@@ -82,6 +91,30 @@ def test_sync_keeps_service_max_when_the_export_has_no_max_points(monkeypatch) -
     assert result["total"] == 1
     assert result["service_max_note"].startswith("The service maximum was not updated")
     assert ScoringTemplate.objects.get().service_max == Decimal("777")
+
+
+@pytest.mark.django_db
+def test_a_zero_maximum_leaves_the_stored_maximum_alone(monkeypatch) -> None:
+    Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create(service_max=Decimal("777"))
+    monkeypatch.setitem(EXPORT[0], "gross_points", 0)
+    monkeypatch.setitem(EXPORT[0]["services"][0], "service_points", 0)
+    monkeypatch.setitem(EXPORT[0]["services"][0], "max_points", 0)
+
+    assert sync_service_scores() == {"total": 1, "service_max_note": None}
+    assert ScoringTemplate.objects.get().service_max == Decimal("777")
+
+
+@pytest.mark.django_db
+def test_a_team_absent_from_the_export_keeps_its_score_but_does_not_set_the_maximum() -> None:
+    Team.objects.create(team_number=3, team_name="Three")
+    absent = Team.objects.create(team_number=4, team_name="Four")
+    ServiceScore.objects.create(team=absent, service_points=100)
+    ScoringTemplate.objects.create(service_max=Decimal("777"))
+
+    assert sync_service_scores() == {"total": 1, "service_max_note": None}
+    assert ServiceScore.objects.get(team=absent).service_points == 100
+    assert ScoringTemplate.objects.get().service_max == Decimal("45")
 
 
 @pytest.mark.django_db

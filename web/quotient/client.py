@@ -174,10 +174,12 @@ class ServiceExportEntry:
 
 @dataclass
 class TeamServiceExport:
+    team_name: str
     team_number: int
     services: list[ServiceExportEntry]
     gross_points: int
     total_sla_penalty: int
+    total_points: int
     quotient_team_id: int | None = None
 
 
@@ -427,12 +429,15 @@ def _service_export(data: object) -> list[TeamServiceExport]:
     exports = []
     for team_data in _objects(data, "the export"):
         services = [_service_entry(s) for s in _objects(team_data.get("services", []), "a team's services")]
+        team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
         exports.append(
             TeamServiceExport(
-                team_number=_team_number(_text(_field(team_data, "team_name", "a team"), "a team's name")),
+                team_name=team_name,
+                team_number=_team_number(team_name),
                 services=services,
                 gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
                 total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
+                total_points=_whole(team_data.get("total_points", 0), "a team's total"),
                 quotient_team_id=_whole(team_data["team_id"], "a team's ID") if "team_id" in team_data else None,
             )
         )

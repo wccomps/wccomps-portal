@@ -317,7 +317,8 @@ def check_export(result: object) -> None:
             isinstance(r, list)
             and all(
                 isinstance(t, TeamServiceExport)
-                and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty))
+                and is_str(t.team_name)
+                and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty, t.total_points))
                 and (t.quotient_team_id is None or is_int(t.quotient_team_id))
                 and all(
                     is_str(s.service_name)
