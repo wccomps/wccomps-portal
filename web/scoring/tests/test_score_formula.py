@@ -228,9 +228,11 @@ def test_suggestions_are_the_ten_newest(gold_team_user: User) -> None:
     team = _team(1)
     findings = [_finding(gold_team_user, team, source_ip="10.0.0.5") for _ in range(11)]
     start = timezone.now()
-    for age, finding in enumerate(reversed(findings)):
+    # The lowest PK is newest and the highest PK is oldest: PK order cannot stand in for timestamps.
+    newest_first = [findings[0], *reversed(findings[1:-1]), findings[-1]]
+    for age, finding in enumerate(newest_first):
         RedTeamScore.objects.filter(pk=finding.pk).update(created_at=start - timedelta(minutes=age))
 
     suggestions = list(suggest_red_score_matches(_incident(team, source_ip="10.0.0.5")))
 
-    assert suggestions == list(reversed(findings))[:10]
+    assert suggestions == newest_first[:10]
