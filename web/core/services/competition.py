@@ -114,6 +114,7 @@ class CompetitionRunResult:
     nextcloud_ok: int = 0
     nextcloud_failed: list[tuple[str, str]] = field(default_factory=list)
     scores_synced: bool | None = None  # The stop's Quotient service score sync; None on a start
+    service_max_note: str | None = None
     metadata_sync_queued: bool = False  # The start queued the worker's Quotient metadata sync
     start_message_queued: bool = False
     error: str | None = None
@@ -144,13 +145,16 @@ class CompetitionRunResult:
         if self.accounts_failed:
             accounts += f" ({self.accounts_failed} failed)"
         lines.append(accounts)
+        # Before the per-account failure lines: the ops post is cut from the end at Discord's limit.
+        if self.scores_synced is not None:
+            lines.append(f"Quotient service scores: {'synced' if self.scores_synced else 'sync failed'}")
+        if self.service_max_note:
+            lines.append(self.service_max_note)
         lines.extend(f"Failed: {username}: {error}" for username, error in self.account_failures)
         if self.nextcloud_ok or self.nextcloud_failed:
             nc_total = self.nextcloud_ok + len(self.nextcloud_failed)
             lines.append(f"Nextcloud accounts provisioned: {self.nextcloud_ok}/{nc_total}")
             lines.extend(f"Failed Nextcloud: {username}: {error}" for username, error in self.nextcloud_failed)
-        if self.scores_synced is not None:
-            lines.append(f"Quotient service scores: {'synced' if self.scores_synced else 'sync failed'}")
         if self.metadata_sync_queued:
             lines.append("Quotient metadata sync queued")
         if self.start_message_queued:
@@ -410,9 +414,11 @@ def _run(
     step += 1
     if not enable:
         try:
-            sync_service_scores(User.objects.filter(username=actor).first())
+            note = sync_service_scores(User.objects.filter(username=actor).first())["service_max_note"]
             result.scores_synced = True
-            yield CompetitionStep("Quotient service scores synced", step, total)
+            result.service_max_note = note
+            done = "Quotient service scores synced"
+            yield CompetitionStep(f"{done}. {note}" if note else done, step, total, ok=note is None)
         except Exception as e:
             logger.warning(f"Failed to sync Quotient service scores: {e}")
             result.scores_synced = False
@@ -470,6 +476,7 @@ def _run(
                     if enable
                     else {"scores_synced": result.scores_synced}
                 ),
+                **({"service_max_note": result.service_max_note} if result.service_max_note else {}),
                 "start_message_queued": result.start_message_queued,
                 **(
                     {"nextcloud_ok": result.nextcloud_ok, "nextcloud_failed": dict(result.nextcloud_failed)}

@@ -97,8 +97,17 @@ METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["http", "ss
 INJECTS = [{"ID": 1, "Title": "Inject 01 - Web (100 pts)", "Description": "Build a page"}]
 EXPORT = [
     {
+        "team_id": 11,
         "team_name": "team01",
-        "services": [{"service_name": "web-http", "service_points": 100, "sla_violations": 1, "sla_penalty": 5}],
+        "services": [
+            {
+                "service_name": "web-http",
+                "service_points": 100,
+                "max_points": 120,
+                "sla_violations": 1,
+                "sla_penalty": 5,
+            }
+        ],
         "gross_points": 100,
         "total_sla_penalty": 5,
         "total_points": 95,
@@ -310,16 +319,18 @@ def check_export(result: object) -> None:
                 isinstance(t, TeamServiceExport)
                 and is_str(t.team_name)
                 and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty, t.total_points))
+                and (t.quotient_team_id is None or is_int(t.quotient_team_id))
                 and all(
                     is_str(s.service_name)
                     and all(is_int(n) for n in (s.service_points, s.sla_violations, s.sla_penalty))
+                    and (s.max_points is None or (is_int(s.max_points) and s.max_points >= max(s.service_points, 0)))
                     for s in t.services
                 )
                 for t in r
             )
         )
 
-    outcome(result, ok, "None or teams' services with whole numbers")
+    outcome(result, ok, "None or teams' services with whole numbers (max_points may be None)")
 
 
 def check_uptimes(result: object) -> None:
@@ -955,17 +966,18 @@ SERVICES = {
 
 
 HUGE_EXPORT = [
-    {**EXPORT[0], "gross_points": 10**30, "services": [{**EXPORT[0]["services"][0], "service_points": 10**30}]}
+    {
+        **EXPORT[0],
+        "gross_points": 10**30,
+        "services": [{**EXPORT[0]["services"][0], "service_points": 10**30, "max_points": 10**30}],
+    }
 ]
 # PostgreSQL's jsonb can't hold a NUL character or a lone surrogate
 NUL_METADATA = {"boxes": [{"name": "\x00", "ip": "10.0.0.5", "services": []}]}
 SURROGATE_METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["\ud800"]}]}
 # Each fits its own column, but the maximum worked out from it doesn't fit ScoringTemplate's
 HUGE_INJECTS = [{**INJECTS[0], "Title": "Inject 01 - Web (100,000,000 pts)"}]
-STRETCHED_EXPORT = [
-    {**EXPORT[0], "gross_points": 99_999_999, "services": [{**EXPORT[0]["services"][0], "service_points": 99_999_999}]}
-]
-LOW_UPTIMES = {"series": [{"Name": "team01", "Data": [{"Service": "web-http", "Uptime": 0.1}]}]}
+STRETCHED_EXPORT = [{**EXPORT[0], "services": [{**EXPORT[0]["services"][0], "max_points": 100_000_000}]}]
 
 
 @pytest.mark.django_db
@@ -989,7 +1001,7 @@ LOW_UPTIMES = {"series": [{"Name": "team01", "Data": [{"Service": "web-http", "U
     data=[
         Answer(200, b"{}"),
         Answer(200, json.dumps(STRETCHED_EXPORT).encode()),
-        Answer(200, json.dumps(LOW_UPTIMES).encode()),
+        Answer(200, json.dumps(UPTIMES).encode()),
     ]
 )
 def test_callers_answer_or_log_whatever_the_service_says(caller: Caller, data: st.DataObject | list[Answer]) -> None:

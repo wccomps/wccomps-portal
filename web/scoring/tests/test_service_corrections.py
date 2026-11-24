@@ -148,11 +148,13 @@ def test_sync_can_revalue_raw_scores_without_revaluing_an_applied_credit(correct
     team, _, _, apply, importer, exports = correction
     ScoringTemplate.objects.create(service_max=400, inject_max=800)
     call_command("service_correction", "apply", *apply, "--expect-composite", "13")
-    other = replace(exports[0].services[0], service_name="Example-DNS")
-    importer.get_service_export.return_value = [replace(exports[0], services=[*exports[0].services, other])]
+    corrected = replace(exports[0].services[0], max_points=250)
+    other = replace(corrected, service_name="Example-DNS", max_points=350)
+    importer.get_service_export.return_value = [replace(exports[0], services=[corrected, other])]
     importer.get_uptimes.return_value = [TeamUptime("team07", 7, {SERVICE: 0.5, "Example-DNS": 0.25})]
-    sync_service_scores()
-    assert ServiceDetail.objects.filter(team=team, service_name="Example-DNS").exists()
+    assert sync_service_scores() == {"total": 1, "service_max_note": None}
+    assert ServiceDetail.objects.get(team=team, service_name=SERVICE).uptime == Decimal("0.5000")
+    assert ServiceDetail.objects.get(team=team, service_name="Example-DNS").uptime == Decimal("0.2500")
     assert ScoringTemplate.objects.get().service_max == 600
     assert not close_out_problem(event_stage())
     changed = next(s for s in compute_standings() if s.team.pk == team.pk)

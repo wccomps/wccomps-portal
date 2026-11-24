@@ -169,6 +169,7 @@ class ServiceExportEntry:
     service_points: int
     sla_violations: int
     sla_penalty: int
+    max_points: int | None = None  # what every check passing would have earned
 
 
 @dataclass
@@ -407,18 +408,27 @@ def _injects(data: object) -> list[Inject]:
     return injects
 
 
+def _service_entry(s: dict[str, object]) -> ServiceExportEntry:
+    """One service of a team's export; ValueError when its max_points couldn't hold the points it says were earned."""
+    points = _whole(_field(s, "service_points", "a service"), "a service's points")
+    max_points = _whole(s["max_points"], "a service's max points") if "max_points" in s else None
+    if max_points is not None and max_points < 0:
+        raise ValueError(f"a service's max points ({max_points}) are negative")
+    if max_points is not None and max_points < points:
+        raise ValueError(f"a service's max points ({max_points}) are below its points ({points})")
+    return ServiceExportEntry(
+        service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
+        service_points=points,
+        sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
+        sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
+        max_points=max_points,
+    )
+
+
 def _service_export(data: object) -> list[TeamServiceExport]:
     exports = []
     for team_data in _objects(data, "the export"):
-        services = [
-            ServiceExportEntry(
-                service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
-                service_points=_whole(_field(s, "service_points", "a service"), "a service's points"),
-                sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
-                sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
-            )
-            for s in _objects(team_data.get("services", []), "a team's services")
-        ]
+        services = [_service_entry(s) for s in _objects(team_data.get("services", []), "a team's services")]
         team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
         exports.append(
             TeamServiceExport(
