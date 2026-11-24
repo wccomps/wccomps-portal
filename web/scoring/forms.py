@@ -273,6 +273,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
     affected_boxes = forms.MultipleChoiceField(
         required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )
+    autofilled_ip = forms.CharField(required=False, max_length=39, widget=forms.HiddenInput)
 
     class Meta:
         model = IncidentReport

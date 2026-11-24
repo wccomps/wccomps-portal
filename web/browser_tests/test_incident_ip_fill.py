@@ -36,6 +36,12 @@ def box(page, name):
     return page.locator(f'button[data-value="{name}"]')
 
 
+def submit_incomplete_report(page):
+    page.evaluate("document.getElementById('incidentForm').noValidate = true")
+    with page.expect_navigation():
+        page.get_by_role("button", name="Submit Report").click()
+
+
 def test_a_box_fills_the_ip_and_a_typed_ip_stays(page):
     ip = page.locator("#id_destination_ip")
     box(page, "web").click()
@@ -49,16 +55,28 @@ def test_a_box_fills_the_ip_and_a_typed_ip_stays(page):
 
 def test_after_a_failed_submit_a_box_change_still_replaces_the_filled_ip(page):
     box(page, "web").click()
-    page.evaluate("document.getElementById('incidentForm').noValidate = true")
-    # nothing else filled in: the server sends the form back
-    with page.expect_navigation():
-        page.get_by_role("button", name="Submit Report").click()
+    submit_incomplete_report(page)
     ip = page.locator("#id_destination_ip")
     assert ip.input_value() == "192.0.2.20"
 
     box(page, "web").click()
     box(page, "db").click()
     assert ip.input_value() == "2001:db8::30"
+
+
+def test_a_failed_submit_keeps_a_manually_cleared_ip_and_selected_service(page):
+    box(page, "web").click()
+    ip = page.locator("#id_destination_ip")
+    service = page.locator("#id_affected_service")
+    assert ip.input_value() == "192.0.2.20"
+    ip.fill("")
+    service.select_option("HTTP")
+
+    submit_incomplete_report(page)
+
+    assert ip.input_value() == ""
+    assert service.input_value() == "HTTP"
+    assert service.locator("option").all_inner_texts() == ["Select a service...", "HTTP", "Other"]
 
 
 def test_selecting_unscored_router_box_filters_service_dropdown_to_other(page):

@@ -74,7 +74,6 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
         "team": team,
         "is_admin": is_admin,
         "box_metadata": get_incident_box_metadata(),
-        "autofilled_ip": request.POST.get("autofilled_ip", ""),
     }
     return render(request, "scoring/submit_incident.html", context)
 

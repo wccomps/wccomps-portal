@@ -12,6 +12,7 @@
         {% if team or is_admin %}
             <c-form enctype="multipart/form-data" id="incidentForm">
                 {% csrf_token %}
+                {{ form.autofilled_ip }}
                 <c-form_errors :form="form" />
                 <c-fieldset heading="Target Information">
                     {% if is_admin %}
@@ -21,10 +22,6 @@
                     <div class="grid-2">
                         {{ form.affected_service.as_field_group }}
                         {{ form.destination_ip.as_field_group }}
-                        <input type="hidden"
-                               name="autofilled_ip"
-                               id="autofilled-ip"
-                               value="{{ autofilled_ip }}">
                     </div>
                 </c-fieldset>
                 <c-fieldset heading="Attack Details">
@@ -98,7 +95,7 @@
 
         function updateIP(address) {
             const ipField = document.getElementById('id_destination_ip');
-            const autofilled = document.getElementById('autofilled-ip');
+            const autofilled = document.getElementById('id_autofilled_ip');
             if (ipField.value && ipField.value !== autofilled.value) return;
             ipField.value = autofilled.value = address;
         }
@@ -171,11 +168,14 @@
 
             const boxes = document.getElementById('id_affected_boxes');
             const ipField = document.getElementById('id_destination_ip');
-            const autofilled = document.getElementById('autofilled-ip');
+            const autofilled = document.getElementById('id_autofilled_ip');
             if (!boxes || !ipField || !autofilled) return;
             boxes.addEventListener('change', onBoxSelectionChange);
             ipField.addEventListener('input', () => { autofilled.value = ''; });
-            onBoxSelectionChange();
+            updateServiceDropdown();
+            {% if not form.is_bound %}
+                updateIP(boxIP());
+            {% endif %}
 
             if (teamSelect) {
                 teamSelect.addEventListener('change', () => updateIP(''));
