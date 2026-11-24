@@ -49,7 +49,9 @@ def test_inject_max_none_without_any_values() -> None:
 
 def _team_export(team_number: int, *services: tuple[str, int, int | None]) -> TeamServiceExport:
     entries = [
-        ServiceExportEntry(service_name=name, service_points=points, max_points=max_points, sla_violations=0, sla_penalty=0)
+        ServiceExportEntry(
+            service_name=name, service_points=points, max_points=max_points, sla_violations=0, sla_penalty=0
+        )
         for name, points, max_points in services
     ]
     gross = sum(e.service_points for e in entries)

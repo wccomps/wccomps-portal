@@ -323,9 +323,7 @@ def check_export(result: object) -> None:
                 and all(
                     is_str(s.service_name)
                     and all(is_int(n) for n in (s.service_points, s.sla_violations, s.sla_penalty))
-                    and (
-                        s.max_points is None or (is_int(s.max_points) and s.max_points >= max(s.service_points, 0))
-                    )
+                    and (s.max_points is None or (is_int(s.max_points) and s.max_points >= max(s.service_points, 0)))
                     for s in t.services
                 )
                 for t in r
@@ -979,9 +977,7 @@ NUL_METADATA = {"boxes": [{"name": "\x00", "ip": "10.0.0.5", "services": []}]}
 SURROGATE_METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["\ud800"]}]}
 # Each fits its own column, but the maximum worked out from it doesn't fit ScoringTemplate's
 HUGE_INJECTS = [{**INJECTS[0], "Title": "Inject 01 - Web (100,000,000 pts)"}]
-STRETCHED_EXPORT = [
-    {**EXPORT[0], "services": [{**EXPORT[0]["services"][0], "max_points": 100_000_000}]}
-]
+STRETCHED_EXPORT = [{**EXPORT[0], "services": [{**EXPORT[0]["services"][0], "max_points": 100_000_000}]}]
 
 
 @pytest.mark.django_db
