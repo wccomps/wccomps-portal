@@ -53,6 +53,25 @@ def test_a_refused_upload_shows_the_posted_values_and_the_error_beside_its_field
     assert field_error(html, "id_packet_file") == "Pick the file again: a page shown again with errors can't keep it."
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_a_refused_upload_counts_physical_lines_in_the_original_paste(gold_client, newline: str) -> None:
+    text = newline.join(["", " \t", "  team,key", "", 'Team01,"' + "x" * 140_000])
+    response = gold_client.post(
+        reverse("upload_packet"),
+        {
+            "title": "Qualifier packet",
+            "team_extras": text,
+            "packet_file": SimpleUploadedFile("packet.pdf", b"%PDF-1.7 packet"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert not Packet.objects.exists()
+    assert field_error(response.content.decode(), "id_team_extras") == (
+        f"The per-team data isn't CSV the upload can read (line 5). {TEAM_EXTRAS_HELP}"
+    )
+
+
 def test_a_refused_upload_without_a_file_asks_only_for_the_file(gold_client):
     html = gold_client.post(reverse("upload_packet"), {"title": "No file"}).content.decode()
 
@@ -60,12 +79,41 @@ def test_a_refused_upload_without_a_file_asks_only_for_the_file(gold_client):
     assert 'value="No file"' in html
 
 
-def test_an_accepted_upload_keeps_the_files_name_and_size(gold_client):
+@pytest.mark.parametrize("team_extras", ["", " \r\n\t\n "])
+def test_an_accepted_upload_keeps_the_files_name_and_size(gold_client, team_extras: str) -> None:
     response = gold_client.post(
         reverse("upload_packet"),
-        {"title": "Qualifier packet", "packet_file": SimpleUploadedFile("qualifier rules.pdf", b"%PDF-1.7 packet")},
+        {
+            "title": "Qualifier packet",
+            "team_extras": team_extras,
+            "packet_file": SimpleUploadedFile("qualifier rules.pdf", b"%PDF-1.7 packet"),
+        },
     )
 
     assert response.status_code == 302
     packet = Packet.objects.get()
     assert (packet.filename, packet.file_size) == ("qualifier rules.pdf", 15)
+    assert packet.team_extras == {}
+
+
+def test_an_accepted_upload_stores_extras_only_for_the_teams_named_by_the_selected_cells(gold_client) -> None:
+    response = gold_client.post(
+        reverse("upload_packet"),
+        {
+            "title": "Qualifier packet",
+            "team_extras": (
+                "\n \r\n  team,key,team note,team,key\n"
+                "Team01,ignore,Team02\n"
+                "\n"
+                "Team02,first,Team04,Team03, last ,unnamed surplus\n"
+                "Team03,ignore,Team03,Team04\n"
+            ),
+            "packet_file": SimpleUploadedFile("packet.pdf", b"%PDF-1.7 packet"),
+        },
+    )
+
+    assert response.status_code == 302
+    assert Packet.objects.get().team_extras == {
+        "3": {"key": "last", "team note": "Team04"},
+        "4": {"key": "", "team note": "Team03"},
+    }

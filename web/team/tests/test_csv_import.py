@@ -115,23 +115,16 @@ University One,invalid-email
             "warnings": [],
         }
 
-    def test_a_csv_the_reader_gives_up_on_says_so(self) -> None:
-        """A quote left open runs the cell past the csv module's field limit."""
-        csv_file = SimpleUploadedFile("test.csv", b'school_name,contact_email\nA,a@example.edu\n"' + b"x" * 140_000)
-
-        [error] = parse_csv_file(csv_file)["errors"]
-
-        assert error.startswith("The file isn't a CSV the import can read (line ")
-        assert error.endswith("): save it from your spreadsheet as CSV and upload it again.")
-
     @pytest.mark.parametrize(
         ("content", "line"),
         [
             (b'school_name,contact_email\nA,a@example.edu\n"' + b"x" * 140_000, 3),
             (b"school_name,contact_email\nA," + b"y" * 140_000 + b"\n", 2),
             (b'school_name,contact_email\n"' + b"x\n" * 70_000, 2),
+            (b'school_name,contact_email\n"Example\nU","' + b"x" * 140_000, 2),
             (b'school_name,contact_email\nA,a@example.edu\n\n\nB,"' + b"x" * 140_000, 5),
             (b'school_name,contact_email\r\nA,a@example.edu\r\n\r\nB,"' + b"x" * 140_000, 4),
+            (b'school_name,contact_email\r"Example\rU",a@example.edu\r\rB,"' + b"x" * 140_000, 5),
             (b"school_name," + b"k" * 140_000 + b"\nA,a@example.edu", 1),
         ],
     )
@@ -152,6 +145,31 @@ University One,invalid-email
 
         assert [row["school_name"] for row in result["rows"]] == ["A"]
         assert [error.split(":")[:2] for error in result["errors"]] == [["Row 3", " contact_email"]]
+
+    @pytest.mark.parametrize(
+        ("last_cells", "email"),
+        [("", None), (",", None), (",last@example.edu,unnamed surplus", "last@example.edu")],
+    )
+    def test_last_duplicate_contact_email_cell_wins(self, last_cells: str, email: str | None) -> None:
+        content = (
+            "School,Contact Email,contact_email,contact_email\n"
+            f"Example U,alias@example.edu,first@example.edu{last_cells}\n"
+        )
+
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content.encode()))
+
+        assert result["warnings"] == [
+            "Columns auto-detected: School as school_name",
+            "Unknown columns will be ignored: Contact Email",
+        ]
+        if email is None:
+            assert result["rows"] == []
+            assert result["errors"] == ["Row 2: contact_email: This field is required."]
+        else:
+            assert result["errors"] == []
+            assert result["rows"] == [
+                {"school_name": "Example U", "contact_email": email, "secondary_email": "", "notes": ""}
+            ]
 
 
 class TestCSVHeaderInference:

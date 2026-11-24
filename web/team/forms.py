@@ -3,6 +3,7 @@ import io
 import random
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from itertools import chain, repeat
 from typing import TypedDict, cast
 
 from django import forms
@@ -251,7 +252,7 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
             errors.append("CSV file is empty or has no headers")
             return {"rows": rows, "errors": errors, "warnings": warnings}
 
-        header_mapping = _infer_header_mapping(list(reader.fieldnames))
+        header_mapping = _infer_header_mapping(header)
         if detected := [f"{raw} as {name}" for raw, name in header_mapping.items() if raw != name]:
             warnings.append("Columns auto-detected: " + ", ".join(detected))
         headers = set(header_mapping.values())
@@ -265,10 +266,17 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
         if unknown_headers:
             warnings.append(f"Unknown columns will be ignored: {', '.join(sorted(unknown_headers))}")
 
-        for row_num, raw_row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
+        row_start = reader.line_num + 1
+        row_num = 1  # The header is row 1; blank records don't count for validation.
+        for cells in reader:
+            row_start = reader.line_num + 1
+            if not cells:
+                continue
+            row_num += 1
+            # As with DictReader, a missing last duplicate cell replaces the earlier value with None.
+            raw_row = dict(zip(header, chain(cells, repeat(None)), strict=False))
             row = {header_mapping.get(k, k): v for k, v in raw_row.items()}
             # A row is checked as the school info form checks one school: lengths, emails, no NUL characters.
-            # A short row's missing cells and a long row's extra ones are left out.
             # A cell may be the school info export's, so the formula guard's quote comes off first
             form = SchoolInfoEditForm({name: unquote_cell(row.get(name) or "") for name in all_headers})
             if form.is_valid():

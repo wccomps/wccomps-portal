@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+from itertools import chain, repeat
 
 from django import forms
 
@@ -30,17 +31,23 @@ def parse_team_extras(csv_text: str) -> dict[str, dict[str, str]]:
         team_col = next((col for col in header if "team" in col.lower()), None)
         if team_col is None:
             raise forms.ValidationError(f"The per-team data has no 'team' column. {TEAM_EXTRAS_HELP}")
-        other_cols = [c for c in header if c != team_col]
         row_start = rows.line_num + 1
         for cells in rows:
             row_start = rows.line_num + 1
-            row = dict(zip(header, cells, strict=False))
-            digits = re.sub(r"[^0-9]", "", row.get(team_col) or "")
+            if not cells:
+                continue
+            # A missing last duplicate team cell must not fall back to an earlier team's number.
+            row = dict(zip(header, chain(cells, repeat(None)), strict=False))
+            digits = re.sub(r"[^0-9]", "", row[team_col] or "")
             if digits and len(digits) <= 9:
-                result[str(int(digits))] = {col: (row.get(col) or "").strip() for col in other_cols}
+                result[str(int(digits))] = {col: (cell or "").strip() for col, cell in row.items() if col != team_col}
     except csv.Error as e:
+        # Count line breaks removed from the front of the paste, treating CRLF as one.
+        first = re.search(r"\S", csv_text)
+        end = first.start() if first else len(csv_text)
+        offset = csv_text.count("\n", 0, end) + csv_text.count("\r", 0, end) - csv_text.count("\r\n", 0, end)
         raise forms.ValidationError(
-            f"The per-team data isn't CSV the upload can read (line {row_start}). {TEAM_EXTRAS_HELP}"
+            f"The per-team data isn't CSV the upload can read (line {row_start + offset}). {TEAM_EXTRAS_HELP}"
         ) from e
     if not result:
         raise forms.ValidationError(f"No row of the per-team data has a team number. {TEAM_EXTRAS_HELP}")
@@ -57,6 +64,7 @@ class PacketUploadForm(forms.Form):
     )
     team_extras = forms.CharField(
         required=False,
+        strip=False,
         label="Team data CSV",
         widget=forms.Textarea(
             attrs={"rows": 6, "placeholder": "team,api_key,max_spend_usd\nTeam01,sk-abc123,100\nTeam02,sk-def456,100"}
@@ -79,7 +87,7 @@ class PacketUploadForm(forms.Form):
 
     def clean_team_extras(self) -> dict[str, dict[str, str]]:
         text: str = self.cleaned_data["team_extras"]
-        return parse_team_extras(text) if text else {}
+        return parse_team_extras(text) if text and not text.isspace() else {}
 
     def clean_packet_file(self) -> Packet:
         try:
