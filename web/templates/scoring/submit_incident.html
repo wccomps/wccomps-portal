@@ -12,7 +12,7 @@
         {% if team or is_admin %}
             <c-form enctype="multipart/form-data" id="incidentForm">
                 {% csrf_token %}
-                {{ form.autofilled_ip }}
+                {{ form.autofilled_ip.as_hidden }}
                 <c-form_errors :form="form" />
                 <c-fieldset heading="Target Information">
                     {% if is_admin %}
