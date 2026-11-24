@@ -190,7 +190,10 @@ def test_an_expired_session_signs_in_again_and_asks_once_more() -> None:
 
     assert injects is not None
     assert [i.inject_id for i in injects] == [3]
-    assert requests == ["https://quotient.test/api/login", "https://quotient.test/api/injects"] * 2
+    assert [str(request.url) for request in requests] == [
+        "https://quotient.test/api/login",
+        "https://quotient.test/api/injects",
+    ] * 2
 
 
 def test_one_sign_in_serves_every_later_read() -> None:
@@ -201,7 +204,7 @@ def test_one_sign_in_serves_every_later_read() -> None:
         assert client.get_infrastructure(force_refresh=True) == QuotientInfrastructure(boxes=[])
         assert client.get_injects(force_refresh=True) == []
 
-    assert requests == [
+    assert [str(request.url) for request in requests] == [
         "https://quotient.test/api/login",
         "https://quotient.test/api/metadata",
         "https://quotient.test/api/injects",
