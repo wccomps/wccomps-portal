@@ -277,7 +277,7 @@ def authentik(teams) -> Iterator[FakeAuthentik]:
         patch("core.authentik_manager.AuthentikManager", side_effect=lambda: fake.manager()),
         patch("core.services.user_groups.refresh_user_groups"),
         patch("scoring.quotient_sync.sync_quotient_metadata"),
-        patch("scoring.quotient_sync.sync_service_scores"),
+        patch("scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "service_max_note": None}),
     ):
         yield fake
 
