@@ -196,7 +196,7 @@ def test_an_expired_session_signs_in_again_and_asks_once_more() -> None:
     ] * 2
 
 
-def test_one_sign_in_serves_every_later_read() -> None:
+def test_metadata_and_inject_reads_share_one_sign_in() -> None:
     cache.clear()
     answers = [Answer(200, b"{}"), Answer(200, b'{"boxes": []}'), Answer(200, b"[]")]
     with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers) as requests:
