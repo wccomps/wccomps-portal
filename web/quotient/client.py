@@ -38,8 +38,12 @@ def _is_unavailable(exc: BaseException | None) -> bool:
 
 
 def _log_failure(message: str, exc: Exception) -> None:
-    """Log a request failure: one line if Quotient is just down, full traceback otherwise."""
-    if not _is_unavailable(exc):
+    """Log direct HTTP status errors without response headers."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        log = logger.warning if status >= 500 else logger.error
+        log("%s: HTTP %d", message, status)
+    elif not _is_unavailable(exc):
         logger.exception(f"{message}: {exc}")
     elif isinstance(exc, QuotientAPIError):
         # Login already logged the unavailability; don't repeat it for every request
@@ -126,6 +130,11 @@ def _team_number(team_name: str) -> int:
     return int("".join(c for c in team_name if c.isdigit()) or "0")
 
 
+def is_service_check_name(name: str) -> bool:
+    """Whether a check name can be used unchanged as one URL segment."""
+    return _SERVICE_NAME_RE.fullmatch(name) is not None
+
+
 def quotient_service_name(service_name: str, hostname: str = "") -> str:
     """Quotient's check name ("box-service") from a ticket's service_name ("box:service", "box-service", or
     "service" with hostname="box"), or "" if it isn't a valid Quotient check identifier."""
@@ -136,9 +145,7 @@ def quotient_service_name(service_name: str, hostname: str = "") -> str:
         host = box.strip() or host
         name = svc.strip()
     candidate = f"{host}-{name}" if host and name and not name.lower().startswith(f"{host.lower()}-") else name
-    if not _SERVICE_NAME_RE.match(candidate) or ".." in candidate:
-        return ""
-    return candidate
+    return candidate if is_service_check_name(candidate) else ""
 
 
 @dataclass
@@ -345,26 +352,23 @@ class QuotientClient:
         """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
         return self._fetch("/api/graphs/uptimes", _uptimes, "uptimes")
 
-    def get_service_checks(
-        self,
-        team_number: int,
-        service_name: str,
-        *,
-        force_refresh: bool = False,
-    ) -> list[ServiceCheck] | None:
-        """Fetch per-round check results for a team's service from Quotient (newest first), or None if unavailable."""
-        target = quotient_service_name(service_name)
-        if not target or team_number <= 0:
-            return []
+    def resolve_history_team_id(self, team_number: int, team_group: str) -> int | None:
+        """Resolve only when the stored team group and the unique scorer roster ordinal agree."""
+        if _history_team_ordinal(team_group) != team_number:
+            return None
+        roster = self._fetch("/api/teams", _history_team_roster, "the team roster")
+        return roster.get(team_number) if roster is not None else None
 
-        return self._cached(
-            f"quotient_service_checks_{team_number}_{target}",
-            30,
-            force_refresh,
-            f"/api/services/{team_number}/{quote(target, safe='')}",
-            _service_checks,
-            "service checks",
-        )
+    def get_service_checks(self, team_id: int, service_name: str) -> list[ServiceCheck] | None:
+        """Fetch fresh per-round checks by Quotient DB ID, or None if unavailable."""
+        target = quotient_service_name(service_name)
+        if not target or team_id <= 0:
+            return []
+        return self._fetch(f"/api/services/{team_id}/{quote(target, safe='')}", _service_checks, "service checks")
+
+    def get_team_service_names(self, team_id: int) -> set[str] | None:
+        """Stored check names from the team's history summary, not the current scoring configuration."""
+        return self._fetch(f"/api/services/{team_id}", _team_service_names, "team service names")
 
     def get_engine_status(self) -> EngineStatus | None:
         """Fetch the engine status (admin only) from Quotient, or None if unavailable."""
@@ -448,6 +452,46 @@ def _uptimes(data: object) -> list[TeamUptime]:
         result.append(TeamUptime(team_name=team_name, team_number=_team_number(team_name), uptimes=uptimes))
     logger.info(f"Fetched uptimes for {len(result)} teams")
     return result
+
+
+def _team_service_names(data: object) -> set[str]:
+    try:
+        return {
+            _text(_field(entry, "ServiceName", "a service summary"), "a service name")
+            for entry in ([] if data is None else _objects(data, "the team service summary"))
+        }
+    except ValueError:
+        raise ValueError("Invalid team service summary.") from None
+
+
+def _history_team_ordinal(name: str) -> int | None:
+    # Go strings.TrimSpace uses Unicode White_Space, excluding Python's extra C0 separators.
+    whitespace = (
+        "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
+        "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+    )
+    match = re.search(r"(?<![0-9])[0-9]+\Z", name.rstrip(whitespace))
+    digits = match[0].lstrip("0") if match else ""
+    if not digits or len(digits) > 10:
+        return None
+    number = int(digits)
+    return number if number < 2**32 else None
+
+
+def _history_team_roster(data: object) -> dict[int, int | None]:
+    roster: dict[int, int | None] = {}
+    ids: set[int] = set()
+    if not isinstance(data, list):
+        raise ValueError("Invalid team roster.")
+    for row in data:
+        team_id, name = (row.get("ID"), row.get("Name")) if isinstance(row, dict) else (None, None)
+        if type(team_id) is not int or not 0 < team_id < 2**32 or team_id in ids or not isinstance(name, str):
+            raise ValueError("The team roster has an invalid or duplicate identity.")
+        ids.add(team_id)
+        number = _history_team_ordinal(name)
+        if number is not None:
+            roster[number] = None if number in roster else team_id
+    return roster
 
 
 def _service_checks(data: object) -> list[ServiceCheck]:

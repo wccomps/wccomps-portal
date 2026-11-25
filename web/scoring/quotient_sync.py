@@ -167,11 +167,7 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
         if "external_mask" not in payload and (parsed := _parse_dns_box_ip_template(box.get("ip", ""))):
             payload["external_mask"], payload["team_dns_server_last_octet"] = parsed
         for sample_team in sample_teams[:3] or [1]:
-            checks = client.get_service_checks(
-                sample_team,
-                f"{box['name']}:{dns_service}",
-                force_refresh=True,
-            )
+            checks = client.get_service_checks(sample_team, f"{box['name']}:{dns_service}")
             domain, internal_mask = _extract_dns_check_network(checks)
             if domain and "team_domain_name" not in payload:
                 payload["team_domain_name"] = domain

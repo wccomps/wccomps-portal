@@ -1,7 +1,7 @@
 {% load cotton %}
 <div class="d-flex justify-between items-center flex-wrap gap-10 mb-10">
     {% if checks is None %}
-        <p class="text-muted m-0">Quotient isn't reachable.</p>
+        <p class="text-muted m-0">Quotient history is unavailable.</p>
     {% elif not quotient_service %}
         <p class="text-muted m-0">No service specified for this ticket.</p>
     {% elif not checks %}
@@ -33,7 +33,7 @@
     {% endif %}
     <c-button type="button"
               variant="default"
-              hx-get="{% url 'ticket_service_checks' ticket.ticket_number %}?refresh=1"
+              hx-get="{% url 'ticket_service_checks' ticket.ticket_number %}"
               hx-target="closest #service-checks-panel"
               hx-swap="innerHTML">
         Refresh

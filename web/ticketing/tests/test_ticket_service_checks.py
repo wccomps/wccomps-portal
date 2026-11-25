@@ -5,8 +5,8 @@ import logging
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
-from django.core.cache import cache
 from django.test import Client, override_settings
 from django.urls import reverse
 from quotient.client import QuotientClient, ServiceCheck, quotient_service_name
@@ -52,7 +52,8 @@ def service_ticket(blue_team):
         ("", "TREX", ""),
         (".", "", ""),
         ("..", "", ""),
-        ("web..http", "", ""),
+        ("A..B", "", "A..B"),
+        ("bad\nname", "", ""),
         ("../2/TREX-DNS", "", ""),
         ("2/TREX-DNS", "TREX", ""),
         ("TREX:../2/TREX-DNS", "", ""),
@@ -63,8 +64,7 @@ def test_quotient_service_name_formats_box_and_service(service_name, hostname, e
     assert quotient_service_name(service_name, hostname) == expected
 
 
-def test_get_service_checks_parses_sorts_and_caches_results():
-    cache.clear()
+def test_get_service_checks_parses_and_sorts_results():
     payload = [
         {
             "Round": {"ID": 4, "StartTime": "2026-10-18T19:28:00Z"},
@@ -83,7 +83,6 @@ def test_get_service_checks_parses_sorts_and_caches_results():
     with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers) as requests:
         qclient = QuotientClient(base_url="https://quotient.test")
         checks = qclient.get_service_checks(1, "TREX:DNS")
-        cached = qclient.get_service_checks(1, "TREX:DNS")
 
     assert checks == [
         ServiceCheck(
@@ -101,7 +100,6 @@ def test_get_service_checks_parses_sorts_and_caches_results():
             error="",
         ),
     ]
-    assert cached == checks
     assert [str(request.url) for request in requests] == [
         "https://quotient.test/api/login",
         "https://quotient.test/api/services/1/TREX-DNS",
@@ -109,7 +107,6 @@ def test_get_service_checks_parses_sorts_and_caches_results():
 
 
 def test_get_service_checks_handles_go_null_slice_and_zero_timestamp():
-    cache.clear()
     payload = [
         {
             "Round": {"ID": 1, "StartTime": "0001-01-01T00:00:00Z"},
@@ -125,14 +122,13 @@ def test_get_service_checks_handles_go_null_slice_and_zero_timestamp():
     ]
     with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers):
         qclient = QuotientClient(base_url="https://quotient.test")
-        assert qclient.get_service_checks(1, "TREX:DNS", force_refresh=True) == []
-        assert qclient.get_service_checks(1, "TREX:DNS", force_refresh=True) == [
+        assert qclient.get_service_checks(1, "TREX:DNS") == []
+        assert qclient.get_service_checks(1, "TREX:DNS") == [
             ServiceCheck(round_number=1, timestamp=None, passed=False, debug="", error="uninitialized")
         ]
 
 
 def test_get_service_checks_never_logs_check_output_on_parse_error(caplog):
-    cache.clear()
     secret_debug = "secret-internal-host.great.cretaceous:8443"
     malformed = [{"Round": {"ID": "not-an-int"}, "Result": False, "Debug": secret_debug, "Error": secret_debug}]
     answers = [Answer(200, b"{}"), Answer(200, json.dumps(malformed).encode())]
@@ -141,10 +137,24 @@ def test_get_service_checks_never_logs_check_output_on_parse_error(caplog):
         serving(answers),
         caplog.at_level(logging.DEBUG),
     ):
-        result = QuotientClient(base_url="https://quotient.test").get_service_checks(1, "TREX:DNS", force_refresh=True)
+        result = QuotientClient(base_url="https://quotient.test").get_service_checks(1, "TREX:DNS")
 
     assert result is None
     assert secret_debug not in caplog.text
+
+
+def test_team_roster_redirect_keeps_location_out_of_logs(caplog):
+    client = QuotientClient(base_url="https://quotient.test")
+    secret = "private-location-value"
+    response = httpx.Response(
+        302,
+        headers={"Location": f"https://example.test/{secret}"},
+        request=httpx.Request("GET", "https://quotient.test/api/teams"),
+    )
+    with patch.object(client, "_request", return_value=response):
+        assert client.resolve_history_team_id(1, "Portal_BlueTeam01") is None
+    assert "HTTP 302" in caplog.text
+    assert secret not in caplog.text
 
 
 def test_ticket_detail_shows_service_check_section_only_to_staff(
@@ -200,8 +210,9 @@ def test_non_staff_roles_cannot_fetch_service_checks_endpoint(
     mock_client.get_service_checks.assert_not_called()
 
 
-def test_service_checks_endpoint_shows_unreachable_message_when_quotient_down(ticketing_support_user, service_ticket):
+def test_service_checks_endpoint_shows_unavailable_history_when_lookup_fails(ticketing_support_user, service_ticket):
     mock_client = MagicMock()
+    mock_client.resolve_history_team_id.return_value = 42
     mock_client.get_service_checks.return_value = None
     with patch("quotient.client.get_quotient_client", return_value=mock_client):
         response = _client(ticketing_support_user).get(
@@ -210,7 +221,7 @@ def test_service_checks_endpoint_shows_unreachable_message_when_quotient_down(ti
 
     assert response.status_code == 200
     html = response.content.decode()
-    assert "Quotient isn't reachable." in html
+    assert "Quotient history is unavailable." in html
     assert "Refresh" in html
 
 
@@ -234,19 +245,15 @@ def test_service_checks_endpoint_renders_streak_last_passed_and_recent_10(ticket
         )
     ]
     mock_client = MagicMock()
+    mock_client.resolve_history_team_id.return_value = 42
     mock_client.get_service_checks.return_value = checks
     with patch("quotient.client.get_quotient_client", return_value=mock_client):
         response = _client(ticketing_support_user).get(
             reverse("ticket_service_checks", args=[service_ticket.ticket_number]),
-            {"refresh": "1"},
         )
 
     assert response.status_code == 200
-    mock_client.get_service_checks.assert_called_once_with(
-        service_ticket.team.team_number,
-        "TREX-DNS",
-        force_refresh=True,
-    )
+    mock_client.get_service_checks.assert_called_once_with(42, "TREX-DNS")
     html = response.content.decode()
     assert "Failing" in html
     assert "for 12 rounds" in html
@@ -258,7 +265,6 @@ def test_service_checks_endpoint_renders_streak_last_passed_and_recent_10(ticket
 
 
 def test_get_service_checks_sanitizes_control_chars_and_caps_untrusted_output():
-    cache.clear()
     hostile = "ok\x00\x1b[31m\r\u202ehidden\tline\n" + ("A" * 20_000)
     payload = [
         {
@@ -271,7 +277,7 @@ def test_get_service_checks_sanitizes_control_chars_and_caps_untrusted_output():
     ]
     answers = [Answer(200, b"{}"), Answer(200, json.dumps(payload).encode())]
     with override_settings(QUOTIENT_USERNAME="admin", QUOTIENT_PASSWORD="secret"), serving(answers):
-        checks = QuotientClient(base_url="https://quotient.test").get_service_checks(1, "TREX:DNS", force_refresh=True)
+        checks = QuotientClient(base_url="https://quotient.test").get_service_checks(1, "TREX:DNS")
 
     assert checks is not None
     assert len(checks) == 12
@@ -303,6 +309,7 @@ def test_service_checks_endpoint_escapes_and_collapses_large_html_debug_output(t
         )
     ]
     mock_client = MagicMock()
+    mock_client.resolve_history_team_id.return_value = 42
     mock_client.get_service_checks.return_value = checks
     with patch("quotient.client.get_quotient_client", return_value=mock_client):
         response = _client(ticketing_support_user).get(

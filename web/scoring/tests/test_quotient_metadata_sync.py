@@ -270,7 +270,7 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
         client.return_value.get_service_checks.return_value = checks
         sync_quotient_metadata()
 
-    client.return_value.get_service_checks.assert_called_once_with(1, "BUGS:DNS", force_refresh=True)
+    client.return_value.get_service_checks.assert_called_once_with(1, "BUGS:DNS")
     mock_post.assert_called_once()
     assert mock_post.call_args.args[0] == "http://10.0.0.10:8080/config"
     assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-token"}

@@ -76,7 +76,7 @@ def test_endpoint_5xx_after_login_logs_single_warning(monkeypatch, caplog, statu
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
-    assert f"Server error '{status}" in warnings[0].getMessage()
+    assert f"HTTP {status}" in warnings[0].getMessage()
     assert not _tracebacks(caplog)
 
 
