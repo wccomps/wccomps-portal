@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
 
-from .calculator import SCALING_FIELDS, Standing, calculate_team_score_detailed, get_leaderboard
+from .calculator import Standing, get_leaderboard
 from .models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
 
 
@@ -16,7 +16,6 @@ from .models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
 class ScorecardPeerContext:
     """Pre-fetched inject and service rows across all teams in a standings cohort."""
 
-    ranked_team_ids: set[int]
     peer_inject_points: dict[str, list[Decimal]]
     peer_service_points: dict[str, list[Decimal]]
     injects_by_team: dict[int, list[InjectScore]]
@@ -48,7 +47,6 @@ def build_peer_context(standings: list[Standing], extra_team_ids: set[int] | Non
             peer_service_points[svc_row.service_name].append(svc_row.points)
 
     return ScorecardPeerContext(
-        ranked_team_ids=ranked_team_ids,
         peer_inject_points=peer_inject_points,
         peer_service_points=peer_service_points,
         injects_by_team=injects_by_team,
@@ -249,7 +247,7 @@ def build_scorecard_context(
     standings: list[Standing],
     peer_context: ScorecardPeerContext | None = None,
 ) -> dict[str, object]:
-    """Context shared by the scorecard page, its PDF, and the emailed and bulk-exported PDFs."""
+    """A team's scorecard template context."""
     team = score.team
 
     red_scores = (
@@ -259,11 +257,6 @@ def build_scorecard_context(
     )
 
     stats = _compute_scorecard_stats(score, standings, peer_context=peer_context)
-    if score.scaling:
-        scaling = dict(score.scaling)
-    else:
-        detailed = calculate_team_score_detailed(team)
-        scaling = {key: detailed[key] for key in SCALING_FIELDS}  # type: ignore[literal-required]
 
     orange_scores = (
         OrangeTeamScore.objects.filter(team=team, is_approved=True)
@@ -282,5 +275,5 @@ def build_scorecard_context(
         "orange_total": sum(o.points_awarded for o in orange_scores),
         "service_total": sum(s["points"] for s in stats["service_stats"]),
         "service_sla_total": sum(s["sla_violations"] for s in stats["service_stats"]),
-        "scaling": scaling,
+        "scaling": score.scaling,
     }

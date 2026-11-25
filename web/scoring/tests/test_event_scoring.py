@@ -36,6 +36,7 @@ def _standing(team, rank, total, service, inject, orange, red, sla, is_excluded=
         incident_recovery_points=Decimal("0"),
         total_score=Decimal(total),
         is_excluded=is_excluded,
+        scaling={},
         rank=rank,
     )
 

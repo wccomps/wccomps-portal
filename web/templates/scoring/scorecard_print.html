@@ -325,15 +325,13 @@
                 </tr>
             </tbody>
         </table>
-        {% if scaling %}
-            <p class="footnote">
-                Scoring weights: Service {{ scaling.service_weight|floatformat:0 }}%, Inject {{ scaling.inject_weight|floatformat:0 }}%, Orange Checks {{ scaling.orange_weight|floatformat:0 }}%.
-                <br>
-                Service: {{ scaling.service_raw|floatformat:0 }} raw × {{ scaling.service_modifier|floatformat:2 }}
-                | Inject: {{ scaling.inject_raw|floatformat:0 }} raw × {{ scaling.inject_modifier|floatformat:2 }}
-                | Orange Checks: {{ scaling.orange_raw|floatformat:0 }} raw × {{ scaling.orange_modifier|floatformat:2 }}
-            </p>
-        {% endif %}
+        <p class="footnote">
+            Scoring weights: Service {{ scaling.service_weight|floatformat:0 }}%, Inject {{ scaling.inject_weight|floatformat:0 }}%, Orange Checks {{ scaling.orange_weight|floatformat:0 }}%.
+            <br>
+            Service: {{ scaling.service_raw|floatformat:0 }} raw × {{ scaling.service_modifier|floatformat:2 }}
+            | Inject: {{ scaling.inject_raw|floatformat:0 }} raw × {{ scaling.inject_modifier|floatformat:2 }}
+            | Orange Checks: {{ scaling.orange_raw|floatformat:0 }} raw × {{ scaling.orange_modifier|floatformat:2 }}
+        </p>
         {% include "scoring/_service_correction_lines.html" %}
         {% if stats.service_stats %}
             <h2>Service Uptime Detail</h2>
