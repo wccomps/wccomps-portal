@@ -44,8 +44,13 @@ def test_inject_max_none_if_any_title_unparsed() -> None:
     assert inject_max_from_titles(_injects("A (100 pts)", "C (no value)")) is None
 
 
-def test_inject_max_none_without_any_values() -> None:
-    assert inject_max_from_titles(_injects("A", "B")) is None
+@pytest.mark.parametrize(
+    ("titles", "expected"),
+    [((), None), (("A", "B"), None), (("A (0 pts)",), None), (("A (1 pts)",), Decimal("1"))],
+    ids=["no-injects", "no-values", "adds-up-to-nothing", "a-single-point"],
+)
+def test_inject_max_of_one_set_of_titles(titles: tuple[str, ...], expected: Decimal | None) -> None:
+    assert inject_max_from_titles(_injects(*titles)) == expected
 
 
 def _detail(team: Team, name: str, points: str, uptime: str) -> None:
@@ -64,6 +69,17 @@ def test_service_max_uses_highest_uptime_per_service() -> None:
     assert result == Decimal("2232")  # 1116 + 1116
 
 
+def test_service_max_keeps_the_highest_reliable_uptime_whichever_team_reports_it() -> None:
+    t1, t2, t3 = (Team.objects.create(team_number=n, team_name=f"T{n}") for n in (1, 2, 3))
+    # web: the best sample comes from the middle team; dns: from the first team.
+    _detail(t1, "web", "400", "0.5")  # 800
+    _detail(t2, "web", "900", "0.9")  # 1000
+    _detail(t3, "web", "300", "0.6")  # 500
+    _detail(t1, "dns", "160", "0.8")  # 200
+    _detail(t2, "dns", "50", "0.5")  # 100
+    assert service_max_from_details() == Decimal("1200")
+
+
 def test_service_max_ignores_zero_point_best_sample() -> None:
     # The highest-uptime team scored 0 (port up, content/auth check failed); it must not
     # "cover" the service with a 0 contribution. The real scorer (lower uptime) sets the max.
@@ -75,9 +91,25 @@ def test_service_max_ignores_zero_point_best_sample() -> None:
     assert service_max_from_details() == Decimal("2116")  # 1000 + 1116, not 1116
 
 
-def test_service_max_none_without_uptime() -> None:
+@pytest.mark.parametrize(
+    ("points", "uptime", "expected"),
+    [
+        ("1000", "0", None),
+        ("100", "0.1", Decimal("1000")),
+        ("1", "1", Decimal("1")),
+        ("0.01", "1", None),
+    ],
+    ids=["no-uptime", "at-the-reliable-uptime-floor", "a-single-point", "rounds-to-nothing"],
+)
+def test_service_max_of_one_sample(points: str, uptime: str, expected: Decimal | None) -> None:
+    _detail(Team.objects.create(team_number=1, team_name="T1"), "web", points, uptime)
+    assert service_max_from_details() == expected
+
+
+def test_service_max_none_when_a_scored_service_has_only_unreliable_samples() -> None:
     t1 = Team.objects.create(team_number=1, team_name="T1")
-    _detail(t1, "web", "1000", "0")  # uptime 0 -> excluded
+    _detail(t1, "web", "100", "0.5")
+    _detail(t1, "ssh", "10", "0.0999")
     assert service_max_from_details() is None
 
 
@@ -96,6 +128,20 @@ def test_set_template_max_skips_none() -> None:
     set_template_max("inject_max", None)
     t.refresh_from_db()
     assert t.inject_max == Decimal("99")  # unchanged
+
+
+def test_set_template_max_skips_a_value_the_column_cannot_hold() -> None:
+    t = ScoringTemplate.objects.create(inject_max=Decimal("99"))
+    set_template_max("inject_max", Decimal("1000000000"))
+    t.refresh_from_db()
+    assert t.inject_max == Decimal("99")
+
+
+def test_set_template_max_is_not_recorded_as_a_human_edit(admin_user) -> None:
+    t = ScoringTemplate.objects.create(updated_by=admin_user)
+    set_template_max("service_max", Decimal("500"))
+    t.refresh_from_db()
+    assert (t.service_max, t.updated_by) == (Decimal("500"), None)
 
 
 def test_set_template_max_skips_without_template() -> None:

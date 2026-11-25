@@ -101,3 +101,16 @@ def test_snapshot_keeps_decimals_exact(scored_teams):
     assert snapshot["orange_scores"][0]["points_awarded"] == {"$d": "8.25"}
     assert snapshot["orange_scores"][0]["max_points"] == 10
     assert context_from_snapshot(snapshot)["orange_total"] == Decimal("8.25")
+
+
+def test_a_finding_without_an_attack_type_freezes_as_unknown(scored_teams):
+    finding = RedTeamScore.objects.create(
+        points_per_team=Decimal("10.00"), submitted_by=User.objects.get(username="red"), is_approved=True
+    )
+    finding.affected_teams.add(scored_teams[1])
+    live = _scorecard_context(2)
+
+    frozen = _frozen(live)
+
+    assert [row["attack_type"] for row in frozen["red_scores"]] == [None]
+    assert _render("scoring/_scorecard_body.html", frozen) == _render("scoring/_scorecard_body.html", live)

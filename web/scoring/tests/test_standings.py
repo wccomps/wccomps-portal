@@ -5,18 +5,10 @@ from decimal import Decimal
 import pytest
 from django.test import Client
 from django.urls import reverse
-from orange_team.models import OrangeCheck
 
 from scoring.calculator import compute_standings, get_leaderboard
 from scoring.models import OrangeTeamScore, ScoringExclusion, ScoringTemplate, ServiceScore
 from team.models import Team
-
-
-@pytest.fixture
-def unit_modifiers(db):
-    # Maxes proportional to weights -> every derived modifier is exactly 1 (raw == scaled).
-    OrangeCheck.objects.create(title="Orange", max_points=20)
-    return ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"))
 
 
 def _team(number, service, is_active=True):
