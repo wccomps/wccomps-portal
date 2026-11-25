@@ -273,6 +273,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
     affected_boxes = forms.MultipleChoiceField(
         required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )
+    autofilled_ip = forms.CharField(required=False, max_length=39, widget=forms.HiddenInput)
 
     class Meta:
         model = IncidentReport
@@ -293,7 +294,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
             "attack_mitigated": "Attack Mitigated",
         }
         help_texts = {
-            "destination_ip": "Filled in from the first box you pick; type or change it if needed",
+            "destination_ip": "Enter one IP address. A box with a known address can fill it in for you.",
             "affected_service": "",
             "source_ip": "",
             "attack_detected_at": "",

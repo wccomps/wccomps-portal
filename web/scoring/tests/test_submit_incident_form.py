@@ -37,12 +37,23 @@ def _report(**fields: str) -> dict[str, str]:
 
 @pytest.mark.parametrize("destination_ip", ["10.0.1.20", ""])
 def test_a_report_without_boxes_goes_in(client: Client, blue_team: Team, destination_ip: str) -> None:
-    response = client.post(reverse("scoring:submit_incident_report"), _report(destination_ip=destination_ip))
+    response = client.post(
+        reverse("scoring:submit_incident_report"),
+        _report(destination_ip=destination_ip, autofilled_ip="192.0.2.20"),
+    )
 
     incident = IncidentReport.objects.get(team=blue_team)
     assert response.status_code == 302
     assert incident.destination_ip == (destination_ip or None)
     assert incident.affected_boxes == []
+
+
+def test_the_autofill_marker_has_a_length_limit(client: Client) -> None:
+    response = client.post(reverse("scoring:submit_incident_report"), _report(autofilled_ip="x" * 40))
+
+    assert response.status_code == 200
+    assert response.context["form"].has_error("autofilled_ip", "max_length")
+    assert not IncidentReport.objects.exists()
 
 
 def test_the_affected_ip_can_be_typed_and_is_not_marked_required(client: Client, blue_team: Team) -> None:
