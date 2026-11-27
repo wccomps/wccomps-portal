@@ -91,6 +91,18 @@ def close_out_warnings(event: Event | None) -> list[CloseOutWarning]:
         for work in UNFINISHED_WORK
         if (count := work.count())
     ]
+    if event is not None:
+        inactive = event.team_assignments.filter(team__is_active=False)
+        if event.results.exists():
+            inactive = inactive.exclude(school_id__in=event.results.values("school_id"))
+        slots = list(inactive.order_by("team__team_number").values_list("team__team_number", flat=True))
+        if slots:
+            numbers = ", ".join(map(str, slots))
+            warnings.append(CloseOutWarning(
+                f"Inactive slots {numbers} have no card in the set being frozen. Their original assignments, "
+                "packet history and raw scores will be archived. The email audit cannot identify past card recipients.",
+                "scoring:export_index",
+            ))
     return warnings + [CloseOutWarning(text, "scoring:email_scorecards") for text in _scorecard_warnings(event)]
 
 

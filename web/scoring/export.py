@@ -4,15 +4,17 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from io import BytesIO, StringIO
-from typing import Protocol, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import BinaryField, CharField, F, Func, Value
 from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.text import slugify
 from django_stubs_ext import WithAnnotations
+from packets.models import Packet, PacketDistribution
 
 from core.csv_export import csv_writer
 from ticketing.chat_comments import comment_origin
@@ -24,7 +26,12 @@ from .models import (
     InjectScore,
     OrangeTeamScore,
     RedTeamScore,
+    ServiceDetail,
+    ServiceScore,
 )
+
+if TYPE_CHECKING:
+    from registration.models import Event
 
 
 def _csv_cell(value: object) -> object:
@@ -120,9 +127,9 @@ def _fetch_inject_grades() -> list[InjectScore]:
     )
 
 
-def _fetch_final_scores() -> list[tuple[Standing, str]]:
+def _fetch_final_scores(standings: list[Standing] | None = None) -> list[tuple[Standing, str]]:
     calculated_at = timezone.now().isoformat()
-    return [(score, calculated_at) for score in compute_standings()]
+    return [(score, calculated_at) for score in (compute_standings() if standings is None else standings)]
 
 
 def _fetch_tickets() -> list[Ticket]:
@@ -364,14 +371,52 @@ def export_dataset(name: str, export_format: str) -> HttpResponse:
     return response
 
 
-def export_all_zip_bytes() -> bytes:
-    """Every dataset, as CSV and JSON, in one zip."""
+def _event_evidence(event: Event) -> dict[str, object]:
+    """The event's roster, packet history and unadjusted scoring rows, separate from the official cards."""
+    roster = event.team_assignments.order_by("team__team_number")
+    team_ids = roster.values("team_id")
+    frozen_schools = set(event.results.values_list("school_id", flat=True))
+    return {
+        "event_id": event.pk,
+        "assignments": [
+            {**row, "has_frozen_scorecard": row["school_id"] in frozen_schools}
+            for row in roster.values(
+                "id", "school_id", "school__name", "team_id", "team__team_number", "team__is_active",
+                "registration_id", "assigned_at",
+            )
+        ],
+        "packets": list(Packet.objects.filter(event=event).order_by("pk").values(
+            "id", "title", "status", "actual_distribution_time",
+        )),
+        "packet_distributions": list(PacketDistribution.objects.filter(packet__event=event).order_by("pk").values(
+            "id", "packet_id", "team_id", "email_status", "email_sent_at", "web_access_enabled",
+            "download_count", "downloaded_at", "last_downloaded_at",
+        )),
+        "service_scores": list(ServiceScore.objects.filter(team_id__in=team_ids).values(
+            "team_id", "service_points", "sla_violations", "synced_at",
+        )),
+        "service_details": list(ServiceDetail.objects.filter(team_id__in=team_ids).values(
+            "team_id", "service_name", "points", "sla_violations", "uptime",
+        )),
+    }
+
+
+def export_all_zip_bytes(*, event: Event | None = None, standings: list[Standing] | None = None) -> bytes:
+    """Every dataset as CSV and JSON, plus event-bound evidence when called from Close Out."""
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for dataset in DATASETS.values():
-            csv_str, json_str = dataset.render_pair()
+            if dataset.filename == "final_scores" and standings is not None:
+                final_scores = cast(Dataset[tuple[Standing, str]], dataset)
+                rows = _fetch_final_scores(standings)
+                csv_str, json_str = final_scores.render_csv(rows), final_scores.render_json(rows)
+            else:
+                csv_str, json_str = dataset.render_pair()
             zip_file.writestr(f"{dataset.filename}.csv", csv_str)
             zip_file.writestr(f"{dataset.filename}.json", json_str)
+        if event is not None:
+            evidence = json.dumps(_event_evidence(event), cls=DjangoJSONEncoder, indent=2)
+            zip_file.writestr("event_evidence.json", evidence)
     return zip_buffer.getvalue()
 
 

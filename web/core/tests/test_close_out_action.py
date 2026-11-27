@@ -295,20 +295,14 @@ def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
     }
 
 
-def test_the_check_says_what_would_make_close_out_refuse(client):
+def test_inactive_assignment_is_an_archive_notice_not_a_refusal(client):
     _open_event()
     _team_with_school()
     Team.objects.filter(team_number=1).update(is_active=False)
 
     response = _check(client).json()
-    assert response["problem"] == (
-        "Team 1 is inactive but holds a school on the list: activate it with Activate Team on its Teams page first, "
-        "or remove its school."
-    )
-    assert response["fixes"] == [
-        {"text": "Team 1: Activate Team", "url": reverse("admin_team_detail", args=[1])},
-        {"text": "Team 1: remove its school", "url": reverse("school_info_remove", args=[1])},
-    ]
+    assert response["problem"] == "" and response["fixes"] == []
+    assert any("Inactive slots 1 have no card" in warning["text"] for warning in response["warnings"])
 
 
 def test_a_failing_check_says_so_and_leaves_the_page_working(client):

@@ -330,7 +330,7 @@ document.addEventListener('alpine:init', () => {
 
         closeOutEvent() {
             const typed = typedConfirm('CLOSE OUT THE EVENT?\n\n' +
-                'This freezes every listed school\'s scorecard as its result, then deletes the live scores, tickets ' +
+                'This freezes the event’s school scorecards and archive, then deletes the live scores, tickets ' +
                 'and blue team Discord links, closes the event and queues the Discord cleanup.\n' +
                 'It cannot be undone: finish grading and email the scorecards first.');
             if (typed) {

@@ -326,6 +326,14 @@ Without Quotient, inject grading says Quotient is unavailable, box lists stay em
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
 15 minutes.
 
+On **Competition → Before you close out**, an inactive assignment on an existing event no longer blocks Close Out.
+Use **Close Out Event** without activating the team. It freezes the same current cards used by the scorecard path,
+without changing their ranks or totals. The Close Out ZIP separately preserves original assignments, packet
+distribution history, and raw service scores and details, including inactive assignments. Inactivity is not an
+attendance decision. The old email audit records only counts and a combined fingerprint: an inactive school not
+in the current card set cannot be identified as a former recipient from that audit. Close Out does not resend or
+reconstruct old PDFs.
+
 Close Out keeps the portal's side of an event in its archive (Download Close Out Archive on the event's page): every
 export, plus each ticket's comments (its Discord thread or Zulip topic as the portal recorded it), its history, and
 each attachment's name, size and SHA-256 (not the file). Quotient's inject submissions and the divisor's log (the

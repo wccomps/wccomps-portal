@@ -117,7 +117,8 @@ def test_the_archive_is_taken_before_the_wipe(event):
     with zipfile.ZipFile(io.BytesIO(EventArchive.objects.get(event=event).data)) as zipped:
         names = set(zipped.namelist())
         final_scores = zipped.read(f"{DATASETS['final_scores'].filename}.csv").decode()
-    assert names == {f"{d.filename}.{ext}" for d in DATASETS.values() for ext in ("csv", "json")}
+    datasets = {f"{d.filename}.{ext}" for d in DATASETS.values() for ext in ("csv", "json")}
+    assert names == datasets | {"event_evidence.json"}
     # Ranked from the live scores: after the wipe no team has a rank
     assert final_scores.splitlines()[1].startswith("1,")
 
@@ -188,16 +189,18 @@ def test_results_are_the_schools_assigned_at_the_event(event):
     ]
 
 
-def test_an_event_finalized_before_is_frozen_again_from_the_live_scores(event):
-    """Finalize used to be its own step; an event finalized then and still open is closed out as it stands now."""
+def test_close_out_does_not_replace_an_unreadable_saved_card_with_live_scores(event):
     Event.objects.filter(pk=event.pk).update(is_finalized=True)
-    EventResult.objects.create(
+    result = EventResult.objects.create(
         event=event, school=School.for_name("School 1"), team_number=1, rank=2, total_score=1, scorecard={}, version=1
     )
 
-    close_out_event(event, "gold")
+    with pytest.raises(CloseOutError, match="A saved scorecard cannot be read"):
+        close_out_event(event, "gold")
 
-    assert list(EventResult.objects.values_list("team_number", "rank")) == [(1, 1), (2, 2)]
+    result.refresh_from_db()
+    assert result.rank == 2 and result.total_score == 1 and result.scorecard == {}
+    assert Event.objects.get(pk=event.pk).is_active and not EventArchive.objects.filter(event=event).exists()
 
 
 @pytest.mark.parametrize(
@@ -206,10 +209,6 @@ def test_an_event_finalized_before_is_frozen_again_from_the_live_scores(event):
         (
             lambda event: CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True}),
             "^The competition is running. When the competition ends, stop it with Stop Competition",
-        ),
-        (
-            lambda event: Team.objects.filter(team_number=2).update(is_active=False),
-            "Team 2 is inactive but holds a school",
         ),
         (
             lambda event: InjectScore.objects.create(
@@ -222,7 +221,7 @@ def test_an_event_finalized_before_is_frozen_again_from_the_live_scores(event):
         ),
         (lambda event: event.team_assignments.all().delete(), "no schools on its list"),
     ],
-    ids=["running", "inactive-team", "scored-team-without-school", "no-schools"],
+    ids=["running", "scored-team-without-school", "no-schools"],
 )
 def test_a_refusal_writes_nothing(event, setup, message):
     setup(event)
