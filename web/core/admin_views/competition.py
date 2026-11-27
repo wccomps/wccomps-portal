@@ -16,6 +16,7 @@ from registration.services import (
     CloseOutError,
     NewEvent,
     TeamFix,
+    TeamFixAction,
     cancel_event,
     cancel_event_problem,
     clear_leftover_data,
@@ -297,15 +298,16 @@ CLOSE_OUT_CHECK_FAILED = (
 
 def _fix_links(fix: TeamFix) -> list[dict[str, str]]:
     """Links to where the team's Close Out problem is fixed."""
-    places = [
-        (fix.activate, "Activate Team", "admin_team_detail"),
-        (fix.enter_school, "enter its school", "school_info_edit"),
-        (fix.remove_school, "remove its school", "school_info_remove"),
-    ]
+    activate = ("Activate Team", "admin_team_detail")
+    enter = ("enter its school", "school_info_edit")
+    places = {
+        TeamFixAction.ENTER_SCHOOL: (enter,),
+        TeamFixAction.ACTIVATE_THEN_ENTER_SCHOOL: (activate, enter),
+        TeamFixAction.ACTIVATE_OR_REMOVE_SCHOOL: (activate, ("remove its school", "school_info_remove")),
+    }
     return [
         {"text": f"Team {fix.team_number}: {text}", "url": reverse(url_name, args=[fix.team_number])}
-        for offered, text, url_name in places
-        if offered
+        for text, url_name in places[fix.action]
     ]
 
 

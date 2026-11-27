@@ -295,6 +295,28 @@ def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
     }
 
 
+@pytest.mark.parametrize(
+    ("has_school", "label", "route"),
+    [
+        (False, "enter its school", "school_info_edit"),
+        (True, "remove its school", "school_info_remove"),
+    ],
+)
+def test_unrecorded_scores_offer_activation_then_only_the_relevant_school_link(client, has_school, label, route):
+    _season()
+    if has_school:
+        team = _team_with_school()
+        Team.objects.filter(pk=team.pk).update(is_active=False)
+    else:
+        team = Team.objects.create(team_number=1, team_name="Team 01", is_active=False)
+        ServiceScore.objects.create(team=team, service_points=Decimal(100))
+
+    assert _check(client).json()["fixes"] == [
+        {"text": "Team 1: Activate Team", "url": reverse("admin_team_detail", args=[1])},
+        {"text": f"Team 1: {label}", "url": reverse(route, args=[1])},
+    ]
+
+
 def test_inactive_assignment_is_an_archive_notice_not_a_refusal(client):
     _open_event()
     _team_with_school()

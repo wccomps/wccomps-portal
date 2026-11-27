@@ -9,6 +9,7 @@ from scoring.models import ServiceScore
 from registration.models import Season
 from registration.services import (
     TeamFix,
+    TeamFixAction,
     cancel_event_problem,
     clear_leftovers_problem,
     close_out_card_check,
@@ -107,7 +108,7 @@ def test_scored_teams_with_no_school_are_named_up_to_three_and_each_told_to_ente
         f"{named} have scores but no school. Enter each team's school on its School Info page first."
     )
     assert close_out_fixes(stage) == [
-        TeamFix(number, activate=False, enter_school=True, remove_school=False) for number in (2, 3, 4)
+        TeamFix(number, TeamFixAction.ENTER_SCHOOL) for number in (2, 3, 4)
     ]
 
 
@@ -149,9 +150,7 @@ def test_mixed_unmapped_slots_only_link_to_the_active_school_editor(current_even
         "reconcile the school mapping against the event roster before retrying. Do not activate a team to bypass "
         "this check. For active slots, enter the school on the School Info page."
     )
-    assert close_out_fixes(stage) == [
-        TeamFix(2, activate=False, enter_school=True, remove_school=False),
-    ]
+    assert close_out_fixes(stage) == [TeamFix(2, TeamFixAction.ENTER_SCHOOL)]
 
 
 def test_with_no_event_open_and_an_empty_school_list_the_scores_have_nowhere_to_go():

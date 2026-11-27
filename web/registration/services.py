@@ -768,14 +768,18 @@ def current_snapshots(event: Event | None, standings: list[Standing] | None = No
     }
 
 
+class TeamFixAction(Enum):
+    ENTER_SCHOOL = "enter_school"
+    ACTIVATE_THEN_ENTER_SCHOOL = "activate_then_enter_school"
+    ACTIVATE_OR_REMOVE_SCHOOL = "activate_or_remove_school"
+
+
 @dataclass(frozen=True)
 class TeamFix:
     """A team whose scores Close Out can't keep yet, and what the pages offer to fix it."""
 
     team_number: int
-    activate: bool  # Inactive: Activate Team on its Teams page first
-    enter_school: bool  # No school: enter it on its School Info page
-    remove_school: bool  # Its school can be removed instead: no packets went out for the event
+    action: TeamFixAction
 
 
 def _unfreezable(event: Event | None) -> tuple[str, list[TeamFix]]:
@@ -796,7 +800,7 @@ def _unfreezable(event: Event | None) -> tuple[str, list[TeamFix]]:
                 f"the list: activate {'it' if one else 'them'} with Activate Team on {'its' if one else 'their'} Teams "
                 f"page first, or remove {'its school' if one else 'their schools'}."
             )
-            return problem, [TeamFix(n, True, False, True) for n in inactive[:SHOWN]]
+            return problem, [TeamFix(n, TeamFixAction.ACTIVATE_OR_REMOVE_SCHOOL) for n in inactive[:SHOWN]]
     unlisted = list(scored_teams().exclude(pk__in=school_by_team).order_by("team_number"))
     if not unlisted:
         return "", []
@@ -821,7 +825,10 @@ def _unfreezable(event: Event | None) -> tuple[str, list[TeamFix]]:
     else:
         problem += f" {enter[0].upper()}{enter[1:]} first."
     return problem, [
-        TeamFix(team.team_number, not team.is_active, True, False)
+        TeamFix(
+            team.team_number,
+            TeamFixAction.ENTER_SCHOOL if team.is_active else TeamFixAction.ACTIVATE_THEN_ENTER_SCHOOL,
+        )
         for team in unlisted[:SHOWN] if event is None or team.is_active
     ]
 
