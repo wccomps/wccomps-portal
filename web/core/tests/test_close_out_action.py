@@ -9,7 +9,13 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 from registration.models import Event, EventResult, Season
-from registration.services import SavedRosterError, close_out_event, remove_team_school, set_team_school
+from registration.services import (
+    SavedRosterError,
+    close_out_event,
+    current_snapshots,
+    remove_team_school,
+    set_team_school,
+)
 from scoring.models import InjectScore, ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
@@ -114,7 +120,11 @@ def test_saved_school_pair_survives_clear_or_reassignment_and_can_be_restored(cl
     team = _team_with_school()
     assignment = event.team_assignments.get()
     school = assignment.school
-    EventResult.objects.create(event=event, school=school, team_number=team.team_number, total_score=100)
+    card = current_snapshots(event)[school.pk]
+    EventResult.objects.create(
+        event=event, school=school, team_number=team.team_number, total_score=card.score.total,
+        rank=card.score.rank, scorecard=card.scorecard,
+    )
 
     response = client.post(reverse("school_info_clear"))
     assert b"Saved scorecards need their school and team number kept together" in response.content
