@@ -302,7 +302,8 @@ def _action_close_out_check(request: HttpRequest, authentik_username: str) -> Js
                         "slot": a.team_number,
                         "text": (
                             f"Team {a.team_number} ({a.school_name}): "
-                            f"{'Unranked' if card.score.rank is None else f'Rank {card.score.rank}'}, {card.score.total} points"
+                            f"{'Unranked' if card.score.rank is None else f'Rank {card.score.rank}'}"
+                            f", {card.score.total} points"
                         ),
                     }
                     for a in cards.roster
