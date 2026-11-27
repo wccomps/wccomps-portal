@@ -61,10 +61,10 @@
         <template x-if="hasCloseOutWarnings">
             <div>
                 <template x-if="closeOutProblem">
-                    <p class="help">Also unfinished:</p>
+                    <p class="help">Other notices:</p>
                 </template>
                 <template x-if="closeOutNotBlocked">
-                    <p class="help">These don't block Close Out: it freezes the results as they stand.</p>
+                    <p class="help">These notices don't block Close Out.</p>
                 </template>
                 <ul class="mt-10 ml-20">
                     <template x-for="(warning, index) in closeOutWarnings" :key="index">
@@ -76,7 +76,7 @@
             </div>
         </template>
         <template x-if="closeOutNothingLeft">
-            <p>No unfinished work found, and the scorecards went out with the current scores.</p>
+            <p>No unfinished work found. The recorded scorecard fingerprint matches the set being archived.</p>
         </template>
         <p>
             Close Out saves the event's school scorecards and archive, then deletes the live data

@@ -281,8 +281,6 @@ CODE_EXCEPTIONS = {
     # Project code kept on purpose
     "web/scoring/models.py:validate_file_size": "scoring migration 0001 imports it as the screenshot validator; it "
     "can go once that migration is squashed",
-    "web/scoring/snapshot.py:context_from_snapshot": "Reads back the scorecard snapshots Close Out stores in "
-    "EventResult; no page shows a stored result yet",
 }
 
 

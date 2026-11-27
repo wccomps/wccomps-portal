@@ -13,13 +13,13 @@ from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeam
 from ticketing.models import Ticket
 
 from .models import Event
-from .services import current_snapshots
+from .services import CloseOutCards, current_snapshots
 from .stage import ScorecardsEmailed
 
 
 @dataclass(frozen=True)
 class CloseOutWarning:
-    """A sentence about unfinished work, and the URL name of the page where it is finished."""
+    """A nonblocking notice and the related page."""
 
     text: str
     url_name: str
@@ -83,27 +83,24 @@ def _sentence(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}."
 
 
-def close_out_warnings(event: Event | None) -> list[CloseOutWarning]:
-    """Unfinished work a close-out of the event (None: the event it records unrecorded scores at) would freeze as it
-    stands, and the state of the scorecard emails. They never block the close-out."""
+def close_out_warnings(event: Event | None, cards: CloseOutCards | None) -> list[CloseOutWarning]:
+    """Unfinished work, preservation notices and mail comparison against the selected cards."""
     warnings = [
         CloseOutWarning(_sentence(count, work.one, work.many), work.url_name)
         for work in UNFINISHED_WORK
         if (count := work.count())
     ]
-    if event is not None:
-        inactive = event.team_assignments.filter(team__is_active=False)
-        if event.results.exists():
-            inactive = inactive.exclude(school_id__in=event.results.values("school_id"))
-        slots = list(inactive.order_by("team__team_number").values_list("team__team_number", flat=True))
-        if slots:
-            numbers = ", ".join(map(str, slots))
+    if event is not None and cards is not None:
+        inactive = event.team_assignments.filter(team__is_active=False).exclude(school_id__in=cards.scores)
+        slots = inactive.order_by("team__team_number").values_list("team__team_number", flat=True)
+        if numbers := ", ".join(map(str, slots)):
             warnings.append(CloseOutWarning(
-                f"Inactive slots {numbers} have no card in the set being frozen. Their original assignments, "
-                "packet history and raw scores will be archived. The email audit cannot identify past card recipients.",
+                f"Inactive slots {numbers} have no card in the set being archived. The close-time roster and "
+                "packet delivery/download summaries will be in the ZIP; raw service inputs are retained separately. "
+                "The email audit cannot identify past card recipients.",
                 "scoring:export_index",
             ))
-    return warnings + [CloseOutWarning(text, "scoring:email_scorecards") for text in _scorecard_warnings(event)]
+    return warnings + [CloseOutWarning(text, "scoring:email_scorecards") for text in _scorecard_warnings(event, cards)]
 
 
 def scorecards_fingerprint(event: Event | None, standings: list[Standing] | None = None) -> str:
@@ -112,12 +109,16 @@ def scorecards_fingerprint(event: Event | None, standings: list[Standing] | None
         school_id: (snapshot.standing.team.team_number, snapshot.scorecard)
         for school_id, snapshot in current_snapshots(event, standings).items()
     }
+    return _card_fingerprint(scorecards)
+
+
+def _card_fingerprint(scorecards: dict[int, tuple[int, dict[str, object]]]) -> str:
     # Round-trip so int keys become strings: sort_keys raises on a dict mixing int and str keys
     normalized = json.dumps(json.loads(json.dumps(scorecards)), sort_keys=True)
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def _scorecard_warnings(event: Event | None) -> list[str]:
+def _scorecard_warnings(event: Event | None, cards: CloseOutCards | None) -> list[str]:
     """Warnings about the last Email Scorecards for the event: none sent, failures, or scores changed since."""
     if event is None:
         return ["No event is open, so scorecard emails can't be checked: make sure the scorecards went out."]
@@ -128,6 +129,11 @@ def _scorecard_warnings(event: Event | None) -> list[str]:
     if failed := emailed.failed:
         one, many = "scorecard email failed in the last send", "scorecard emails failed in the last send"
         warnings.append(_sentence(failed, one, many))
-    if emailed.scorecards_hash != scorecards_fingerprint(event):
-        warnings.append("Scores changed after the last scorecard email.")
+    if cards is not None and emailed.scorecards_hash != _card_fingerprint({
+        school: (score.team_number, cards.snapshots[school]) for school, score in cards.scores.items()
+    }):
+        warnings.append(
+            "Saved scorecards differ from the last scorecard email record." if cards.saved
+            else "Scores changed after the last scorecard email."
+        )
     return warnings

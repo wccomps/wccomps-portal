@@ -326,13 +326,18 @@ Without Quotient, inject grading says Quotient is unavailable, box lists stay em
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
 15 minutes.
 
-On **Competition → Before you close out**, an inactive assignment on an existing event no longer blocks Close Out.
-Use **Close Out Event** without activating the team. It freezes the same current cards used by the scorecard path,
-without changing their ranks or totals. The Close Out ZIP separately preserves original assignments, packet
-distribution history, and raw service scores and details, including inactive assignments. Inactivity is not an
-attendance decision. The old email audit records only counts and a combined fingerprint: an inactive school not
-in the current card set cannot be identified as a former recipient from that audit. Close Out does not resend or
-reconstruct old PDFs.
+On **Competition → Before you close out**, review the scorecard-set and mail notices. **Close Out Event** keeps
+validated saved school cards exactly, even if a school is now inactive. If there are no saved cards, it freezes
+the normal current scorecard set without adding inactive slots or changing ranks or totals. Do not activate a
+team to bypass a missing school mapping: stop and have the event roster owner reconcile the original assignment.
+An open event with saved cards must be closed out, not canceled. Close Out does not decide attendance, approve
+judging, resend mail or reconstruct old PDFs. The historical email audit has counts and a combined fingerprint,
+not delivery-time school membership or proof of receipt.
+
+The Gold ZIP preserves the roster as recorded at Close Out and slot-based packet distribution records, including
+the packet’s email mode. These records do not establish delivery-time school identity. Raw service scores and
+details, including those for inactive slots, are kept separately in the database for authorized operators, not in
+the Gold ZIP.
 
 Close Out keeps the portal's side of an event in its archive (Download Close Out Archive on the event's page): every
 export, plus each ticket's comments (its Discord thread or Zulip topic as the portal recorded it), its history, and

@@ -6,7 +6,8 @@ Decimals a live scorecard gives them.
 """
 
 from collections.abc import Iterable
-from decimal import Decimal
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import cast
 
 from .calculator import SCORE_COMPONENT_FIELDS, Standing
@@ -76,3 +77,71 @@ def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
 def context_from_snapshot(data: dict[str, object]) -> dict[str, object]:
     """A stored snapshot back as a template context."""
     return cast(dict[str, object], _decode(data))
+
+
+@dataclass(frozen=True)
+class FinalScore:
+    team_number: int
+    team_name: str
+    rank: int | None
+    total: Decimal
+    components: dict[str, Decimal]
+    service_credit: int
+    sla_credit: int
+
+    @classmethod
+    def from_standing(cls, standing: Standing) -> FinalScore:
+        return cls(
+            standing.team.team_number, standing.team.team_name, standing.rank, standing.total_score,
+            {key: getattr(standing, key) for key in SCORE_COMPONENT_FIELDS},
+            sum(line["service_credit"] for line in standing.service_corrections),
+            sum(line["sla_credit"] for line in standing.service_corrections),
+        )
+
+
+def _snapshot_number(value: object) -> Decimal:
+    if type(value) not in (Decimal, int, str):
+        raise ValueError
+    number = Decimal(cast(Decimal | int | str, value))
+    if not number.is_finite():
+        raise ValueError
+    return number
+
+
+def frozen_final_score(
+    data: dict[str, object], version: int, number: int, name: str, rank: int | None, total: Decimal,
+) -> FinalScore:
+    """Validate the frozen v1 export inputs without rewriting the stored card or creating live scoring state."""
+    try:
+        context = context_from_snapshot(data)
+        score, team = context["score"], context["team"]
+        if (
+            version != SNAPSHOT_VERSION or not isinstance(score, dict) or not isinstance(team, dict)
+            or type(team["team_number"]) is not int or team["team_number"] != number
+            or score["rank"] != rank or (rank is not None and type(score["rank"]) is not int)
+            or _snapshot_number(score["total_score"]) != total
+            or not isinstance(context["stats"], dict) or not isinstance(context["scaling"], dict)
+            or not isinstance(context["red_scores"], list) or not isinstance(context["orange_scores"], list)
+        ):
+            raise ValueError
+        components = {field: _snapshot_number(score[field]) for field in SCORE_COMPONENT_FIELDS}
+        for field in ("red_total", "inject_total", "orange_total", "service_total", "service_sla_total"):
+            _snapshot_number(context[field])
+        corrections = score.get("service_corrections", [])
+        if not isinstance(corrections, list):
+            raise ValueError
+        raw_credit = sla_credit = 0
+        for line in corrections:
+            if not isinstance(line, dict) or any(
+                not isinstance(line[key], str) or not line[key] for key in ("service_name", "ruling")
+            ):
+                raise ValueError
+            raw, sla = line["service_credit"], line["sla_credit"]
+            _snapshot_number(line["service_modifier"])
+            if type(raw) is not int or type(sla) is not int or sla < 0:
+                raise ValueError
+            raw_credit += raw
+            sla_credit += sla
+    except (KeyError, TypeError, ValueError, InvalidOperation, RecursionError):
+        raise ValueError("A saved scorecard cannot be read. Nothing was closed out.") from None
+    return FinalScore(number, name, rank, total, components, raw_credit, sla_credit)

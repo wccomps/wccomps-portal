@@ -56,7 +56,10 @@ during an event.
    ticket comments (their Discord threads and Zulip topics as the portal recorded them), ticket history and
    attachment names, sizes and SHA-256 (not the files) (`web/registration/services.py` `_freeze_results`;
    `web/scoring/export.py` `DATASETS`). Only Gold Team downloads it (`web/registration/views.py` `event_archive`), as
-   it does the same datasets live (`web/scoring/views/export.py`). Off the portal, the scoring host's archive script
+   it does the same datasets live (`web/scoring/views/export.py`). The archive contains the roster at Close Out and
+   slot-based packet distribution records. Raw service scores and checks are retained separately in
+   `EventScoringEvidence` in the same transaction; they have no Portal download or admin view. Off the portal, the
+   scoring host's archive script
    writes a tarball of the teams' inject uploads and the divisor log of runner source addresses
    (`web/quotient/archive_scoring_host.py`).
 12. **Quotient admin login** (`web/portal/settings.py` `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD`): reads every team's

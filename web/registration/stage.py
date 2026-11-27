@@ -239,7 +239,7 @@ def event_stage() -> EventStage:
     scores = scored_teams().exists()
     live_data = scores or live_competition_data_exists()
     if event is not None:
-        stage = Stage.PLAYED if scores else Stage.READY
+        stage = Stage.PLAYED if scores or event.results.exists() else Stage.READY
     elif scores:
         stage = Stage.UNRECORDED
     else:
@@ -251,5 +251,5 @@ def event_stage() -> EventStage:
         live_data=live_data,
         closed_out_before=Event.objects.filter(is_finalized=True).exists(),
         packets_sent=packets_sent(event),
-        scorecards_emailed=scores and _scorecards_emailed(event),
+        scorecards_emailed=stage in (Stage.PLAYED, Stage.UNRECORDED) and _scorecards_emailed(event),
     )

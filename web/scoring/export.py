@@ -1,14 +1,14 @@
 import json
 import zipfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from io import BytesIO, StringIO
-from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db.models import BinaryField, CharField, F, Func, Value
+from django.db.models import BinaryField, CharField, Exists, F, Func, OuterRef, Value
 from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
@@ -20,15 +20,14 @@ from core.csv_export import csv_writer
 from ticketing.chat_comments import comment_origin
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
-from .calculator import Standing, compute_standings
+from .calculator import compute_standings
 from .models import (
     IncidentReport,
     InjectScore,
     OrangeTeamScore,
     RedTeamScore,
-    ServiceDetail,
-    ServiceScore,
 )
+from .snapshot import FinalScore
 
 if TYPE_CHECKING:
     from registration.models import Event
@@ -127,9 +126,13 @@ def _fetch_inject_grades() -> list[InjectScore]:
     )
 
 
-def _fetch_final_scores(standings: list[Standing] | None = None) -> list[tuple[Standing, str]]:
-    calculated_at = timezone.now().isoformat()
-    return [(score, calculated_at) for score in (compute_standings() if standings is None else standings)]
+def _stamp_final_scores(scores: Sequence[FinalScore]) -> list[tuple[FinalScore, str]]:
+    exported_at = timezone.now().isoformat()
+    return [(score, exported_at) for score in scores]
+
+
+def _fetch_final_scores() -> list[tuple[FinalScore, str]]:
+    return _stamp_final_scores([FinalScore.from_standing(score) for score in compute_standings()])
 
 
 def _fetch_tickets() -> list[Ticket]:
@@ -177,6 +180,31 @@ def _fetch_ticket_attachments() -> list[DigestedAttachment]:
         .annotate(size=Length("file_data"), sha256=sha256)
     )
 
+FINAL_SCORES = Dataset[tuple[FinalScore, str]](
+    "final_scores",
+    [
+        Column("Rank", "rank", lambda sc: sc[0].rank),
+        Column("Team", "team", lambda sc: sc[0].team_name),
+        Column("Team Number", "team_number", lambda sc: sc[0].team_number),
+        Column("Total Score", "total_score", lambda sc: sc[0].total),
+        Column("Service Points", "service_points", lambda sc: sc[0].components["service_points"]),
+        Column("Inject Points", "inject_points", lambda sc: sc[0].components["inject_points"]),
+        Column("Orange Points", "orange_points", lambda sc: sc[0].components["orange_points"]),
+        Column("Red Deductions", "red_deductions", lambda sc: sc[0].components["red_deductions"]),
+        Column(
+            "Incident Recovery Points",
+            "incident_recovery_points",
+            lambda sc: sc[0].components["incident_recovery_points"],
+        ),
+        Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].components["sla_penalties"]),
+        Column("Raw Service Credit", "raw_service_credit", lambda sc: sc[0].service_credit),
+        Column("SLA Credit", "sla_credit", lambda sc: sc[0].sla_credit),
+        Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].components["point_adjustments"]),
+        Column("Exported At", "exported_at", lambda sc: sc[1]),
+    ],
+    _fetch_final_scores,
+)
+
 
 DATASETS: dict[str, ExportableDataset] = {
     "red_scores": Dataset[RedTeamScore](
@@ -189,6 +217,11 @@ DATASETS: dict[str, ExportableDataset] = {
             Column("Affected Boxes", "affected_boxes", lambda f: f.affected_boxes),
             Column("Affected Service", "affected_service", lambda f: f.affected_service),
             Column("Affected Teams", "affected_teams", lambda f: [t.team_name for t in f.affected_teams.all()]),
+            Column(
+                "Affected Team Numbers",
+                "affected_team_numbers",
+                lambda f: [t.team_number for t in f.affected_teams.all()],
+            ),
             Column("Points Per Team", "points_per_team", lambda f: f.points_per_team),
             Column("Universally Attempted", "universally_attempted", lambda f: f.universally_attempted),
             Column("Persistence Established", "persistence_established", lambda f: f.persistence_established),
@@ -261,34 +294,7 @@ DATASETS: dict[str, ExportableDataset] = {
         ],
         _fetch_inject_grades,
     ),
-    "final_scores": Dataset[tuple[Standing, str]](
-        "final_scores",
-        [
-            Column("Rank", "rank", lambda sc: sc[0].rank),
-            Column("Team", "team", lambda sc: sc[0].team.team_name),
-            Column("Team Number", "team_number", lambda sc: sc[0].team.team_number),
-            Column("Total Score", "total_score", lambda sc: sc[0].total_score),
-            Column("Service Points", "service_points", lambda sc: sc[0].service_points),
-            Column("Inject Points", "inject_points", lambda sc: sc[0].inject_points),
-            Column("Orange Points", "orange_points", lambda sc: sc[0].orange_points),
-            Column("Red Deductions", "red_deductions", lambda sc: sc[0].red_deductions),
-            Column("Incident Recovery Points", "incident_recovery_points", lambda sc: sc[0].incident_recovery_points),
-            Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].sla_penalties),
-            Column(
-                "Raw Service Credit",
-                "raw_service_credit",
-                lambda sc: sum(line["service_credit"] for line in sc[0].service_corrections),
-            ),
-            Column(
-                "SLA Credit",
-                "sla_credit",
-                lambda sc: sum(line["sla_credit"] for line in sc[0].service_corrections),
-            ),
-            Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].point_adjustments),
-            Column("Calculated At", "calculated_at", lambda sc: sc[1]),
-        ],
-        _fetch_final_scores,
-    ),
+    "final_scores": FINAL_SCORES,
     "tickets": Dataset[Ticket](
         "tickets",
         [
@@ -372,46 +378,36 @@ def export_dataset(name: str, export_format: str) -> HttpResponse:
 
 
 def _event_evidence(event: Event) -> dict[str, object]:
-    """The event's roster, packet history and unadjusted scoring rows, separate from the official cards."""
-    roster = event.team_assignments.order_by("team__team_number")
-    team_ids = roster.values("team_id")
-    frozen_schools = set(event.results.values_list("school_id", flat=True))
+    """Close-time roster and slot-based delivery/download summaries, not historical school attribution."""
+    roster = event.team_assignments.annotate(
+        has_frozen_scorecard=Exists(event.results.filter(school_id=OuterRef("school_id")))
+    ).order_by("team__team_number")
     return {
         "event_id": event.pk,
-        "assignments": [
-            {**row, "has_frozen_scorecard": row["school_id"] in frozen_schools}
-            for row in roster.values(
-                "id", "school_id", "school__name", "team_id", "team__team_number", "team__is_active",
-                "registration_id", "assigned_at",
-            )
-        ],
+        "captured_at": timezone.now().isoformat(),
+        "assignments": list(roster.values(
+            "id", "school_id", "school__name", "team_id", "team__team_number", "team__is_active",
+            "registration_id", "assigned_at", "has_frozen_scorecard",
+        )),
         "packets": list(Packet.objects.filter(event=event).order_by("pk").values(
-            "id", "title", "status", "actual_distribution_time",
+            "id", "title", "status", "actual_distribution_time", "send_via_email",
         )),
         "packet_distributions": list(PacketDistribution.objects.filter(packet__event=event).order_by("pk").values(
             "id", "packet_id", "team_id", "email_status", "email_sent_at", "web_access_enabled",
             "download_count", "downloaded_at", "last_downloaded_at",
         )),
-        "service_scores": list(ServiceScore.objects.filter(team_id__in=team_ids).values(
-            "team_id", "service_points", "sla_violations", "synced_at",
-        )),
-        "service_details": list(ServiceDetail.objects.filter(team_id__in=team_ids).values(
-            "team_id", "service_name", "points", "sla_violations", "uptime",
-        )),
     }
 
 
-def export_all_zip_bytes(*, event: Event | None = None, standings: list[Standing] | None = None) -> bytes:
+def export_all_zip_bytes(*, event: Event | None = None, final_scores: list[FinalScore] | None = None) -> bytes:
     """Every dataset as CSV and JSON, plus event-bound evidence when called from Close Out."""
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for dataset in DATASETS.values():
-            if dataset.filename == "final_scores" and standings is not None:
-                final_scores = cast(Dataset[tuple[Standing, str]], dataset)
-                rows = _fetch_final_scores(standings)
-                csv_str, json_str = final_scores.render_csv(rows), final_scores.render_json(rows)
-            else:
-                csv_str, json_str = dataset.render_pair()
+        datasets = DATASETS if final_scores is None else {
+            **DATASETS, "final_scores": replace(FINAL_SCORES, fetch=lambda: _stamp_final_scores(final_scores)),
+        }
+        for dataset in datasets.values():
+            csv_str, json_str = dataset.render_pair()
             zip_file.writestr(f"{dataset.filename}.csv", csv_str)
             zip_file.writestr(f"{dataset.filename}.json", json_str)
         if event is not None:

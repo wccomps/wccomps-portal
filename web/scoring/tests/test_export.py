@@ -309,6 +309,7 @@ class TestRedFindingsExport:
             "Affected Boxes",
             "Affected Service",
             "Affected Teams",
+            "Affected Team Numbers",
             "Points Per Team",
             "Universally Attempted",
             "Persistence Established",
@@ -725,7 +726,7 @@ class TestFinalScoresExport:
             "Incident Recovery Points",
             "SLA Penalties",
             "Point Adjustments",
-            "Calculated At",
+            "Exported At",
         ]
 
         for header in required_headers:
@@ -772,7 +773,7 @@ class TestFinalScoresExport:
             "incident_recovery_points",
             "sla_penalties",
             "point_adjustments",
-            "calculated_at",
+            "exported_at",
         ]
 
         for field in required_fields:

@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import TypedDict
 
 from django.contrib.auth.models import User
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models.functions import Now
 from django.utils import timezone
@@ -357,6 +358,13 @@ class EventArchive(models.Model):
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
     data = models.BinaryField()
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class EventScoringEvidence(models.Model):
+    """Raw pre-wipe service inputs. Operator database access only; no admin or download route."""
+
+    event = models.OneToOneField(Event, on_delete=models.PROTECT)
+    data = models.JSONField(encoder=DjangoJSONEncoder)
 
 
 class RegistrationRateLimit(models.Model):

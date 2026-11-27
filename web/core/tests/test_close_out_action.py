@@ -77,7 +77,7 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
     assert lines[-1] == {
         "done": True,
         "success": True,
-        "message": "Closed out Inv: froze 1 school result(s) and the export archive, deleted 1 ServiceScore, and "
+        "message": "Closed out Inv: archived 1 school result(s), deleted 1 ServiceScore, and "
         "queued the Discord cleanup (the bot reports it in the ops channel). Next: Import the next school list to "
         "open an event.",
     }
@@ -322,10 +322,10 @@ def test_the_page_load_does_not_build_scorecards(client):
     _open_event()
     _team_with_school()
 
-    with patch("registration.close_out_checks.scorecards_fingerprint") as fingerprint:
+    with patch("registration.services.current_snapshots") as snapshots:
         page = _page(client)
 
-    fingerprint.assert_not_called()
+    snapshots.assert_not_called()
     assert BUTTON in page
     assert "Couldn&#x27;t check unfinished work" in page
 

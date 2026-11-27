@@ -185,10 +185,10 @@ def test_a_link_to_advanced_opens_it(live_server, pw_browser, on_load):
 
 
 def test_a_blocking_problem_comes_first_and_the_warnings_never_say_go_ahead(live_server, pw_browser):
-    from team.models import Team
+    from registration.models import EventTeamAssignment
 
-    _open_event_with_a_score()
-    Team.objects.filter(team_number=1).update(is_active=False)
+    event = _open_event_with_a_score()
+    EventTeamAssignment.objects.filter(event=event, team__team_number=1).delete()
     user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
@@ -202,9 +202,9 @@ def test_a_blocking_problem_comes_first_and_the_warnings_never_say_go_ahead(live
             section = page.locator("#close-out")
             section.get_by_role("link", name="1 inject grade is not approved.").wait_for()
             text = section.inner_text()
-            assert "Team 1 is inactive" in text
-            assert text.index("Team 1 is inactive") < text.index("1 inject grade is not approved.")
-            assert "Also unfinished" in text
+            assert "has no schools on its list" in text
+            assert text.index("has no schools on its list") < text.index("1 inject grade is not approved.")
+            assert "Other notices" in text
             assert "don't block" not in text
             assert page.get_by_role("button", name="Close Out Event").is_disabled()
     finally:

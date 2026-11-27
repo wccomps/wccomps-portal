@@ -20,8 +20,8 @@ from registration.services import (
     cancel_event_problem,
     clear_leftover_data,
     clear_leftovers_problem,
+    close_out_card_check,
     close_out_event,
-    close_out_fixes,
     close_out_problem,
 )
 from registration.stage import EventStage, event_stage
@@ -262,7 +262,7 @@ def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iter
         yield ndjson_done(str(e), success=False)
         return
     yield ndjson_done(
-        f"Closed out {outcome.event.name}: froze {outcome.results} school result(s) and the export archive, "
+        f"Closed out {outcome.event.name}: archived {outcome.results} school result(s), "
         f"deleted {_wiped_summary(outcome.wiped)}, and queued the Discord cleanup (the bot reports it in the ops "
         f"channel). Next: {event_stage().next_step}"
     )
@@ -274,9 +274,15 @@ def _action_close_out_check(request: HttpRequest, authentik_username: str) -> Js
     must not break the page that holds Start and Stop."""
     try:
         stage = event_stage()
-        warnings = [{"text": w.text, "url": reverse(w.url_name)} for w in close_out_warnings(stage.event)]
-        problem = close_out_problem(stage)
-        fixes = [link for fix in close_out_fixes(stage) for link in _fix_links(fix)] if problem else []
+        problem = close_out_problem(stage, check_schools=False)
+        problem, team_fixes, cards = (problem, [], None) if problem else close_out_card_check(stage.event)
+        fixes = [link for fix in team_fixes for link in _fix_links(fix)]
+        warnings = [{"text": w.text, "url": reverse(w.url_name)} for w in close_out_warnings(stage.event, cards)]
+        if stage.event is not None and cards is not None and cards.saved:
+            warnings.insert(0, {
+                "text": f"Close Out will keep the {len(cards.scores)} saved school scorecard(s), not live standings.",
+                "url": reverse("registration_event_detail", args=[stage.event.pk]),
+            })
     except Exception:
         logger.exception("Close-out check failed")
         return JsonResponse({"error": CLOSE_OUT_CHECK_FAILED}, status=500)

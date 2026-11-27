@@ -14,11 +14,13 @@ from scoring.scorecard import build_scorecard_context
 
 from registration.close_out_checks import (
     CloseOutWarning,
-    close_out_warnings,
     scorecards_fingerprint,
 )
+from registration.close_out_checks import (
+    close_out_warnings as notices_for_cards,
+)
 from registration.models import Event, Season
-from registration.services import close_out_event, set_team_school
+from registration.services import close_out_card_check, close_out_event, set_team_school
 from registration.stage import ScorecardsEmailed
 from team.models import Team
 from ticketing.models import Ticket
@@ -29,6 +31,10 @@ EMAIL = "scoring:email_scorecards"
 NOT_EMAILED = CloseOutWarning(
     "No scorecard email is recorded for this event. If you already emailed them, you can close out.", EMAIL
 )
+
+
+def close_out_warnings(event):
+    return notices_for_cards(event, close_out_card_check(event)[2])
 
 
 @pytest.fixture
