@@ -402,6 +402,8 @@ def event_delete(request: HttpRequest, event_id: int) -> HttpResponse:
 class EventPageRow:
     registration: TeamRegistration | None  # None: the school list's schools, or a deleted registration
     assignment: EventTeamAssignment | None  # None: a registration with no team yet, so registration is set
+    assignment_open: bool = False
+    assignment_problem: str = ""
 
     @property
     def school_name(self) -> str:
@@ -412,7 +414,10 @@ class EventPageRow:
 
     @property
     def can_assign(self) -> bool:
-        return self.assignment is None and self.registration is not None and self.registration.status == "approved"
+        return (
+            self.assignment_open and not self.assignment_problem and self.assignment is None
+            and self.registration is not None and self.registration.status == "approved"
+        )
 
 
 @require_permission("gold_team")
@@ -433,12 +438,21 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     # Imported schools have no registration: match those by school
     by_registration = {a.registration_id: a for a in assignments if a.registration_id}
     by_school = {a.school.name_key: a for a in assignments}
+    archive_problem = archive_reconciliation_problem(event) if event.is_active else ""
+    saved_conflicts = saved_slots_needing_reconciliation(event) if event.is_active else {}
+
+    def assignment_problem(registration: TeamRegistration) -> str:
+        if (slot := saved_conflicts.get(normalize_school_name(registration.school_name))) is not None:
+            return saved_slot_message(registration.school_name, slot)
+        return ""
 
     rows = [
         EventPageRow(
             enrollment.registration,
             by_registration.get(enrollment.registration_id)
             or by_school.get(normalize_school_name(enrollment.registration.school_name)),
+            assignment_open=event.is_active and not archive_problem,
+            assignment_problem=assignment_problem(enrollment.registration),
         )
         for enrollment in enrollments
     ]
@@ -450,8 +464,6 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     )
 
     sent = packets_sent(event)
-    saved_conflicts = saved_slots_needing_reconciliation(event) if event.is_active else {}
-    archive_problem = archive_reconciliation_problem(event) if event.is_active else ""
     saved_slots = set(event.results.values_list("team_number", flat=True)) if event.is_active and not sent else set()
     linked = set(linked_roster_teams().values_list("pk", flat=True)) if event.is_active and not sent else set()
     status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
@@ -466,16 +478,7 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "rows": rows,
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
-        "assignable_count": 0 if archive_problem else sum(
-            1 for row in rows if row.can_assign
-            and row.registration is not None
-            and normalize_school_name(row.registration.school_name) not in saved_conflicts
-        ),
-        "saved_slot_notices": [
-            saved_slot_message(row.registration.school_name, slot)
-            for row in rows if row.registration is not None
-            and (slot := saved_conflicts.get(normalize_school_name(row.registration.school_name))) is not None
-        ],
+        "assignable_count": sum(row.can_assign for row in rows),
         "packets_sent": sent,
         "removable_assignments": removable,
         "archives": _available_archives(event),

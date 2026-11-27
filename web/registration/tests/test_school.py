@@ -127,6 +127,8 @@ def test_saved_school_must_be_reconciled_not_randomly_assigned_or_unassigned(gol
     assert SchoolInfo.objects.filter(school=school, team=team).exists()
     detail = client.get(url).content.decode()
     assert "<strong>0</strong> ready to assign" in detail and "has a saved card for Team 4" in detail
+    assert not re.search(r">\s*Ready to assign\s*<", detail)
+    assert "Assign Team Numbers" not in detail
     reply = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
     assert b"has a saved card for Team 4" in reply.content
     assert not event.team_assignments.exists()

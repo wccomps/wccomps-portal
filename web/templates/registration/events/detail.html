@@ -40,9 +40,6 @@
                 <strong>{{ total_assigned }}</strong> teams assigned,
                 <strong>{{ assignable_count }}</strong> ready to assign
             </p>
-            {% for notice in saved_slot_notices %}
-                <p>{{ notice }}</p>
-            {% endfor %}
             {% if packets_sent %}
                 <p class="text-success">Packets sent for this event, so its teams can no longer be unassigned here.</p>
             {% endif %}
@@ -100,7 +97,9 @@
                             <td></td>
                         {% endif %}
                         <td>
-                            {% if item.assignment %}
+                            {% if item.assignment_problem %}
+                                <span class="text-muted">{{ item.assignment_problem }}</span>
+                            {% elif item.assignment %}
                                 <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
                             {% elif item.can_assign %}
                                 <span class="text-muted">Ready to assign</span>

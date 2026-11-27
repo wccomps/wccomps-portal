@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
+from django.test import Client
 from django.urls import reverse
 from orange_team.models import OrangeAssignment, OrangeCheck
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore, ServiceScore
@@ -189,6 +190,26 @@ def test_a_malformed_send_record_is_an_error_not_a_changed_score(event):
 
     with pytest.raises(TypeError):
         ScorecardsEmailed.latest(event)
+
+
+@pytest.mark.parametrize("digest_present", [False, True])
+def test_preview_distinguishes_a_missing_fingerprint_field_from_a_null_value(event, gold_team_user, digest_present):
+    from core.models import AuditLog
+
+    details = {"event": event.pk, "teams": 2, "failed": 0}
+    if digest_present:
+        details["scorecards_hash"] = None
+    AuditLog.objects.create(
+        action=ScorecardsEmailed.ACTION, admin_user="gold", target_entity="event", target_id=event.pk, details=details,
+    )
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(reverse("admin_competition_action"), {"action": "close_out_check"})
+    if digest_present:
+        assert response.status_code == 200 and response.json()["preview"]
+        assert any("differ" in warning["text"] for warning in response.json()["warnings"])
+    else:
+        assert response.status_code == 500 and "Couldn't preview Close Out" in response.json()["error"]
 
 
 @pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction

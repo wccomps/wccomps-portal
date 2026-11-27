@@ -327,19 +327,20 @@ stop's score sync step fails (the stop still completes), and the worker logs the
 15 minutes.
 
 On **Competition → Before you close out**, review the listed schools, ranks, totals, omissions and advisory mail
-notices. **Close Out Event** keeps saved v1 school cards unchanged after checking required fields, detail rows,
-rank bounds and order, and school-to-slot mapping. It uses current cards only when there are no saved results or
-prior archive. A changed roster or card set requires a reload and fresh preview before confirmation. In an existing
-event, have the roster owner reconcile an unmapped inactive school and slot, without activating the team.
+notices. **Close Out Event** keeps saved v1 school cards unchanged after checking required fields, detail totals,
+rank bounds and order, saved neighbors, and school-to-slot mapping. It uses current cards only when there are no
+saved results or prior archive. A changed roster or card set requires a reload and fresh preview before
+confirmation. In an existing event, have the roster owner reconcile an unmapped inactive school and slot without
+activating the team.
 With no open event, the recovery workflow for unrecorded live scores uses the live school list.
 
-An open event with saved cards must be closed out, not canceled. An open event with an existing archive but no
-saved cards needs reconciliation; do not cancel or replace its roster. No recorded mail send or a different
-fingerprint is advisory; a malformed send record prevents the preview. Do not send new live cards to replace
-saved ones. Close Out does not decide attendance, approve judging, resend mail, or reconstruct past PDFs or
-recipients. If Nextcloud is configured when cleanup runs, it can delete team accounts and their files. Preserve
-required files before confirming; the ZIP does not include them. Pending teardown is refused while an open event
-needs archive reconciliation.
+Do not cancel an open event with saved cards. If it already has Close Out evidence, reconcile it first. An open
+event with an archive but no saved cards also needs reconciliation; do not cancel or replace its roster.
+No recorded send or a different fingerprint is advisory. A latest matching send record missing its fingerprint
+field prevents the preview. Do not send new live cards to replace saved ones. Close Out does not decide attendance,
+approve judging, resend mail, or reconstruct past PDFs or recipients. If Nextcloud is configured when cleanup
+runs, it can delete team accounts and their files. Preserve required files before confirming; the ZIP does not
+include them. Pending teardown is refused while an open event needs archive reconciliation.
 
 Gold can download the Close Out ZIP and any retained older ZIP separately from the event page. The Portal does
 not label retained bytes as Finalize or Close Out without matching event audit evidence; otherwise the label is

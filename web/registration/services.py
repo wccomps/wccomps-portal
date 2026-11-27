@@ -82,7 +82,7 @@ class SchoolChangedError(Exception):
 
 
 class SavedRosterError(SchoolChangedError):
-    """Retained event evidence prevents a roster change."""
+    """Live scores or retained event evidence prevent this roster change."""
 
 
 SAVED_ROSTER = "Saved scorecards need their school and team number kept together. Review Close Out first."
@@ -605,6 +605,7 @@ def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     school or a school was put on the list since the preview.
     """
     school_list_lock()
+    # Score ingestion takes this lock before writing; validate the whole batch before activation.
     if (problem := add_problem(event)) or not isinstance(event, Event):
         raise ImportBlockedError(problem)
     teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
@@ -1034,8 +1035,7 @@ def discord_cleanup_problem(stage: EventStage) -> str:
 
 
 def teardown_problem(stage: EventStage, open_event_id: int | None) -> str:
-    """Why a queued Discord teardown can't run now, or '': not while the competition runs, nor once the open event
-    is no longer the one it was queued for (open_event_id; None, none open)."""
+    """Why queued team teardown cannot proceed for the event it was scheduled against."""
     if stage.archive_problem:
         return stage.archive_problem
     if stage.running:

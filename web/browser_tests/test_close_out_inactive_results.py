@@ -93,6 +93,7 @@ def _response(client, event, **fields):
     "failure",
     ["unassigned", "correction", "malformed", "incomplete", "details", "cohort",
      "wrong_school", "missing_category", "detail_rank", "category_bound", "neighbor_bound", "missing_detail_rows",
+     "self_neighbor", "duplicate_neighbor", "missing_neighbor", "neighbor_gap", "neighbor_order", "detail_sum",
      "modifier", "weight", "version"],
 )
 def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
@@ -128,6 +129,23 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
         elif failure == "missing_detail_rows":
             card["stats"]["inject_stats"] = []
             card["inject_total"] = 1
+        elif failure == "detail_sum":
+            card["inject_total"] = {"$d": "10"}
+            card["stats"]["inject_stats"][0]["points"] = 0
+        elif failure.startswith("neighbor_") or failure.endswith("_neighbor"):
+            total = snapshot.score.total
+            def neighbor(rank, score, gap):
+                return {"rank": rank, "total_score": {"$d": str(score)}, "gap": {"$d": str(gap)}}
+
+            stats = card["stats"]
+            stats["team_count"] = 1 if failure == "self_neighbor" else 2
+            stats["neighbors"] = {
+                "self_neighbor": [neighbor(1, total, 0)],
+                "duplicate_neighbor": [neighbor(2, total, 0)] * 2,
+                "missing_neighbor": [],
+                "neighbor_gap": [neighbor(2, total, -1)],
+                "neighbor_order": [neighbor(2, total + 1, 1)],
+            }[failure]
         elif failure == "modifier":
             card["scaling"]["service_modifier"] = -1
         elif failure == "weight":
@@ -141,6 +159,10 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
             "wrong_school": "do not match",
             "version": "uses an unsupported version",
         }.get(failure, "A saved scorecard cannot be read")
+        retained = EventArchive.objects.create(event=event, data=b"retained", retained_kind="finalize")
+    assignments_before = list(event.team_assignments.order_by("pk").values())
+    score_models = (ServiceScore, ServiceDetail, InjectScore)
+    scores_before = [list(model.objects.order_by("pk").values()) for model in score_models]
     saved_before = list(event.results.values())
     preview = client.post(reverse("admin_competition_action"), {"action": "close_out_check"}).json()
     assert expected in preview["problem"]
@@ -152,7 +174,14 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     assert not response["success"] and expected in response["message"]
     event.refresh_from_db()
     assert event.is_active and not event.is_finalized and list(event.results.values()) == saved_before
+    if failure not in ("unassigned", "correction"):
+        kept = EventArchive.objects.get(event=event)
+        assert (bytes(kept.data), kept.updated_at, kept.close_out_data) == (
+            b"retained", retained.updated_at, None,
+        )
     assert not EventScoringEvidence.objects.filter(event=event).exists()
+    assert list(event.team_assignments.order_by("pk").values()) == assignments_before
+    assert [list(model.objects.order_by("pk").values()) for model in score_models] == scores_before
     assert ServiceScore.objects.count() == InjectScore.objects.count() == packet.distributions.count() == 3
     assert set(QueuedTask.objects.values_list("pk", flat=True)) == queued
 
@@ -167,8 +196,14 @@ def test_saved_ranks_share_a_single_cohort_order(stopped_event, gold_team_user, 
     preview = client.post(url, {"action": "close_out_check"}).json()["preview"]
     for school, snapshot in current_snapshots(event).items():
         rank = snapshot.score.rank if cohort_conflict else 3 - snapshot.score.rank
+        stats = snapshot.scorecard["stats"]
         if cohort_conflict and rank == 1:
-            snapshot.scorecard["stats"]["team_count"] = 3
+            stats["team_count"] = 3
+        if not cohort_conflict:
+            peer_rank = 3 - rank
+            stats["neighbors"] = [{
+                "rank": peer_rank, "total_score": {"$d": str(snapshot.score.total)}, "gap": 0,
+            }]
         snapshot.scorecard["score"]["rank"] = rank
         EventResult.objects.create(
             event=event, school_id=school, team_number=snapshot.score.team_number,
@@ -371,6 +406,16 @@ def test_historical_v1_card_and_finalize_zip_survive_close_out(
     EventTeamAssignment.objects.create(event=event, team=team, school=school)
     fixture = Path(__file__).parents[1] / "scoring/tests/fixtures/scorecard_snapshot_v1.json"
     card = json.loads(fixture.read_text())
+    # The template fixture uses distinct sentinel values, not arithmetic produced by the writer.
+    card["red_total"] = {"$d": "5501.00"}
+    card["inject_total"] = {"$d": "5201.00"}
+    card["orange_total"] = {"$d": "5601.00"}
+    card["service_total"] = {"$d": "5101.00"}
+    card["service_sla_total"] = 5103
+    card["stats"]["neighbors"] = [
+        {"rank": 1, "total_score": {"$d": "3808.00"}, "gap": 0},
+        {"rank": 3, "total_score": {"$d": "3807.99"}, "gap": {"$d": "-0.01"}},
+    ]
     result = EventResult.objects.create(
         event=event, school=school, team_number=37, rank=2, total_score="3808.00", scorecard=card,
     )

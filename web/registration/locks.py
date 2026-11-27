@@ -10,8 +10,7 @@ SCHOOL_LIST_LOCK_ID = 7_261_640_002
 
 
 def school_list_lock() -> None:
-    """Acquire the transaction-scoped advisory lock serializing school list, open-event, registration review, and
-    packet distribution writes; released at commit before any email is sent. Re-entrant within one transaction."""
+    """Serialize roster and event writes with the local commit phase of service score imports."""
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
 

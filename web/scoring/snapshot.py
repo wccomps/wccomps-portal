@@ -157,7 +157,9 @@ def _fields(row: dict[str, object], *, numbers: str = "", text: str = "", flags:
         raise ValueError
 
 
-def _validate_v1_details(context: dict[str, object], components: dict[str, Decimal], rank: int | None) -> int:
+def _validate_v1_details(
+    context: dict[str, object], components: dict[str, Decimal], rank: int | None, score_total: Decimal,
+) -> int:
     stats, scaling = context["stats"], context["scaling"]
     if not isinstance(stats, dict) or not isinstance(scaling, dict):
         raise ValueError
@@ -192,12 +194,20 @@ def _validate_v1_details(context: dict[str, object], components: dict[str, Decim
         _fields(row, numbers="points avg max delta", text="name feedback", flags="below_avg")
         if row.get("max_points") is not None:
             _snapshot_number(row["max_points"])
+    if rank is not None and not 1 <= rank <= count:
+        return count  # The caller reports the invalid overall rank.
+    adjacent = set() if rank is None else {n for n in (rank - 1, rank + 1) if 1 <= n <= count}
     for row in _rows(stats["neighbors"]):
         _positive_rank(row["rank"])
         neighbor = cast(int, row["rank"])
-        if rank is None or neighbor > count or abs(neighbor - rank) > 1:
+        if rank is None or neighbor not in adjacent:
             raise ValueError
-        _fields(row, numbers="total_score gap")
+        adjacent.remove(neighbor)
+        gap = _snapshot_number(row["total_score"]) - score_total
+        if gap != _snapshot_number(row["gap"]) or (neighbor < rank and gap < 0) or (neighbor > rank and gap > 0):
+            raise ValueError
+    if adjacent:
+        raise ValueError
     for row in _rows(context["red_scores"]):
         _fields(row, numbers="points_per_team", text="affected_boxes_display affected_service")
         attack = row["attack_type"]
@@ -211,14 +221,14 @@ def _validate_v1_details(context: dict[str, object], components: dict[str, Decim
         _fields(row, numbers="points_awarded", text="description")
         if row.get("max_points") is not None:
             _snapshot_number(row["max_points"])
-    for total, rows in (
-        ("red_total", context["red_scores"]),
-        ("orange_total", context["orange_scores"]),
-        ("inject_total", stats["inject_stats"]),
-        ("service_total", stats["service_stats"]),
-        ("service_sla_total", stats["service_stats"]),
+    for total, rows, points in (
+        ("red_total", context["red_scores"], "points_per_team"),
+        ("orange_total", context["orange_scores"], "points_awarded"),
+        ("inject_total", stats["inject_stats"], "points"),
+        ("service_total", stats["service_stats"], "points"),
+        ("service_sla_total", stats["service_stats"], "sla_violations"),
     ):
-        if _snapshot_number(context[total]) and not rows:
+        if _snapshot_number(context[total]) != sum(_snapshot_number(row[points]) for row in _rows(rows)):
             raise ValueError
     return count
 
@@ -254,7 +264,7 @@ def frozen_final_score(
         ):
             raise ValueError
         components = {field: _snapshot_number(score[field]) for field in _V1_CATEGORIES}
-        count = _validate_v1_details(context, components, rank)
+        count = _validate_v1_details(context, components, rank, total)
         corrections = score.get("service_corrections", [])
         if not isinstance(corrections, list):
             raise ValueError
