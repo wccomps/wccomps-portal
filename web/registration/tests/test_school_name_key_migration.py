@@ -30,7 +30,8 @@ def test_reversing_with_a_key_longer_than_255_stops_and_names_the_school() -> No
         assert School.objects.get(name="ß" * 200).name_key == "ss" * 200
     finally:
         # The failed reverse leaves 0010 applied, but later migrations (including packet references) are gone.
-        old_school = MigrationExecutor(connection).loader.project_state([AFTER]).apps.get_model("registration", "School")
+        old_apps = MigrationExecutor(connection).loader.project_state([AFTER]).apps
+        old_school = old_apps.get_model("registration", "School")
         old_school.objects.filter(name="ß" * 200).delete()
         _migrate(_latest())
 
