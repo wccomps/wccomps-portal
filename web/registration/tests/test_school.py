@@ -135,6 +135,29 @@ def test_saved_school_must_be_reconciled_not_randomly_assigned_or_unassigned(gol
     assert not Team.objects.filter(is_active=True, team_number=5).exists()
 
 
+@pytest.mark.parametrize("enrolled", [False, True], ids=["imported", "enrolled"])
+def test_wrong_saved_slot_shows_current_unassign_target_and_original_slot(gold_team_user, event, enrolled):
+    team = Team.objects.create(team_number=5, team_name="Team 05")
+    set_team_school(team, "Saved school", contact_email="c@example.edu")
+    assignment = event.team_assignments.get(team=team)
+    if enrolled:
+        _enrolled(event, assignment.school.name)
+    card = EventResult.objects.create(event=event, school=assignment.school, team_number=4, total_score=0, scorecard={})
+    client = _client(gold_team_user)
+    url = reverse("registration_event_detail", args=[event.pk])
+    detail = client.get(url).content.decode()
+    unassign = reverse("registration_unassign_team", args=[assignment.pk])
+    assert "Team 05</strong>" in detail and "has a saved card for Team 4" in detail
+    assert unassign in detail and UNASSIGN.search(detail)
+    assert "Assign Team Numbers" not in detail
+
+    client.post(unassign, {"school": assignment.school_id})
+    assert not event.team_assignments.exists() and not SchoolInfo.objects.filter(team=team).exists()
+    assert event.results.get() == card
+    detail = client.get(url).content.decode()
+    assert "has a saved card for Team 4" in detail and "Team 05</strong>" not in detail
+
+
 def test_assign_teams_skips_a_school_that_already_has_a_team(gold_team_user, event):
     set_team_school(
         Team.objects.create(team_number=4, team_name="Team 04"), "Example University", contact_email="c@example.edu"

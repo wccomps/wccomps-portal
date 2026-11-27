@@ -1,4 +1,4 @@
-"""Race the real roster writers against score sync using separate PostgreSQL sessions."""
+"""Race the real roster writers against service-score writers using separate PostgreSQL sessions."""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -10,6 +10,7 @@ from django.db import connection, connections, transaction
 from django.test import Client
 from django.urls import reverse
 from quotient.client import QuotientClient, ServiceExportEntry, TeamServiceExport
+from scoring.admin import ServiceScoreAdmin
 from scoring.models import ServiceDetail, ServiceScore
 from scoring.quotient_sync import check_sync, sync_service_scores
 
@@ -137,3 +138,54 @@ def test_import_can_take_roster_lock_inside_stops_run_lock(roster):
         assert locked and sync_service_scores()["teams_created"] == 1
     assert ServiceScore.objects.get(team=team).service_points == 40
     assert event.team_assignments.get().school.name == "Original College"
+
+
+@pytest.mark.parametrize("method", ["csv", "random"])
+def test_admin_first_score_serializes_with_automatic_claim(roster, admin_client, method, monkeypatch):
+    event, team, client = roster
+    ready, resume = Barrier(), Barrier()
+    original_save = ServiceScoreAdmin.save_model
+
+    def save_then_pause(admin, request, obj, form, change):
+        original_save(admin, request, obj, form, change)
+        ready.set()
+        assert resume.wait(10)
+
+    def admin_add():
+        try:
+            return admin_client.post(reverse("admin:scoring_servicescore_add"), {
+                "team": team.pk, "service_points": "40.00", "sla_violations": "0", "_save": "Save",
+            })
+        finally:
+            connections.close_all()
+
+    monkeypatch.setattr(ServiceScoreAdmin, "save_model", save_then_pause)
+    with ThreadPoolExecutor(1) as pool:
+        pending = pool.submit(admin_add)
+        try:
+            assert ready.wait(10)
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
+                assert cursor.fetchone() == (False,)
+                resume.set()
+                school_list_lock()
+                if method == "csv":
+                    with pytest.raises(ImportBlockedError, match="Team 3 is no longer free"):
+                        _claim(method, event, client)
+                else:
+                    response = _claim(method, event, client)
+                    assert response is not None and b"Not enough teams available" in response.content
+        finally:
+            resume.set()
+        assert pending.result(timeout=10).status_code == 302
+    team.refresh_from_db()
+    assert not team.is_active and not event.team_assignments.exists()
+    assert ServiceScore.objects.get(team=team).service_points == 40
+
+    # A normal edit of the committed row is still accepted.
+    score = ServiceScore.objects.get(team=team)
+    assert admin_client.post(reverse("admin:scoring_servicescore_change", args=[score.pk]), {
+        "team": team.pk, "service_points": "45.00", "sla_violations": "0", "_save": "Save",
+    }).status_code == 302
+    score.refresh_from_db()
+    assert score.service_points == 45

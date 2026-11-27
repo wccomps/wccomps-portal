@@ -923,16 +923,17 @@ def close_out_card_check(stage: EventStage) -> CloseOutCards:
     event = stage.event
     roster = _close_out_roster(event)
     _validate_mapping(event, roster)
-    if event is not None and (saved := list(event.results.all())):
+    if event is not None and (saved := list(event.results.select_related("school"))):
         assignments = {a.school_id: a for a in roster}
         schools = {}
         try:
             for result in saved:
                 assignment = assignments.get(result.school_id)
                 if assignment is None or assignment.team_number != result.team_number:
+                    held = f"currently assigned Team {assignment.team_number}" if assignment else "not assigned here"
                     raise CloseOutError(
-                        "The saved school and team number do not match the event's current roster. "
-                        "Have the event roster owner reconcile the pair. Nothing was closed out."
+                        f"{result.school.name} is {held}, so its saved school and team number do not match the roster. "
+                        f"{saved_slot_message(result.school.name, result.team_number)} Nothing was closed out."
                     )
                 score = frozen_final_score(
                     result.scorecard, result.version, result.team_number, assignment.team_name,

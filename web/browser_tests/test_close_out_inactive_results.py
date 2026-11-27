@@ -169,6 +169,9 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     assert not preview["preview"]
     if failure == "unassigned":
         assert "event roster owner" in preview["problem"] and preview["fixes"] == []
+    if failure == "wrong_school":
+        assert "Example School 50 is currently assigned Team 50" in preview["problem"]
+        assert "has a saved card for Team 41" in preview["problem"]
     queued = set(QueuedTask.objects.values_list("pk", flat=True))
     response = _response(client, event)
     assert not response["success"] and expected in response["message"]
@@ -186,8 +189,8 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     assert set(QueuedTask.objects.values_list("pk", flat=True)) == queued
 
 
-@pytest.mark.parametrize("cohort_conflict", [False, True], ids=["inverted-ranks", "mixed-cohorts"])
-def test_saved_ranks_share_a_single_cohort_order(stopped_event, gold_team_user, cohort_conflict):
+@pytest.mark.parametrize("conflict", ["inverted-ranks", "mixed-cohorts", "neighbor-total"])
+def test_saved_cards_agree_on_cohort_rank_and_neighbor_total(stopped_event, gold_team_user, conflict):
     event, _, _ = stopped_event
     Team.objects.filter(team_number=1).update(is_active=True)
     client = Client()
@@ -195,25 +198,40 @@ def test_saved_ranks_share_a_single_cohort_order(stopped_event, gold_team_user, 
     url = reverse("admin_competition_action")
     preview = client.post(url, {"action": "close_out_check"}).json()["preview"]
     for school, snapshot in current_snapshots(event).items():
-        rank = snapshot.score.rank if cohort_conflict else 3 - snapshot.score.rank
+        rank = 3 - snapshot.score.rank if conflict == "inverted-ranks" else snapshot.score.rank
         stats = snapshot.scorecard["stats"]
-        if cohort_conflict and rank == 1:
+        if conflict == "mixed-cohorts" and rank == 1:
             stats["team_count"] = 3
-        if not cohort_conflict:
+        if conflict == "inverted-ranks":
             peer_rank = 3 - rank
             stats["neighbors"] = [{
                 "rank": peer_rank, "total_score": {"$d": str(snapshot.score.total)}, "gap": 0,
+            }]
+        if conflict == "neighbor-total" and rank == 1:
+            claimed = snapshot.score.total - Decimal("100.00")
+            stats["neighbors"] = [{
+                "rank": 2, "total_score": {"$d": str(claimed)}, "gap": -100,
             }]
         snapshot.scorecard["score"]["rank"] = rank
         EventResult.objects.create(
             event=event, school_id=school, team_number=snapshot.score.team_number,
             rank=rank, total_score=snapshot.score.total, scorecard=snapshot.scorecard,
         )
-    expected = "Saved result cohorts conflict" if cohort_conflict else "Saved result ranks conflict"
-    assert expected in client.post(url, {"action": "close_out_check"}).json()["problem"]
+    saved_before = list(event.results.values())
+    archive = EventArchive.objects.create(event=event, data=b"old ZIP", retained_kind="finalize")
+    expected = {
+        "mixed-cohorts": "Saved result cohorts conflict",
+        "inverted-ranks": "Saved result ranks conflict",
+        "neighbor-total": "Saved scorecards disagree on the total for Rank 2",
+    }[conflict]
+    refused = client.post(url, {"action": "close_out_check"}).json()
+    assert expected in refused["problem"] and not refused["preview"]
     assert expected in _response(client, event, preview=preview)["message"]
     assert ServiceScore.objects.count() == 3 and Event.objects.get(pk=event.pk).is_active
-    assert not EventArchive.objects.filter(event=event).exists()
+    assert list(event.results.values()) == saved_before
+    archive.refresh_from_db()
+    assert bytes(archive.data) == b"old ZIP" and archive.close_out_data is None
+    assert not EventScoringEvidence.objects.filter(event=event).exists()
 
 
 @pytest.mark.browser

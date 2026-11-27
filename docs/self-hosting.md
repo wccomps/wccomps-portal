@@ -332,6 +332,9 @@ rank bounds and order, saved neighbors, and school-to-slot mapping. It uses curr
 saved results or prior archive. A changed roster or card set requires a reload and fresh preview before
 confirmation. In an existing event, have the roster owner reconcile an unmapped inactive school and slot without
 activating the team.
+The event page shows the current assignment separately from the saved slot that needs reconciliation, including
+imported schools with no enrollment. A saved school with neither an assignment nor an enrollment appears in
+the reconciliation notices.
 With no open event, the recovery workflow for unrecorded live scores uses the live school list.
 
 Do not cancel an open event with saved cards. If it already has Close Out evidence, reconcile it first. An open

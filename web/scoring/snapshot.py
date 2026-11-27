@@ -104,6 +104,7 @@ class FinalScore:
     service_credit: int
     sla_credit: int
     cohort: int | None = None
+    neighbors: tuple[tuple[int, Decimal], ...] = ()
 
     @classmethod
     def from_standing(cls, standing: Standing) -> FinalScore:
@@ -140,6 +141,11 @@ def validate_frozen_ranks(scores: Iterable[FinalScore]) -> None:
     for (rank, total), (next_rank, next_total) in pairwise(ranked):
         if rank == next_rank or total < next_total:
             raise ValueError("Saved result ranks conflict. Nothing was closed out.")
+    retained = dict(ranked)
+    for score in frozen:
+        for rank, total in score.neighbors:
+            if rank in retained and retained[rank] != total:
+                raise ValueError(f"Saved scorecards disagree on the total for Rank {rank}. Nothing was closed out.")
 
 
 def _rows(value: object) -> list[dict[str, object]]:
@@ -159,7 +165,7 @@ def _fields(row: dict[str, object], *, numbers: str = "", text: str = "", flags:
 
 def _validate_v1_details(
     context: dict[str, object], components: dict[str, Decimal], rank: int | None, score_total: Decimal,
-) -> int:
+) -> tuple[int, tuple[tuple[int, Decimal], ...]]:
     stats, scaling = context["stats"], context["scaling"]
     if not isinstance(stats, dict) or not isinstance(scaling, dict):
         raise ValueError
@@ -195,17 +201,20 @@ def _validate_v1_details(
         if row.get("max_points") is not None:
             _snapshot_number(row["max_points"])
     if rank is not None and not 1 <= rank <= count:
-        return count  # The caller reports the invalid overall rank.
+        return count, ()  # The caller reports the invalid overall rank.
     adjacent = set() if rank is None else {n for n in (rank - 1, rank + 1) if 1 <= n <= count}
+    neighbors = []
     for row in _rows(stats["neighbors"]):
         _positive_rank(row["rank"])
         neighbor = cast(int, row["rank"])
         if rank is None or neighbor not in adjacent:
             raise ValueError
         adjacent.remove(neighbor)
-        gap = _snapshot_number(row["total_score"]) - score_total
+        neighbor_total = _snapshot_number(row["total_score"])
+        gap = neighbor_total - score_total
         if gap != _snapshot_number(row["gap"]) or (neighbor < rank and gap < 0) or (neighbor > rank and gap > 0):
             raise ValueError
+        neighbors.append((neighbor, neighbor_total))
     if adjacent:
         raise ValueError
     for row in _rows(context["red_scores"]):
@@ -230,7 +239,7 @@ def _validate_v1_details(
     ):
         if _snapshot_number(context[total]) != sum(_snapshot_number(row[points]) for row in _rows(rows)):
             raise ValueError
-    return count
+    return count, tuple(neighbors)
 
 
 def _positive_rank(value: object) -> None:
@@ -264,7 +273,7 @@ def frozen_final_score(
         ):
             raise ValueError
         components = {field: _snapshot_number(score[field]) for field in _V1_CATEGORIES}
-        count = _validate_v1_details(context, components, rank, total)
+        count, neighbors = _validate_v1_details(context, components, rank, total)
         corrections = score.get("service_corrections", [])
         if not isinstance(corrections, list):
             raise ValueError
@@ -284,4 +293,4 @@ def frozen_final_score(
         raise ValueError("A saved scorecard cannot be read. Nothing was closed out.") from None
     if rank is not None and not 1 <= rank <= count:
         raise ValueError("Saved result rank is outside its recorded cohort. Nothing was closed out.")
-    return FinalScore(number, name, rank, total, components, raw_credit, sla_credit, count)
+    return FinalScore(number, name, rank, total, components, raw_credit, sla_credit, count, neighbors)

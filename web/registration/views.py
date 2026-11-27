@@ -441,27 +441,34 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     archive_problem = archive_reconciliation_problem(event) if event.is_active else ""
     saved_conflicts = saved_slots_needing_reconciliation(event) if event.is_active else {}
 
-    def assignment_problem(registration: TeamRegistration) -> str:
-        if (slot := saved_conflicts.get(normalize_school_name(registration.school_name))) is not None:
-            return saved_slot_message(registration.school_name, slot)
-        return ""
+    def assignment_problem(name: str, key: str) -> str:
+        slot = saved_conflicts.get(key)
+        return saved_slot_message(name, slot) if slot is not None else ""
 
-    rows = [
-        EventPageRow(
-            enrollment.registration,
-            by_registration.get(enrollment.registration_id)
-            or by_school.get(normalize_school_name(enrollment.registration.school_name)),
+    rows = []
+    for enrollment in enrollments:
+        registration = enrollment.registration
+        name_key = normalize_school_name(registration.school_name)
+        assignment = by_registration.get(enrollment.registration_id) or by_school.get(name_key)
+        school = assignment.school if assignment else None
+        rows.append(EventPageRow(
+            registration,
+            assignment,
             assignment_open=event.is_active and not archive_problem,
-            assignment_problem=assignment_problem(enrollment.registration),
-        )
-        for enrollment in enrollments
-    ]
+            assignment_problem=assignment_problem(school.name, school.name_key) if school else (
+                assignment_problem(registration.school_name, name_key)
+            ),
+        ))
     matched = {row.assignment.pk for row in rows if row.assignment}
     rows.extend(
-        EventPageRow(assignment.registration, assignment)
+        EventPageRow(
+            assignment.registration, assignment,
+            assignment_problem=assignment_problem(assignment.school.name, assignment.school.name_key),
+        )
         for assignment in sorted(assignments, key=lambda a: a.team.team_number)
         if assignment.pk not in matched
     )
+    missing_rows = saved_conflicts.keys() - {normalize_school_name(row.school_name) for row in rows}
 
     sent = packets_sent(event)
     saved_slots = set(event.results.values_list("team_number", flat=True)) if event.is_active and not sent else set()
@@ -479,6 +486,11 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
         "assignable_count": sum(row.can_assign for row in rows),
+        "saved_slot_notices": [
+            saved_slot_message(name, slot)
+            for name, slot in event.results.filter(school__name_key__in=missing_rows)
+            .values_list("school__name", "team_number")
+        ],
         "packets_sent": sent,
         "removable_assignments": removable,
         "archives": _available_archives(event),
