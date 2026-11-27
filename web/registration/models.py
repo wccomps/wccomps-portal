@@ -358,6 +358,7 @@ class EventArchive(models.Model):
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
     data = models.BinaryField(null=True, editable=False)
     close_out_data = models.BinaryField(null=True, editable=False)
+    retained_kind = models.CharField(max_length=9, blank=True, default="", editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 
 

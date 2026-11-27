@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from packets.models import Packet
 from packets.services import teams_without_delivered_copy
-from registration.stage import ACTIONS, Action, EventStage
+from registration.stage import ACTIONS, Action, EventStage, Stage
 
 from core.admin_views.places import PLACES, STEPS, Section, action_url
 from core.models import CompetitionConfig
@@ -40,6 +40,7 @@ class EventStatus(StrEnum):
     STOPPED = "stopped"  # An event is open, teams have scores and the competition isn't running
     NOT_STARTED = "not_started"  # An event is open and no team has scores yet
     NO_EVENT = "no_event"  # No event is open and the competition isn't running, whether or not teams have scores
+    RECONCILE = "reconcile"
 
 
 # Each status's word and badge variant in the Event section
@@ -48,6 +49,7 @@ STATUS_SHOWN: dict[EventStatus, tuple[str, str]] = {
     EventStatus.STOPPED: ("Stopped", "warning"),
     EventStatus.NOT_STARTED: ("Not started", "info"),
     EventStatus.NO_EVENT: ("No event", "neutral"),
+    EventStatus.RECONCILE: ("Needs archive reconciliation", "warning"),
 }
 
 
@@ -56,6 +58,8 @@ def _status(stage: EventStage) -> EventStatus:
         return EventStatus.RUNNING
     if stage.event is None:
         return EventStatus.NO_EVENT
+    if stage.stage == Stage.RECONCILE:
+        return EventStatus.RECONCILE
     return EventStatus.STOPPED if stage.played else EventStatus.NOT_STARTED
 
 
@@ -175,6 +179,8 @@ class EventPanel:
     @property
     def start_offered(self) -> bool:
         """Start before any team has scores, or again while running after a start that left something off."""
+        if self.stage.stage == Stage.RECONCILE:
+            return False
         return not (self.stage.running or self.stage.played) or (self.stage.running and self.facts.last_run_incomplete)
 
     @property
@@ -215,6 +221,9 @@ def _state(action: Action, stage: EventStage) -> StepState:
 
 
 def event_panel(facts: EventFacts) -> EventPanel:
+    if facts.stage.stage == Stage.RECONCILE:
+        actions = (Action.STOP, Action.RECONCILE) if facts.stage.running else (Action.RECONCILE,)
+        return EventPanel(facts, [ShownStep(action, _state(action, facts.stage), "") for action in actions])
     steps = [
         ShownStep(action, _state(action, facts.stage), DETAILS[action](facts) if action in DETAILS else "")
         for action in STEPS

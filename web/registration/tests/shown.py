@@ -4,6 +4,7 @@ from datetime import date
 
 from registration.models import Event, Season
 from registration.services import NewEvent, NewSeason, close_out_card_check
+from registration.stage import event_stage
 
 
 def new_event(name: str, day: date, event_type: str, season: NewSeason | None = None) -> NewEvent:
@@ -13,4 +14,6 @@ def new_event(name: str, day: date, event_type: str, season: NewSeason | None = 
 
 
 def close_out_preview(event: Event | None) -> str:
-    return close_out_card_check(event).preview_key(event)
+    stage = event_stage()
+    assert stage.event == event
+    return close_out_card_check(stage).preview_key(event)

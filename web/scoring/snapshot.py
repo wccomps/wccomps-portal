@@ -36,7 +36,7 @@ def _encode(value: object) -> object:
     if isinstance(value, Decimal):
         return {_DECIMAL: str(value)}
     if isinstance(value, dict):
-        return {key: _encode(item) for key, item in value.items()}
+        return {str(key): _encode(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_encode(item) for item in value]
     return value
@@ -124,10 +124,10 @@ class SchoolSnapshot:
 def scorecard_fingerprint(schools: dict[int, SchoolSnapshot]) -> str:
     """Preserve the existing mail-audit encoding of school → (slot, serialized card)."""
     payload = {
-        school: (cast(dict[str, int], card.scorecard["team"])["team_number"], card.scorecard)
+        str(school): (card.score.team_number, card.scorecard)
         for school, card in schools.items()
     }
-    normalized = json.dumps(json.loads(json.dumps(payload)), sort_keys=True)
+    normalized = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
@@ -157,7 +157,7 @@ def _fields(row: dict[str, object], *, numbers: str = "", text: str = "", flags:
         raise ValueError
 
 
-def _validate_v1_details(context: dict[str, object], components: dict[str, Decimal], ranked: bool) -> int:
+def _validate_v1_details(context: dict[str, object], components: dict[str, Decimal], rank: int | None) -> int:
     stats, scaling = context["stats"], context["scaling"]
     if not isinstance(stats, dict) or not isinstance(scaling, dict):
         raise ValueError
@@ -177,10 +177,12 @@ def _validate_v1_details(context: dict[str, object], components: dict[str, Decim
     categories = stats["category_ranks"]
     if not isinstance(categories, dict):
         raise ValueError
-    if ranked and any(components[field] and name not in categories for field, name in _V1_CATEGORIES.items()):
+    if rank is not None and any(components[field] and name not in categories for field, name in _V1_CATEGORIES.items()):
         raise ValueError
     for row in _rows(list(categories.values())):
         _positive_rank(row["rank"])
+        if rank is not None and cast(int, row["rank"]) > count:
+            raise ValueError
         _fields(row, numbers="avg min max value delta", flags="below_avg")
     for row in _rows(stats["service_stats"]):
         _positive_rank(row["rank"])
@@ -192,6 +194,9 @@ def _validate_v1_details(context: dict[str, object], components: dict[str, Decim
             _snapshot_number(row["max_points"])
     for row in _rows(stats["neighbors"]):
         _positive_rank(row["rank"])
+        neighbor = cast(int, row["rank"])
+        if rank is None or neighbor > count or abs(neighbor - rank) > 1:
+            raise ValueError
         _fields(row, numbers="total_score gap")
     for row in _rows(context["red_scores"]):
         _fields(row, numbers="points_per_team", text="affected_boxes_display affected_service")
@@ -206,6 +211,15 @@ def _validate_v1_details(context: dict[str, object], components: dict[str, Decim
         _fields(row, numbers="points_awarded", text="description")
         if row.get("max_points") is not None:
             _snapshot_number(row["max_points"])
+    for total, rows in (
+        ("red_total", context["red_scores"]),
+        ("orange_total", context["orange_scores"]),
+        ("inject_total", stats["inject_stats"]),
+        ("service_total", stats["service_stats"]),
+        ("service_sla_total", stats["service_stats"]),
+    ):
+        if _snapshot_number(context[total]) and not rows:
+            raise ValueError
     return count
 
 
@@ -240,9 +254,7 @@ def frozen_final_score(
         ):
             raise ValueError
         components = {field: _snapshot_number(score[field]) for field in _V1_CATEGORIES}
-        count = _validate_v1_details(context, components, rank is not None)
-        for field in ("red_total", "inject_total", "orange_total", "service_total", "service_sla_total"):
-            _snapshot_number(context[field])
+        count = _validate_v1_details(context, components, rank)
         corrections = score.get("service_corrections", [])
         if not isinstance(corrections, list):
             raise ValueError

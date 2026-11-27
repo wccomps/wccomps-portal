@@ -74,7 +74,10 @@ def _assert_nothing_happened(event=None):
         assert event.is_active
 
 
-def test_close_out_streams_each_step_and_closes_the_open_event(client):
+@pytest.mark.parametrize("discord", [True, False], ids=["with-discord", "without-discord"])
+def test_close_out_streams_each_step_and_closes_the_open_event(client, settings, discord):
+    if not discord:
+        settings.DISCORD_BOT_TOKEN = ""
     event = _open_event()
     _team_with_school()
 
@@ -83,16 +86,16 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
     assert [line.get("step") for line in lines[:-1]] == [
         "Closing out: archiving the results, then clearing the live data"
     ]
+    cleanup = ", and queued Discord cleanup" if discord else ""
     assert lines[-1] == {
         "done": True,
         "success": True,
-        "message": "Closed out Inv: archived 1 school result(s), deleted 1 ServiceScore, and "
-        "queued the Discord cleanup (the bot reports it in the ops channel). Next: Import the next school list to "
-        "open an event.",
+        "message": f"Closed out Inv: archived 1 school result(s), deleted 1 ServiceScore{cleanup}. "
+        "Next: Import the next school list to open an event.",
     }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
-    assert QueuedTask.objects.filter(task_type="reconcile_teams").count() == 1
+    assert QueuedTask.objects.filter(task_type="reconcile_teams").exists() is discord
 
 
 @pytest.mark.parametrize("typed", [None, "", "no"])

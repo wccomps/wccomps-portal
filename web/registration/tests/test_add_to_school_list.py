@@ -3,8 +3,9 @@
 from datetime import date
 
 import pytest
+from scoring.models import ServiceScore
 
-from registration.models import Event, EventTeamAssignment, School, Season
+from registration.models import Event, EventResult, EventTeamAssignment, School, Season
 from registration.services import (
     ImportBlockedError,
     SchoolListRow,
@@ -13,6 +14,7 @@ from registration.services import (
     held_schools,
     set_team_school,
 )
+from team.forms import validate_csv_additions
 from team.models import SchoolInfo, Team, default_team_name
 
 pytestmark = pytest.mark.django_db
@@ -113,7 +115,7 @@ def test_adding_needs_the_open_event(season, event, teams):
 def test_a_team_given_a_school_since_the_preview_refuses_the_whole_add(event, teams):
     _school_on(teams[1], "School One")
 
-    with pytest.raises(ImportBlockedError, match="Team 2 was given a school since the preview"):
+    with pytest.raises(ImportBlockedError, match="Team 2 is no longer free"):
         add_to_school_list(event, [_row(3, "School Two"), _row(2, "School Three")], "gold")
 
     assert _holders() == {2: "School One"}
@@ -123,7 +125,7 @@ def test_a_team_given_a_school_since_the_preview_refuses_the_whole_add(event, te
 def test_a_team_held_at_the_open_event_alone_is_not_free(event, teams):
     EventTeamAssignment.objects.create(event=event, team=teams[1], school=School.for_name("School One"))
 
-    with pytest.raises(ImportBlockedError, match="Team 2 was given a school since the preview"):
+    with pytest.raises(ImportBlockedError, match="Team 2 is no longer free"):
         add_to_school_list(event, [_row(2, "School Two")], "gold")
 
     assert EventTeamAssignment.objects.get(event=event, team=teams[1]).school.name == "School One"
@@ -150,6 +152,26 @@ def test_free_teams_are_those_no_school_holds(event, teams):
     assert list(free_teams(event).order_by("team_number").values_list("team_number", flat=True)) == [2, 3, 4]
 
 
+def test_csv_add_cannot_preview_or_commit_a_different_slot_for_a_saved_school(event, teams):
+    school = School.for_name("Saved school")
+    EventResult.objects.create(event=event, school=school, team_number=1, total_score=0, scorecard={})
+    preview = validate_csv_additions([{"school_name": school.name}], event)
+    assert preview["teams_to_create"] == [] and "has a saved card for Team 1" in preview["errors"][0]
+    with pytest.raises(ImportBlockedError, match="has a saved card for Team 1"):
+        add_to_school_list(event, [_row(2, school.name)], "gold")
+    assert not event.team_assignments.exists()
+
+
+def test_csv_commit_refuses_a_slot_that_received_scores_after_preview(event, teams):
+    ServiceScore.objects.create(team=teams[1], service_points=5)
+    with pytest.raises(ImportBlockedError, match="Team 2 is no longer free"):
+        add_to_school_list(event, [_row(2, "Another school")], "gold")
+    add_to_school_list(event, [_row(3, "Another school")], "gold")
+    assert EventTeamAssignment.objects.get(event=event).team == teams[2]
+    assert not Team.objects.get(pk=teams[1].pk).is_active
+    assert ServiceScore.objects.get(team=teams[1]).service_points == 5
+
+
 @pytest.mark.parametrize("leftover", ["discord_link", "ticket", "ticket_counter"])
 def test_a_team_still_carrying_per_team_data_is_not_free(event, teams, leftover):
     from django.contrib.auth.models import User
@@ -166,7 +188,7 @@ def test_a_team_still_carrying_per_team_data_is_not_free(event, teams, leftover)
         Team.objects.filter(pk=teams[1].pk).update(ticket_counter=1)
 
     assert 2 not in set(free_teams(event).values_list("team_number", flat=True))
-    with pytest.raises(ImportBlockedError, match="Team 2 was given a school since the preview"):
+    with pytest.raises(ImportBlockedError, match="Team 2 is no longer free"):
         add_to_school_list(event, [_row(2, "School Two")], "gold")
 
 

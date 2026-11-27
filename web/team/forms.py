@@ -25,6 +25,8 @@ from registration.services import (
     held_schools,
     import_problem,
     import_school_list,
+    saved_slot_message,
+    saved_slots_needing_reconciliation,
 )
 
 from core.csv_export import csv_writer, unquote_cell
@@ -386,6 +388,13 @@ def validate_csv_additions(rows: list[CSVRowData], event: Event | NewEvent) -> C
     warnings: list[str] = []
 
     keys = [normalize_school_name(row["school_name"]) for row in rows]
+    saved = saved_slots_needing_reconciliation(event)
+    errors.extend(
+        saved_slot_message(row["school_name"], saved[key])
+        for row, key in zip(rows, keys, strict=True) if key in saved
+    )
+    if errors:
+        return {"teams_to_create": [], "errors": errors, "warnings": warnings}
     on_list = held_schools(keys, event)
     new_rows = [row for row, key in zip(rows, keys, strict=True) if key not in on_list]
     if skipped := [row["school_name"] for row, key in zip(rows, keys, strict=True) if key in on_list]:

@@ -314,7 +314,8 @@ document.addEventListener('alpine:init', () => {
         async checkCloseOut() {
             try {
                 const result = await wcPost(actionUrl, { action: 'close_out_check' });
-                this.closeOutState = result.success ? {status: 'complete', result} : {status: 'failed'};
+                this.closeOutState = result.success && result.event === this.openEvent
+                    ? {status: 'complete', result} : {status: 'failed'};
             } catch (e) {
                 this.closeOutState = {status: 'failed'};
             }
@@ -324,14 +325,16 @@ document.addEventListener('alpine:init', () => {
             if (this.closeOutBlocked) return;
             const typed = typedConfirm('CLOSE OUT THE EVENT?\n\n' +
                 'This archives the reviewed school scorecards, deletes live scores, tickets and blue team Discord links, ' +
-                'closes the event and queues Discord cleanup.\n' +
-                'If Nextcloud is configured when the worker runs, it deletes all team accounts and their files. ' +
+                'closes the event and queues Discord cleanup where configured.\n' +
+                'If Nextcloud is configured when cleanup runs, it can delete team accounts and their files. ' +
                 'The Portal archive does not include those files.\n' +
                 'This cannot be undone. Review the archive set and notices before proceeding.');
             if (typed) {
+                const preview = this.closeOutState.result.preview;
+                this.closeOutState = {status: 'submitted'};
                 this.doStreamAction('close_out_event', {
                     confirm: typed,
-                    preview: this.closeOutState.result.preview,
+                    preview,
                     open_event: this.openEvent,
                     new_name: this.closeOutName,
                     new_date: this.closeOutDate,

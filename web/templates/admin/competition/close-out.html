@@ -89,14 +89,14 @@
             </div>
         </template>
         <c-alert variant="warning">
-            If Nextcloud is configured when the worker runs, its cleanup deletes all team accounts and their files.
+            If Nextcloud is configured when cleanup runs, it can delete team accounts and their files.
             Preserve required files before confirming: the Portal archive does not include them.
         </c-alert>
         <p>
             Close Out saves the event's school scorecards and archive, then deletes the live data
             (scores, tickets, orange assignments and check-ins, team Discord links and queued announcements), resets
             the ticket numbers, closes the event, clears the schedule, the start message and the scoring engine's box
-            list, and queues the Discord cleanup (team channels and roles).
+            list, and queues Discord cleanup (team channels and roles) where configured.
         </p>
         <c-button_row>
             <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">

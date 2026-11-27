@@ -40,6 +40,9 @@
                 <strong>{{ total_assigned }}</strong> teams assigned,
                 <strong>{{ assignable_count }}</strong> ready to assign
             </p>
+            {% for notice in saved_slot_notices %}
+                <p>{{ notice }}</p>
+            {% endfor %}
             {% if packets_sent %}
                 <p class="text-success">Packets sent for this event, so its teams can no longer be unassigned here.</p>
             {% endif %}

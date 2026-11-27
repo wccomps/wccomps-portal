@@ -82,7 +82,7 @@ class SchoolChangedError(Exception):
 
 
 class SavedRosterError(SchoolChangedError):
-    """A roster write would break a school/slot pair referenced by a saved card."""
+    """Retained event evidence prevents a roster change."""
 
 
 SAVED_ROSTER = "Saved scorecards need their school and team number kept together. Review Close Out first."
@@ -204,6 +204,8 @@ def set_team_school(
     event = Event.objects.open()
     if problem := archive_reconciliation_problem(event):
         raise SavedRosterError(problem)
+    if expect_free and info is None and scored_teams().filter(pk=team.pk).exists():
+        raise SavedRosterError(f"Team {team.team_number} has scores. Have the roster owner reconcile that slot.")
     renaming = rename and info is not None
     school = _rename(info.school, school_name, event) if rename and info else School.for_name(school_name)
     if event is not None and event.results.filter(
@@ -304,11 +306,12 @@ def _enqueue_unless_pending(payload: ClearTeamChannels | ResetNextcloudTeam) -> 
         QueuedTask.enqueue(payload)
 
 
-def queue_team_reconcile(actor: str, open_event_id: int | None) -> None:
+def queue_team_reconcile(actor: str, open_event_id: int | None) -> bool:
     """Queue the teardown and set-up of the team channels and of the Nextcloud accounts, for the open event
     open_event_id (None, none open), in the caller's transaction."""
-    QueuedTask.enqueue(ReconcileTeams(requested_by=actor, open_event_id=open_event_id))
+    discord = QueuedTask.enqueue(ReconcileTeams(requested_by=actor, open_event_id=open_event_id))
     QueuedTask.enqueue(ReconcileNextcloud(requested_by=actor, open_event_id=open_event_id))
+    return bool(discord)
 
 
 def activate_teams(teams: list[Team]) -> int:
@@ -330,7 +333,7 @@ def remove_team_school(team: Team, expected_school_id: int | None = None) -> Non
     """
     school_list_lock()
     Team.objects.select_for_update().filter(pk=team.pk).first()
-    if DiscordLink.objects.filter(team=team, is_active=True).exists():
+    if linked_roster_teams().filter(pk=team.pk).exists():
         raise TeamLinkedError(LINKED_TEAM_REMOVE)
     event = Event.objects.open()
     if problem := archive_reconciliation_problem(event):
@@ -558,15 +561,18 @@ def add_problem(event: Event | NewEvent) -> str:
     return archive_reconciliation_problem(open_event) if open_event == event else ADD_NEEDS_OPEN_EVENT
 
 
+def linked_roster_teams() -> QuerySet[Team]:
+    return Team.objects.filter(Exists(DiscordLink.objects.filter(team=OuterRef("pk"), is_active=True)))
+
+
 def free_teams(event: Event) -> QuerySet[Team]:
-    """Teams no school holds and nobody used: not on the school list, not assigned at the event (the open one), and
-    carrying no per-team data a school left behind (active blue team Discord links, tickets, a ticket counter). A
-    Discord role or category left on one is removed when it is handed over (set_team_school)."""
+    """Unassigned slots without saved cards or live scoring, links, or ticket history."""
     return Team.objects.filter(
         ~Exists(SchoolInfo.objects.filter(team=OuterRef("pk"))),
         ~Exists(event.team_assignments.filter(team=OuterRef("pk"))),
         ~Exists(event.results.filter(team_number=OuterRef("team_number"))),
-        ~Exists(DiscordLink.objects.filter(team=OuterRef("pk"), is_active=True)),
+        ~Exists(linked_roster_teams().filter(pk=OuterRef("pk"))),
+        ~Exists(scored_teams().filter(pk=OuterRef("pk"))),
         ~Exists(Ticket.objects.filter(team=OuterRef("pk"))),
         ticket_counter=0,
     )
@@ -578,6 +584,15 @@ def held_schools(name_keys: Iterable[str], event: Event) -> set[str]:
     on_list = SchoolInfo.objects.filter(school__name_key__in=keys).values_list("school__name_key", flat=True)
     at_event = event.team_assignments.filter(school__name_key__in=keys).values_list("school__name_key", flat=True)
     return set(on_list) | set(at_event)
+
+
+def saved_slots_needing_reconciliation(event: Event) -> dict[str, int]:
+    matching = event.team_assignments.filter(school_id=OuterRef("school_id"), team__team_number=OuterRef("team_number"))
+    return dict(event.results.filter(~Exists(matching)).values_list("school__name_key", "team_number"))
+
+
+def saved_slot_message(school: str, slot: int) -> str:
+    return f"{school} has a saved card for Team {slot}. Have the roster owner reconcile that school and slot."
 
 
 @transaction.atomic
@@ -597,8 +612,12 @@ def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
         raise ImportBlockedError(f"These teams no longer exist: {', '.join(missing)}. Upload the file again.")
     free = set(free_teams(event).filter(pk__in=[team.pk for team in teams.values()]).values_list("pk", flat=True))
     if taken := [row.team_number for row in rows if teams[row.team_number].pk not in free]:
-        raise ImportBlockedError(f"Team {taken[0]} was given a school since the preview. Upload the file again.")
+        raise ImportBlockedError(f"Team {taken[0]} is no longer free. Upload the file again.")
     held = held_schools((normalize_school_name(row.school_name) for row in rows), event)
+    saved = saved_slots_needing_reconciliation(event)
+    for row in rows:
+        if (slot := saved.get(normalize_school_name(row.school_name))) is not None:
+            raise ImportBlockedError(saved_slot_message(row.school_name, slot))
     if listed := [row.school_name for row in rows if normalize_school_name(row.school_name) in held]:
         raise ImportBlockedError(f"{listed[0]} is already on the list. Upload the file again.")
 
@@ -704,6 +723,7 @@ class CloseOutOutcome:
     event: Event
     results: int
     wiped: WipedData
+    discord_cleanup_queued: bool
 
 
 # A row changed since the REPEATABLE READ snapshot, and a deadlock (a defence: not every writer takes TeamQuerySet.lock)
@@ -744,7 +764,7 @@ def _refusing_conflicts() -> Iterator[None]:
 def _close_out(target: Event | NewEvent, actor: str, preview: str) -> CloseOutOutcome:
     """Archive selected cards and evidence before wiping live data; the school list survives for the next import."""
     with _locked_transition(lambda stage: _stale_target(target, stage) or close_out_problem(stage)) as (config, stage):
-        cards = close_out_card_check(stage.event)
+        cards = close_out_card_check(stage)
         if not constant_time_compare(preview, cards.preview_key(stage.event)):
             raise CloseOutError(
                 "The Close Out preview changed. Reload and review it again. Nothing was closed out."
@@ -755,7 +775,7 @@ def _close_out(target: Event | NewEvent, actor: str, preview: str) -> CloseOutOu
         event.close()
         _reset_for_next_event(config)
         # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
-        queue_team_reconcile(actor, None)
+        discord_cleanup_queued = queue_team_reconcile(actor, None)
         AuditLog.objects.create(
             action=EVENT_CLOSED_OUT,
             admin_user=actor,
@@ -769,7 +789,7 @@ def _close_out(target: Event | NewEvent, actor: str, preview: str) -> CloseOutOu
                 "ticket_counters_reset": wiped.ticket_counters_reset,
             },
         )
-    return CloseOutOutcome(event, results, wiped)
+    return CloseOutOutcome(event, results, wiped, discord_cleanup_queued)
 
 
 def _assign_school_list(event: Event) -> None:
@@ -895,10 +915,11 @@ class CloseOutCards:
         return salted_hmac("close-out-preview", repr(reviewed), algorithm="sha256").hexdigest()
 
 
-def close_out_card_check(event: Event | None) -> CloseOutCards:
-    """Select the cards used by both Gold's preview and the transactional Close Out."""
-    if problem := archive_reconciliation_problem(event):
-        raise CloseOutError(problem)
+def close_out_card_check(stage: EventStage) -> CloseOutCards:
+    """Select the cards using the same event and reconciliation decision as the caller."""
+    if stage.archive_problem:
+        raise CloseOutError(stage.archive_problem)
+    event = stage.event
     roster = _close_out_roster(event)
     _validate_mapping(event, roster)
     if event is not None and (saved := list(event.results.all())):

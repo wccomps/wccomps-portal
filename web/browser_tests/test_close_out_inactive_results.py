@@ -92,7 +92,8 @@ def _response(client, event, **fields):
 @pytest.mark.parametrize(
     "failure",
     ["unassigned", "correction", "malformed", "incomplete", "details", "cohort",
-     "wrong_school", "missing_category", "detail_rank", "modifier", "weight", "version"],
+     "wrong_school", "missing_category", "detail_rank", "category_bound", "neighbor_bound", "missing_detail_rows",
+     "modifier", "weight", "version"],
 )
 def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     event, packet, batch = stopped_event
@@ -120,6 +121,13 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
             del card["stats"]["category_ranks"]["services"]
         elif failure == "detail_rank":
             card["stats"]["service_stats"][0]["rank"] = "1"
+        elif failure == "category_bound":
+            card["stats"]["category_ranks"]["services"]["rank"] = card["stats"]["team_count"] + 1
+        elif failure == "neighbor_bound":
+            card["stats"]["neighbors"] = [{"rank": card["stats"]["team_count"] + 1, "total_score": 7, "gap": 5}]
+        elif failure == "missing_detail_rows":
+            card["stats"]["inject_stats"] = []
+            card["inject_total"] = 1
         elif failure == "modifier":
             card["scaling"]["service_modifier"] = -1
         elif failure == "weight":
@@ -131,7 +139,6 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
         )
         expected = {
             "wrong_school": "do not match",
-            "cohort": "rank is outside its recorded cohort",
             "version": "uses an unsupported version",
         }.get(failure, "A saved scorecard cannot be read")
     saved_before = list(event.results.values())
@@ -161,7 +168,7 @@ def test_saved_ranks_share_a_single_cohort_order(stopped_event, gold_team_user, 
     for school, snapshot in current_snapshots(event).items():
         rank = snapshot.score.rank if cohort_conflict else 3 - snapshot.score.rank
         if cohort_conflict and rank == 1:
-            snapshot.scorecard["stats"]["team_count"] = 1
+            snapshot.scorecard["stats"]["team_count"] = 3
         snapshot.scorecard["score"]["rank"] = rank
         EventResult.objects.create(
             event=event, school_id=school, team_number=snapshot.score.team_number,
@@ -190,12 +197,41 @@ def test_stale_gold_preview_refuses_before_archiving_or_wiping(stopped_event, go
         Team.objects.filter(team_number=1).update(is_active=False)
         page.get_by_role("button", name="Close Out Event").click()
         expect(page.get_by_text("The Close Out preview changed.", exact=False)).to_be_visible()
+        expect(page.get_by_role("button", name="Close Out Event")).to_be_disabled()
         assert Event.objects.get(pk=event.pk).is_active and ServiceScore.objects.count() == 3
         assert not event.results.exists() and not EventArchive.objects.filter(event=event).exists()
         page.reload()
         expect(page.get_by_text("Team 1 (Example School 1, inactive)", exact=False)).to_be_visible()
         page.get_by_role("button", name="Close Out Event").click()
         expect(page.get_by_text("archived 1 school result(s)", exact=False)).to_be_visible()
+
+
+@pytest.mark.browser
+def test_preview_response_for_another_open_event_requires_reload(
+    stopped_event, gold_team_user, live_server, pw_browser,
+):
+    event, _, _ = stopped_event
+    other = Event.objects.create(
+        season=event.season, name="Another event", date=event.date, event_type=event.event_type,
+    )
+    with create_session_context(pw_browser, live_server, gold_team_user) as context:
+        def route_request(route):
+            request = route.request
+            if not request.url.startswith(live_server.url + "/"):
+                route.abort()
+                return
+            if request.method == "POST" and request.url.endswith(reverse("admin_competition_action")):
+                Event.objects.filter(pk=event.pk).update(is_active=False)
+                Event.objects.filter(pk=other.pk).update(is_active=True)
+            route.continue_()
+
+        context.route("**/*", route_request)
+        page = context.new_page()
+        page.goto(live_server.url + reverse("admin_competition"))
+        expect(page.get_by_text("Couldn't preview Close Out.", exact=False)).to_be_visible()
+        expect(page.get_by_role("button", name="Close Out Event")).to_be_disabled()
+    assert not EventArchive.objects.exists()
+    assert ServiceScore.objects.count() == 3
 
 
 @pytest.mark.browser
@@ -341,7 +377,7 @@ def test_historical_v1_card_and_finalize_zip_survive_close_out(
     old_zip = BytesIO()
     with ZipFile(old_zip, "w") as archive:
         archive.writestr("original-finalize.txt", "Original synthetic ZIP")
-    historical = EventArchive.objects.create(event=event, data=old_zip.getvalue())
+    historical = EventArchive.objects.create(event=event, data=old_zip.getvalue(), retained_kind="finalize")
     prompts = []
     with create_session_context(pw_browser, live_server, gold_team_user) as context:
         context.route(
@@ -363,7 +399,7 @@ def test_historical_v1_card_and_finalize_zip_survive_close_out(
         expect(page.get_by_text("Preserve required files", exact=False)).to_be_visible()
         page.get_by_role("button", name="Close Out Event").click()
         expect(page.get_by_text("archived 1 school result(s)", exact=False)).to_be_visible()
-        assert "If Nextcloud is configured when the worker runs, it deletes all team accounts" in prompts[0]
+        assert "If Nextcloud is configured when cleanup runs, it can delete team accounts" in prompts[0]
         page.goto(live_server.url + reverse("registration_event_detail", args=[event.pk]))
         with page.expect_download() as old:
             page.get_by_role("link", name="Download retained Finalize Archive (ZIP)").click()
@@ -403,6 +439,9 @@ def test_archive_only_event_gets_reconciliation_not_cancel_or_close_out(
         page = context.new_page()
         page.goto(live_server.url + reverse("admin_competition"))
         expect(page.locator("#close-out").get_by_text(message, exact=False)).to_be_visible()
+        expect(page.get_by_text("Needs archive reconciliation", exact=True)).to_be_visible()
+        expect(page.get_by_text(message, exact=False)).to_have_count(2)
+        expect(page.get_by_role("button", name="Start Competition Again")).to_have_count(0)
         expect(page.get_by_role("button", name="Cancel Event", exact=True)).to_have_count(0)
         expect(page.get_by_role("button", name="Close Out Event", exact=True)).to_have_count(0)
     client = Client()

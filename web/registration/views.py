@@ -6,7 +6,9 @@ from typing import cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Count, F, Q
+from django.db.models.expressions import Combinable
+from django.db.models.functions import Coalesce
 from django.forms import CheckboxSelectMultiple
 from django.http import Http404, HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
@@ -26,7 +28,6 @@ from .locks import school_list_lock
 from .models import (
     Event,
     EventArchive,
-    EventResult,
     EventTeamAssignment,
     RegistrationEventEnrollment,
     RegistrationOpen,
@@ -49,7 +50,10 @@ from .services import (
     delete_season,
     event_delete_problem,
     free_teams,
+    linked_roster_teams,
     remove_team_school,
+    saved_slot_message,
+    saved_slots_needing_reconciliation,
     school_clashes,
     season_delete_problem,
     set_team_school,
@@ -446,12 +450,14 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     )
 
     sent = packets_sent(event)
+    saved_conflicts = saved_slots_needing_reconciliation(event) if event.is_active else {}
     archive_problem = archive_reconciliation_problem(event) if event.is_active else ""
     saved_slots = set(event.results.values_list("team_number", flat=True)) if event.is_active and not sent else set()
+    linked = set(linked_roster_teams().values_list("pk", flat=True)) if event.is_active and not sent else set()
     status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
     removable = {
         a.pk for a in assignments if event.is_active and not sent and not archive_problem
-        and a.team.team_number not in saved_slots
+        and a.team.team_number not in saved_slots and a.team_id not in linked
     }
     context = {
         "event": event,
@@ -460,7 +466,16 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "rows": rows,
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
-        "assignable_count": 0 if archive_problem else sum(1 for row in rows if row.can_assign),
+        "assignable_count": 0 if archive_problem else sum(
+            1 for row in rows if row.can_assign
+            and row.registration is not None
+            and normalize_school_name(row.registration.school_name) not in saved_conflicts
+        ),
+        "saved_slot_notices": [
+            saved_slot_message(row.registration.school_name, slot)
+            for row in rows if row.registration is not None
+            and (slot := saved_conflicts.get(normalize_school_name(row.registration.school_name))) is not None
+        ],
         "packets_sent": sent,
         "removable_assignments": removable,
         "archives": _available_archives(event),
@@ -469,27 +484,23 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     return render(request, "registration/events/detail.html", context)
 
 
-_KNOWN_FINALIZE = Q(close_out_data__isnull=False) | (
-    Q(event__is_active=True) & Q(Exists(EventResult.objects.filter(event_id=OuterRef("event_id"))))
-)
-_ARCHIVE_VERSIONS = {
-    "close_out": ("close_out_data", "Close Out Archive", Q(close_out_data__isnull=False)),
-    "finalize": ("data", "retained Finalize Archive", Q(data__isnull=False) & _KNOWN_FINALIZE),
-    "historical": ("data", "Historical Archive (capture type unrecorded)", Q(data__isnull=False) & ~_KNOWN_FINALIZE),
+_HAS_RETAINED = Q(data__isnull=False)
+_HAS_CAPTURE = Q(close_out_data__isnull=False)
+_ARCHIVE_VERSIONS: dict[str, tuple[Combinable, str, Q]] = {
+    "close_out": (
+        Coalesce("close_out_data", "data"), "Close Out Archive",
+        _HAS_CAPTURE | (_HAS_RETAINED & Q(retained_kind="close_out")),
+    ),
+    "finalize": (F("data"), "retained Finalize Archive", _HAS_RETAINED & Q(retained_kind="finalize")),
+    "historical": (F("data"), "Historical Archive (capture type unrecorded)", _HAS_RETAINED & Q(retained_kind="")),
 }
 
 
 def _available_archives(event: Event) -> dict[str, str]:
-    flags = EventArchive.objects.filter(event=event).annotate(
+    flags = EventArchive.objects.filter(event=event).values(
         **{version: condition for version, (_, _, condition) in _ARCHIVE_VERSIONS.items()}
-    ).values_list(*_ARCHIVE_VERSIONS).first()
-    if flags is None:
-        return {}
-    return {
-        version: label
-        for (version, (_, label, _)), available in zip(_ARCHIVE_VERSIONS.items(), flags, strict=True)
-        if available
-    }
+    ).first() or {}
+    return {version: label for version, (_, label, _) in _ARCHIVE_VERSIONS.items() if flags.get(version)}
 
 
 @require_GET
@@ -558,18 +569,15 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         # A school holds one team, whether it was imported or assigned here
         taken = set(SchoolInfo.objects.values_list("school__name_key", flat=True))
         taken |= set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
-        saved_slots = dict(event.results.values_list("school__name_key", "team_number"))
+        saved_slots = saved_slots_needing_reconciliation(event)
         by_school: defaultdict[str, list[TeamRegistration]] = defaultdict(list)
         for enrollment in enrolled_registrations:
             registration = enrollment.registration
             key = normalize_school_name(registration.school_name)
-            if key in taken:
+            if (slot := saved_slots.get(key)) is not None:
+                messages.error(request, saved_slot_message(registration.school_name, slot))
+            elif key in taken:
                 skipped.append(registration.school_name)
-            elif key in saved_slots:
-                messages.error(
-                    request, f"{registration.school_name} has a saved card for Team {saved_slots[key]}. "
-                    "Have the roster owner reconcile that school and slot.",
-                )
             else:
                 by_school[key].append(registration)
 

@@ -1,5 +1,7 @@
 """Unfinished-work links and comparisons with the last recorded scorecard fingerprint, not delivery."""
 
+import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -19,8 +21,8 @@ from registration.close_out_checks import (
     close_out_warnings as notices_for_cards,
 )
 from registration.models import Event, Season
-from registration.services import close_out_card_check, close_out_event, set_team_school
-from registration.stage import ScorecardsEmailed
+from registration.services import close_out_card_check, close_out_event, current_snapshots, set_team_school
+from registration.stage import ScorecardsEmailed, event_stage
 from registration.tests.shown import close_out_preview
 from team.models import Team
 from ticketing.models import Ticket
@@ -31,7 +33,7 @@ NOT_EMAILED = CloseOutWarning("No scorecard email is recorded for this event.")
 
 
 def close_out_warnings(event):
-    return notices_for_cards(event, close_out_card_check(event))
+    return notices_for_cards(event, close_out_card_check(event_stage()))
 
 
 @pytest.fixture
@@ -150,7 +152,17 @@ def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
         return context
 
     with patch("registration.services.build_scorecard_context", with_int_keys):
-        assert scorecards_fingerprint(event) == scorecards_fingerprint(event)
+        snapshots = current_snapshots(event)
+        legacy_payload = {
+            key: (card.scorecard["team"]["team_number"], card.scorecard)
+            for key, card in zip((2, 10), snapshots.values(), strict=True)
+        }
+        old = json.dumps(json.loads(json.dumps(legacy_payload)), sort_keys=True)
+        from scoring.snapshot import scorecard_fingerprint
+
+        assert scorecard_fingerprint(dict(zip((2, 10), snapshots.values(), strict=True))) == (
+            hashlib.sha256(old.encode()).hexdigest()
+        )
 
 
 def test_sends_with_no_event_open_never_count(event):

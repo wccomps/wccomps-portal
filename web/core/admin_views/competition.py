@@ -188,6 +188,10 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
 def _toggle_competition(request: HttpRequest, authentik_username: str, *, enable: bool) -> StreamingHttpResponse:
     if enable:
         stage = event_stage()
+        if stage.archive_problem:
+            return StreamingHttpResponse(
+                iter([ndjson_done(stage.archive_problem, success=False)]), content_type="application/x-ndjson"
+            )
         if stage.played and not stage.running:
             form = TypedConfirmForm(request.POST)
             if not form.is_valid():
@@ -263,10 +267,10 @@ def _stream_close_out(target: Event | NewEvent, authentik_username: str, preview
     except CloseOutError as e:
         yield ndjson_done(str(e), success=False)
         return
+    cleanup = ", and queued Discord cleanup" if outcome.discord_cleanup_queued else ""
     yield ndjson_done(
         f"Closed out {outcome.event.name}: archived {outcome.results} school result(s), "
-        f"deleted {_wiped_summary(outcome.wiped)}, and queued the Discord cleanup (the bot reports it in the ops "
-        f"channel). Next: {event_stage().next_step}"
+        f"deleted {_wiped_summary(outcome.wiped)}{cleanup}. Next: {event_stage().next_step}"
     )
 
 
@@ -279,7 +283,7 @@ def _action_close_out_check(request: HttpRequest, authentik_username: str) -> Js
         fixes = []
         if not problem:
             try:
-                cards = close_out_card_check(stage.event)
+                cards = close_out_card_check(stage)
             except CloseOutError as exc:
                 problem = str(exc)
                 fixes = [link for fix in exc.fixes for link in _fix_links(fix)]
@@ -303,7 +307,7 @@ def _action_close_out_check(request: HttpRequest, authentik_username: str) -> Js
         return JsonResponse({"error": CLOSE_OUT_CHECK_FAILED}, status=500)
     return JsonResponse({
         "success": True, "problem": problem, "fixes": fixes, "warnings": warnings, "preview": preview,
-        "summary": summary,
+        "summary": summary, "event": str(stage.event.pk) if stage.event else "",
     })
 
 
