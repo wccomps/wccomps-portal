@@ -468,6 +468,7 @@ CASES = [
         CloseOutForm,
         hints=lambda w: {
             "confirm": YOLO,
+            "preview": st.text(alphabet="0123456789abcdef", min_size=64, max_size=64),
             "open_event": st.sampled_from(("", str(w.open_event.pk))),
             **NEW_EVENT_HINTS(w),
         },

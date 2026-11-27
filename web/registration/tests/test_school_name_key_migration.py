@@ -7,6 +7,7 @@ from django.db.migrations.executor import MigrationExecutor
 pytestmark = pytest.mark.django_db(transaction=True)
 
 BEFORE = ("registration", "0009_forget_unused_event_fields")
+AFTER = ("registration", "0010_school_name_key_unlimited")
 
 
 def _migrate(targets: list[tuple[str, str]]) -> None:
@@ -28,7 +29,9 @@ def test_reversing_with_a_key_longer_than_255_stops_and_names_the_school() -> No
             _migrate([BEFORE])
         assert School.objects.get(name="ß" * 200).name_key == "ss" * 200
     finally:
-        School.objects.filter(name="ß" * 200).delete()
+        # The failed reverse leaves 0010 applied, but later migrations (including packet references) are gone.
+        old_school = MigrationExecutor(connection).loader.project_state([AFTER]).apps.get_model("registration", "School")
+        old_school.objects.filter(name="ß" * 200).delete()
         _migrate(_latest())
 
 

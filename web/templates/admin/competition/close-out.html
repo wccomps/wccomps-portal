@@ -79,14 +79,14 @@
             <p>No unfinished work found. The recorded scorecard fingerprint matches the set being archived.</p>
         </template>
         <template x-if="closeOutSummary">
-            <details open>
-                <summary x-text="closeOutSummary.title"></summary>
+            <div class="mb-10">
+                <h3 x-text="closeOutSummary.title"></h3>
                 <ul>
                     <template x-for="school in closeOutSummary.schools" :key="school.slot">
                         <li x-text="school.text"></li>
                     </template>
                 </ul>
-            </details>
+            </div>
         </template>
         <template x-if="closeOutNextcloud">
             <c-alert variant="warning">
