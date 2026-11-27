@@ -200,13 +200,14 @@ def _leftovers():
     """A closed out event, then a score that arrived after the close-out."""
     from registration.models import Event
     from registration.services import close_out_event
+    from registration.tests.shown import close_out_preview
     from scoring.models import ServiceScore
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     event = _open_event()
     team = _team_with_school()
     ServiceScore.objects.create(team=team, service_points=5)
-    close_out_event(event, "admin")
+    close_out_event(event, "admin", preview=close_out_preview(event))
     ServiceScore.objects.create(team=team, service_points=3)
     return Event.objects.get(pk=event.pk)
 
@@ -253,8 +254,8 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     assert '@click="clearLeftovers"' not in page
     assert response.status_code == 400
     assert response.json()["error"] == (
-        "These scores are not recorded at any event yet and no event was ever closed out. Finish grading, then email "
-        "every school its scorecard with Email Scorecards. Close out the event with Close Out Event on the "
+        "These scores are not recorded at any event yet and no event was ever closed out. Finish grading and review "
+        "the current school cards with Email Scorecards. Close out the event with Close Out Event on the "
         "Competition page; with no event open, it asks for the event's name, date and type."
     )
     assert ServiceScore.objects.exists()

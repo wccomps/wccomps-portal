@@ -85,6 +85,7 @@ PLACES: dict[Action, ActionPlace] = {
         "Finish scoring and email scorecards", Kind.ELSEWHERE, "scoring:email_scorecards", Section.CLOSE_OUT
     ),
     Action.CLOSE_OUT: ActionPlace("Close Out Event", Kind.HERE, shows=Section.CLOSE_OUT),
+    Action.RECONCILE: ActionPlace("Reconcile archive", Kind.HERE, shows=Section.CLOSE_OUT, rare=True),
     Action.CANCEL: ActionPlace("Cancel event", Kind.HERE, Anchor.ADVANCED, rare=True),
     Action.CLEAR: ActionPlace("Clear leftover data", Kind.HERE, Anchor.ADVANCED, Section.LEFTOVERS, rare=True),
 }

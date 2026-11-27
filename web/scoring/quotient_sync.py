@@ -9,13 +9,14 @@ import httpx
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from quotient.client import QuotientClient, ServiceCheck
-from registration.models import Event
+from registration.locks import school_list_lock
+from registration.models import Event, EventTeamAssignment
 
 from core.models import CompetitionConfig
 from core.services.competition import run_lock
-from team.models import MAX_TEAMS, Team
+from team.models import MAX_TEAMS, SchoolInfo, Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
 from .models import QuotientMetadataCache, ServiceCorrectionBatch, ServiceDetail, ServiceScore
@@ -265,11 +266,27 @@ def _check_storable(row: models.Model, what: str) -> None:
         raise ValueError(f"{what} can't be stored: {'; '.join(e.messages)}") from e
 
 
+def _score_slot_identities(event_id: int | None) -> dict[int, tuple[int, tuple[int, int] | None]]:
+    # A missing assignment is also part of the slot identity.
+    by_team = {
+        team: (pk, school)
+        for team, pk, school in (
+            EventTeamAssignment.objects.filter(event_id=event_id).values_list("team_id", "pk", "school_id")
+            if event_id is not None
+            else SchoolInfo.objects.values_list("team_id", "pk", "school_id")
+        )
+    }
+    return {number: (pk, by_team.get(pk)) for number, pk in Team.objects.values_list("team_number", "pk")}
+
+
 def sync_service_scores(user: User | None = None) -> dict[str, int]:
     """Sync each team's aggregate ServiceScore and per-service ServiceDetail records from Quotient, removing and
     skipping teams with no services in the export. Raises ValueError, writing nothing, when Quotient's scores or
     uptimes can't be read or don't fit the portal's columns."""
-    event_id = Event.objects.filter(is_active=True).values_list("pk", flat=True).first()
+    with transaction.atomic():
+        school_list_lock()
+        event_id = Event.objects.filter(is_active=True).values_list("pk", flat=True).first()
+        original_slots = _score_slot_identities(event_id)
     client = QuotientClient()
 
     export_data = client.get_service_export()
@@ -284,13 +301,14 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
     teams_created = 0
     details_synced = 0
 
-    rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
+    rows: list[tuple[int, ServiceScore, list[ServiceDetail]]] = []
     for team_export in export_data:
-        team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None
-        if team is None:
+        number = team_export.team_number
+        if not number or (slot := original_slots.get(number)) is None:
             continue
+        team_id, _ = slot
         score = ServiceScore(
-            team=team,
+            team_id=team_id,
             service_points=Decimal(team_export.gross_points),
             sla_violations=Decimal(-team_export.total_sla_penalty),
             synced_by=user,
@@ -298,7 +316,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         team_uptimes = uptimes_by_team.get(team_export.team_number, {})
         details = [
             ServiceDetail(
-                team=team,
+                team_id=team_id,
                 service_name=svc.service_name,
                 points=Decimal(svc.service_points),
                 uptime=Decimal(str(team_uptimes.get(svc.service_name, 0))).quantize(UPTIME_PLACES),
@@ -306,24 +324,33 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             )
             for svc in team_export.services
         ]
-        rows.append((team, score, details))
+        rows.append((number, score, details))
 
     with run_lock() as locked, guarded_service_sync(event_id):
         if not locked:
             raise ValueError("A competition transition or score sync is in progress.")
+        # Automatic roster claims read the score tables under the same lock, before activation.
+        school_list_lock()
         CompetitionConfig.locked()
         if Event.objects.filter(is_active=True).values_list("pk", flat=True).first() != event_id:
             raise ValueError("The active event changed during score sync.")
+        current_slots = _score_slot_identities(event_id)
+        if any(
+            original_slots.get(row.team_number) != current_slots.get(row.team_number)
+            for row in export_data
+            if row.team_number
+        ):
+            raise ValueError("A team slot changed school or identity during score sync; no scores were imported.")
         check_sync(event_id, export_data, uptimes_data)
-        for team, score, details in rows:
+        for number, score, details in rows:
             for row in (score, *details):
-                _check_storable(row, f"Quotient's scores for team {team.team_number}")
-            ServiceDetail.objects.filter(team=team).delete()
+                _check_storable(row, f"Quotient's scores for team {number}")
+            ServiceDetail.objects.filter(team_id=score.team_id).delete()
             if not details:
-                ServiceScore.objects.filter(team=team).delete()
+                ServiceScore.objects.filter(team_id=score.team_id).delete()
                 continue
             _service_score, created = ServiceScore.objects.update_or_create(
-                team=team,
+                team_id=score.team_id,
                 defaults={
                     "service_points": score.service_points,
                     "sla_violations": score.sla_violations,

@@ -309,6 +309,7 @@ class TestRedFindingsExport:
             "Affected Boxes",
             "Affected Service",
             "Affected Teams",
+            "Affected Team Numbers",
             "Points Per Team",
             "Universally Attempted",
             "Persistence Established",

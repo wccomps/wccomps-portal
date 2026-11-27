@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import TypedDict
 
 from django.contrib.auth.models import User
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models.functions import Now
 from django.utils import timezone
@@ -352,11 +353,20 @@ class EventResult(models.Model):
 
 
 class EventArchive(models.Model):
-    """The event's full export zip, for whatever the scorecard didn't keep; written at Close Out."""
+    """Retained pre-migration bytes and an explicitly identified Close Out capture."""
 
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
-    data = models.BinaryField()
+    data = models.BinaryField(null=True, editable=False)
+    close_out_data = models.BinaryField(null=True, editable=False)
+    retained_kind = models.CharField(max_length=9, blank=True, default="", editable=False)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class EventScoringEvidence(models.Model):
+    """Raw pre-wipe service inputs. Operator database access only; no admin or download route."""
+
+    event = models.OneToOneField(Event, on_delete=models.PROTECT, primary_key=True)
+    data = models.JSONField(encoder=DjangoJSONEncoder)
 
 
 class RegistrationRateLimit(models.Model):

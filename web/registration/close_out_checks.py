@@ -1,28 +1,26 @@
-"""What a close-out would freeze unfinished, shown before confirming (never blocking), and the record of the
-scorecards Email Scorecards sent, which those checks compare with the scores."""
+"""Close Out notices about unfinished work, retained evidence and the recorded mail fingerprint."""
 
-import hashlib
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from orange_team.models import OrangeAssignment
 from scoring.calculator import Standing
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore
+from scoring.snapshot import scorecard_fingerprint
 
 from ticketing.models import Ticket
 
 from .models import Event
-from .services import current_snapshots
+from .services import CloseOutCards, current_snapshots
 from .stage import ScorecardsEmailed
 
 
 @dataclass(frozen=True)
 class CloseOutWarning:
-    """A sentence about unfinished work, and the URL name of the page where it is finished."""
+    """A nonblocking notice and the related page."""
 
     text: str
-    url_name: str
+    url_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,39 +81,51 @@ def _sentence(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}."
 
 
-def close_out_warnings(event: Event | None) -> list[CloseOutWarning]:
-    """Unfinished work a close-out of the event (None: the event it records unrecorded scores at) would freeze as it
-    stands, and the state of the scorecard emails. They never block the close-out."""
+def close_out_warnings(event: Event | None, cards: CloseOutCards | None) -> list[CloseOutWarning]:
+    """Unfinished work, preservation notices and mail comparison against the selected cards."""
     warnings = [
         CloseOutWarning(_sentence(count, work.one, work.many), work.url_name)
         for work in UNFINISHED_WORK
         if (count := work.count())
     ]
-    return warnings + [CloseOutWarning(text, "scoring:email_scorecards") for text in _scorecard_warnings(event)]
+    if cards is not None:
+        omitted = ", ".join(
+            f"Team {a.team_number} ({a.school_name}, {'active' if a.is_active else 'inactive'})"
+            for a in cards.roster
+            if a.school_id not in cards.schools
+        )
+        if omitted:
+            warnings.append(
+                CloseOutWarning(
+                    f"No card in the set being archived for: {omitted}. "
+                    "The close-time roster still includes these assignments; existing packet distributions "
+                    "are archived by slot."
+                )
+            )
+    return warnings + [CloseOutWarning(text) for text in _scorecard_warnings(event, cards)]
 
 
 def scorecards_fingerprint(event: Event | None, standings: list[Standing] | None = None) -> str:
-    """A hash of every school's scorecard from standings (by default, computed now)."""
-    scorecards = {
-        school_id: (snapshot.standing.team.team_number, snapshot.scorecard)
-        for school_id, snapshot in current_snapshots(event, standings).items()
-    }
-    # Round-trip so int keys become strings: sort_keys raises on a dict mixing int and str keys
-    normalized = json.dumps(json.loads(json.dumps(scorecards)), sort_keys=True)
-    return hashlib.sha256(normalized.encode()).hexdigest()
+    """Fingerprint of assigned schools' current cards in the supplied or freshly computed standings."""
+    return scorecard_fingerprint(current_snapshots(event, standings))
 
 
-def _scorecard_warnings(event: Event | None) -> list[str]:
-    """Warnings about the last Email Scorecards for the event: none sent, failures, or scores changed since."""
+def _scorecard_warnings(event: Event | None, cards: CloseOutCards | None) -> list[str]:
+    """Compare the selected cards to the last recorded fingerprint, not to individual deliveries."""
     if event is None:
-        return ["No event is open, so scorecard emails can't be checked: make sure the scorecards went out."]
+        return ["No event is open, so scorecard email records cannot be matched to an event."]
     emailed = ScorecardsEmailed.latest(event)
     if emailed is None:
-        return ["No scorecard email is recorded for this event. If you already emailed them, you can close out."]
+        return ["No scorecard email is recorded for this event."]
     warnings = []
     if failed := emailed.failed:
-        one, many = "scorecard email failed in the last send", "scorecard emails failed in the last send"
+        one = "scorecard email failed in the last recorded send"
+        many = "scorecard emails failed in the last recorded send"
         warnings.append(_sentence(failed, one, many))
-    if emailed.scorecards_hash != scorecards_fingerprint(event):
-        warnings.append("Scores changed after the last scorecard email.")
+    if cards is not None and emailed.scorecards_hash != cards.fingerprint:
+        warnings.append(
+            "Saved scorecards differ from the last scorecard email record."
+            if cards.saved
+            else "Current school scorecards differ from the last email record."
+        )
     return warnings

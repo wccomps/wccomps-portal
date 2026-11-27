@@ -1,30 +1,36 @@
 import json
 import zipfile
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from io import BytesIO, StringIO
-from typing import Protocol, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from django.conf import settings
-from django.db.models import BinaryField, CharField, F, Func, Value
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db.models import BinaryField, Case, CharField, F, Func, Value, When
 from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.text import slugify
 from django_stubs_ext import WithAnnotations
+from packets.models import Packet, PacketDistribution
 
 from core.csv_export import csv_writer
 from ticketing.chat_comments import comment_origin
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
-from .calculator import Standing, compute_standings
+from .calculator import compute_standings
 from .models import (
     IncidentReport,
     InjectScore,
     OrangeTeamScore,
     RedTeamScore,
 )
+from .snapshot import FinalScore
+
+if TYPE_CHECKING:
+    from registration.models import Event
 
 
 def _csv_cell(value: object) -> object:
@@ -120,9 +126,13 @@ def _fetch_inject_grades() -> list[InjectScore]:
     )
 
 
-def _fetch_final_scores() -> list[tuple[Standing, str]]:
-    calculated_at = timezone.now().isoformat()
-    return [(score, calculated_at) for score in compute_standings()]
+def _stamp_final_scores(scores: Sequence[FinalScore]) -> list[tuple[FinalScore, str]]:
+    exported_at = timezone.now().isoformat()
+    return [(score, exported_at) for score in scores]
+
+
+def _fetch_final_scores() -> list[tuple[FinalScore, str]]:
+    return _stamp_final_scores([FinalScore.from_standing(score) for score in compute_standings()])
 
 
 def _fetch_tickets() -> list[Ticket]:
@@ -171,6 +181,50 @@ def _fetch_ticket_attachments() -> list[DigestedAttachment]:
     )
 
 
+_FINAL_SCORE_COLUMNS: list[Column[tuple[FinalScore, str]]] = [
+    Column("Rank", "rank", lambda sc: sc[0].rank),
+    Column("Team", "team", lambda sc: sc[0].team_name),
+    Column("Team Number", "team_number", lambda sc: sc[0].team_number),
+    Column("Total Score", "total_score", lambda sc: sc[0].total),
+    Column("Service Points", "service_points", lambda sc: sc[0].components["service_points"]),
+    Column("Inject Points", "inject_points", lambda sc: sc[0].components["inject_points"]),
+    Column("Orange Points", "orange_points", lambda sc: sc[0].components["orange_points"]),
+    Column("Red Deductions", "red_deductions", lambda sc: sc[0].components["red_deductions"]),
+    Column(
+        "Incident Recovery Points",
+        "incident_recovery_points",
+        lambda sc: sc[0].components["incident_recovery_points"],
+    ),
+    Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].components["sla_penalties"]),
+    Column("Raw Service Credit", "raw_service_credit", lambda sc: sc[0].service_credit),
+    Column("SLA Credit", "sla_credit", lambda sc: sc[0].sla_credit),
+    Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].components["point_adjustments"]),
+]
+FINAL_SCORES = Dataset[tuple[FinalScore, str]](
+    "final_scores",
+    [*_FINAL_SCORE_COLUMNS, Column("Calculated At", "calculated_at", lambda sc: sc[1])],
+    _fetch_final_scores,
+)
+
+_INJECT_GRADES = Dataset[InjectScore](
+    "inject_grades",
+    [
+        Column("Team", "team", lambda g: g.team.team_name),
+        Column("Team Number", "team_number", lambda g: g.team.team_number),
+        Column("Inject ID", "inject_id", lambda g: g.inject_id),
+        Column("Inject Name", "inject_name", lambda g: g.inject_name),
+        Column("Max Points", "max_points", lambda g: g.max_points),
+        Column("Points Awarded", "points_awarded", lambda g: g.points_awarded),
+        Column("Approved", "is_approved", lambda g: g.is_approved),
+        Column("Approved By", "approved_by", lambda g: g.approved_by.username if g.approved_by else None),
+        Column("Approved At", "approved_at", lambda g: g.approved_at.isoformat() if g.approved_at else None),
+        Column("Graded By", "graded_by", lambda g: g.graded_by.username if g.graded_by else None),
+        Column("Graded At", "graded_at", lambda g: g.graded_at.isoformat()),
+    ],
+    _fetch_inject_grades,
+)
+
+
 DATASETS: dict[str, ExportableDataset] = {
     "red_scores": Dataset[RedTeamScore](
         "red_findings",
@@ -182,6 +236,11 @@ DATASETS: dict[str, ExportableDataset] = {
             Column("Affected Boxes", "affected_boxes", lambda f: f.affected_boxes),
             Column("Affected Service", "affected_service", lambda f: f.affected_service),
             Column("Affected Teams", "affected_teams", lambda f: [t.team_name for t in f.affected_teams.all()]),
+            Column(
+                "Affected Team Numbers",
+                "affected_team_numbers",
+                lambda f: [t.team_number for t in f.affected_teams.all()],
+            ),
             Column("Points Per Team", "points_per_team", lambda f: f.points_per_team),
             Column("Universally Attempted", "universally_attempted", lambda f: f.universally_attempted),
             Column("Persistence Established", "persistence_established", lambda f: f.persistence_established),
@@ -237,51 +296,8 @@ DATASETS: dict[str, ExportableDataset] = {
         ],
         _fetch_orange_adjustments,
     ),
-    "inject_grades": Dataset[InjectScore](
-        "inject_grades",
-        [
-            Column("Team", "team", lambda g: g.team.team_name),
-            Column("Team Number", "team_number", lambda g: g.team.team_number),
-            Column("Inject ID", "inject_id", lambda g: g.inject_id),
-            Column("Inject Name", "inject_name", lambda g: g.inject_name),
-            Column("Max Points", "max_points", lambda g: g.max_points),
-            Column("Points Awarded", "points_awarded", lambda g: g.points_awarded),
-            Column("Approved", "is_approved", lambda g: g.is_approved),
-            Column("Approved By", "approved_by", lambda g: g.approved_by.username if g.approved_by else None),
-            Column("Approved At", "approved_at", lambda g: g.approved_at.isoformat() if g.approved_at else None),
-            Column("Graded By", "graded_by", lambda g: g.graded_by.username if g.graded_by else None),
-            Column("Graded At", "graded_at", lambda g: g.graded_at.isoformat()),
-        ],
-        _fetch_inject_grades,
-    ),
-    "final_scores": Dataset[tuple[Standing, str]](
-        "final_scores",
-        [
-            Column("Rank", "rank", lambda sc: sc[0].rank),
-            Column("Team", "team", lambda sc: sc[0].team.team_name),
-            Column("Team Number", "team_number", lambda sc: sc[0].team.team_number),
-            Column("Total Score", "total_score", lambda sc: sc[0].total_score),
-            Column("Service Points", "service_points", lambda sc: sc[0].service_points),
-            Column("Inject Points", "inject_points", lambda sc: sc[0].inject_points),
-            Column("Orange Points", "orange_points", lambda sc: sc[0].orange_points),
-            Column("Red Deductions", "red_deductions", lambda sc: sc[0].red_deductions),
-            Column("Incident Recovery Points", "incident_recovery_points", lambda sc: sc[0].incident_recovery_points),
-            Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].sla_penalties),
-            Column(
-                "Raw Service Credit",
-                "raw_service_credit",
-                lambda sc: sum(line["service_credit"] for line in sc[0].service_corrections),
-            ),
-            Column(
-                "SLA Credit",
-                "sla_credit",
-                lambda sc: sum(line["sla_credit"] for line in sc[0].service_corrections),
-            ),
-            Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].point_adjustments),
-            Column("Calculated At", "calculated_at", lambda sc: sc[1]),
-        ],
-        _fetch_final_scores,
-    ),
+    "inject_grades": _INJECT_GRADES,
+    "final_scores": FINAL_SCORES,
     "tickets": Dataset[Ticket](
         "tickets",
         [
@@ -364,14 +380,99 @@ def export_dataset(name: str, export_format: str) -> HttpResponse:
     return response
 
 
-def export_all_zip_bytes() -> bytes:
-    """Every dataset, as CSV and JSON, in one zip."""
+def public_event_evidence(event: Event, selected_schools: Collection[int]) -> dict[str, object]:
+    """Close-time roster and slot-based packet summaries, without restricted scoring inputs."""
+    roster = event.team_assignments.annotate(
+        has_frozen_scorecard=Case(When(school_id__in=list(selected_schools), then=True), default=False)
+    ).order_by("team__team_number")
+    return {
+        "event_id": event.pk,
+        "captured_at": timezone.now().isoformat(),
+        "assignments": list(
+            roster.values(
+                "id",
+                "school_id",
+                "school__name",
+                "team_id",
+                "team__team_number",
+                "team__is_active",
+                "registration_id",
+                "has_frozen_scorecard",
+            )
+        ),
+        "packets": list(
+            Packet.objects.filter(event=event)
+            .order_by("pk")
+            .values(
+                "id",
+                "title",
+                "status",
+                "actual_distribution_time",
+                "send_via_email",
+            )
+        ),
+        "packet_distributions": list(
+            PacketDistribution.objects.filter(packet__event=event)
+            .order_by("pk")
+            .values(
+                "id",
+                "packet_id",
+                "team_id",
+                "email_status",
+                "email_sent_at",
+                "web_access_enabled",
+                "download_count",
+                "downloaded_at",
+                "last_downloaded_at",
+                "school_at_distribution_id",
+                "created_at",
+            )
+        ),
+    }
+
+
+@dataclass(frozen=True)
+class CloseOutExport:
+    scores: Sequence[FinalScore]
+    evidence: dict[str, object]
+
+
+def export_all_zip_bytes(close_out: CloseOutExport | None = None) -> bytes:
+    """Render all datasets; a Close Out capture uses the selected scores and its public evidence."""
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for dataset in DATASETS.values():
+        datasets = DATASETS
+        if close_out is not None:
+            columns = [
+                *_FINAL_SCORE_COLUMNS,
+                Column[tuple[FinalScore, str]]("Exported At", "exported_at", lambda sc: sc[1]),
+            ]
+            datasets = {
+                **DATASETS,
+                "final_scores": replace(
+                    FINAL_SCORES,
+                    columns=columns,
+                    fetch=lambda: _stamp_final_scores(close_out.scores),
+                ),
+                "inject_grades": replace(
+                    _INJECT_GRADES,
+                    columns=[
+                        *_INJECT_GRADES.columns,
+                        Column(
+                            "Approved Feedback",
+                            "approved_feedback",
+                            lambda grade: grade.feedback if grade.feedback_approved else "",
+                        ),
+                    ],
+                ),
+            }
+        for dataset in datasets.values():
             csv_str, json_str = dataset.render_pair()
             zip_file.writestr(f"{dataset.filename}.csv", csv_str)
             zip_file.writestr(f"{dataset.filename}.json", json_str)
+        if close_out is not None:
+            evidence = json.dumps(close_out.evidence, cls=DjangoJSONEncoder, indent=2)
+            zip_file.writestr("event_evidence.json", evidence)
     return zip_buffer.getvalue()
 
 

@@ -2,9 +2,11 @@ from typing import Protocol
 
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Count, JSONField, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
+from registration.locks import school_list_lock
 
 from core.admin import PortalModelAdmin, PortalTabularInline
 from core.services.competition import run_lock
@@ -276,8 +278,9 @@ class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
         extra_context: dict[str, object] | None = None,
     ) -> HttpResponse:
         if request.method == "POST":
-            with run_lock() as locked:
+            with run_lock() as locked, transaction.atomic():
                 self._check_import_writable(locked)
+                school_list_lock()
                 return super().changeform_view(request, object_id, form_url, extra_context)
         return super().changeform_view(request, object_id, form_url, extra_context)
 

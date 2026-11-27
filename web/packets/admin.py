@@ -25,6 +25,7 @@ class PacketDistributionInline(PortalTabularInline[PacketDistribution, Packet]):
         "downloaded_at",
     ]
     readonly_fields = [
+        "team",
         "email_sent_at",
         "downloaded_at",
         "download_count",
@@ -246,6 +247,8 @@ class PacketDistributionAdmin(PortalModelAdmin[PacketDistribution]):
         "downloaded_by",
     ]
     readonly_fields = [
+        "packet",
+        "team",
         "email_sent_at",
         "downloaded_at",
         "last_downloaded_at",
@@ -253,6 +256,10 @@ class PacketDistributionAdmin(PortalModelAdmin[PacketDistribution]):
         "created_at",
         "updated_at",
     ]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
     fieldsets = [
         (
             "Basic Information",

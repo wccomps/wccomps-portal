@@ -6,9 +6,11 @@ from typing import cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
+from django.db.models.expressions import Combinable
+from django.db.models.functions import Coalesce
 from django.forms import CheckboxSelectMultiple
-from django.http import HttpRequest, HttpResponse, QueryDict
+from django.http import Http404, HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
@@ -38,6 +40,7 @@ from .models import (
 from .services import (
     EventKeptError,
     PacketsSentError,
+    SavedRosterError,
     SchoolChangedError,
     SchoolTakenError,
     TeamLinkedError,
@@ -47,11 +50,15 @@ from .services import (
     delete_season,
     event_delete_problem,
     free_teams,
+    linked_roster_teams,
     remove_team_school,
+    saved_slot_message,
+    saved_slots_needing_reconciliation,
     school_clashes,
     season_delete_problem,
     set_team_school,
 )
+from .stage import archive_reconciliation_problem
 
 
 class RegistrationPageStatus(StrEnum):
@@ -395,6 +402,8 @@ def event_delete(request: HttpRequest, event_id: int) -> HttpResponse:
 class EventPageRow:
     registration: TeamRegistration | None  # None: the school list's schools, or a deleted registration
     assignment: EventTeamAssignment | None  # None: a registration with no team yet, so registration is set
+    assignment_open: bool = False
+    assignment_problem: str = ""
 
     @property
     def school_name(self) -> str:
@@ -405,7 +414,13 @@ class EventPageRow:
 
     @property
     def can_assign(self) -> bool:
-        return self.assignment is None and self.registration is not None and self.registration.status == "approved"
+        return (
+            self.assignment_open
+            and not self.assignment_problem
+            and self.assignment is None
+            and self.registration is not None
+            and self.registration.status == "approved"
+        )
 
 
 @require_permission("gold_team")
@@ -426,24 +441,54 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     # Imported schools have no registration: match those by school
     by_registration = {a.registration_id: a for a in assignments if a.registration_id}
     by_school = {a.school.name_key: a for a in assignments}
+    archive_problem = archive_reconciliation_problem(event) if event.is_active else ""
+    saved_conflicts = saved_slots_needing_reconciliation(event) if event.is_active else {}
 
-    rows = [
-        EventPageRow(
-            enrollment.registration,
-            by_registration.get(enrollment.registration_id)
-            or by_school.get(normalize_school_name(enrollment.registration.school_name)),
+    def assignment_problem(name: str, key: str) -> str:
+        slot = saved_conflicts.get(key)
+        return saved_slot_message(name, slot) if slot is not None else ""
+
+    rows = []
+    for enrollment in enrollments:
+        registration = enrollment.registration
+        name_key = normalize_school_name(registration.school_name)
+        assignment = by_registration.get(enrollment.registration_id) or by_school.get(name_key)
+        school = assignment.school if assignment else None
+        rows.append(
+            EventPageRow(
+                registration,
+                assignment,
+                assignment_open=event.is_active and not archive_problem,
+                assignment_problem=assignment_problem(school.name, school.name_key)
+                if school
+                else (assignment_problem(registration.school_name, name_key)),
+            )
         )
-        for enrollment in enrollments
-    ]
     matched = {row.assignment.pk for row in rows if row.assignment}
     rows.extend(
-        EventPageRow(assignment.registration, assignment)
+        EventPageRow(
+            assignment.registration,
+            assignment,
+            assignment_problem=assignment_problem(assignment.school.name, assignment.school.name_key),
+        )
         for assignment in sorted(assignments, key=lambda a: a.team.team_number)
         if assignment.pk not in matched
     )
+    missing_rows = saved_conflicts.keys() - {normalize_school_name(row.school_name) for row in rows}
 
     sent = packets_sent(event)
+    saved_slots = set(event.results.values_list("team_number", flat=True)) if event.is_active and not sent else set()
+    linked = set(linked_roster_teams().values_list("pk", flat=True)) if event.is_active and not sent else set()
     status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
+    removable = {
+        a.pk
+        for a in assignments
+        if event.is_active
+        and not sent
+        and not archive_problem
+        and a.team.team_number not in saved_slots
+        and a.team_id not in linked
+    }
     context = {
         "event": event,
         "status_word": status_word,
@@ -451,23 +496,56 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "rows": rows,
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
-        "assignable_count": sum(1 for row in rows if row.can_assign),
+        "assignable_count": sum(row.can_assign for row in rows),
+        "saved_slot_notices": [
+            saved_slot_message(name, slot)
+            for name, slot in event.results.filter(school__name_key__in=missing_rows).values_list(
+                "school__name", "team_number"
+            )
+        ],
         "packets_sent": sent,
-        # Only the open event's teams can be unassigned, and only until packets go out
-        "can_unassign": event.is_active and not sent,
-        "has_archive": EventArchive.objects.filter(event=event).exists(),
+        "removable_assignments": removable,
+        "archives": _available_archives(event),
     }
 
     return render(request, "registration/events/detail.html", context)
 
 
+_HAS_RETAINED = Q(data__isnull=False)
+_HAS_CAPTURE = Q(close_out_data__isnull=False)
+_ARCHIVE_VERSIONS: dict[str, tuple[Combinable, str, Q]] = {
+    "close_out": (
+        Coalesce("close_out_data", "data"),
+        "Close Out Archive",
+        _HAS_CAPTURE | (_HAS_RETAINED & Q(retained_kind="close_out")),
+    ),
+    "finalize": (F("data"), "retained Finalize Archive", _HAS_RETAINED & Q(retained_kind="finalize")),
+    "historical": (F("data"), "Historical Archive (capture type unrecorded)", _HAS_RETAINED & Q(retained_kind="")),
+}
+
+
+def _available_archives(event: Event) -> dict[str, str]:
+    flags = (
+        EventArchive.objects.filter(event=event)
+        .values(**{version: condition for version, (_, _, condition) in _ARCHIVE_VERSIONS.items()})
+        .first()
+        or {}
+    )
+    return {version: label for version, (_, label, _) in _ARCHIVE_VERSIONS.items() if flags.get(version)}
+
+
 @require_GET
 @require_permission("gold_team")
 def event_archive(request: HttpRequest, event_id: int) -> HttpResponse:
-    """The zip Close Out took of the event's live data before deleting it."""
-    archive = get_object_or_404(EventArchive.objects.select_related("event"), event_id=event_id)
-    response = HttpResponse(bytes(archive.data), content_type="application/zip")
-    response["Content-Disposition"] = f'attachment; filename="{slugify(archive.event.name)}_close_out_archive.zip"'
+    """Read only the requested capture; never substitute historical bytes for a missing Close Out."""
+    version = request.GET.get("version", "close_out")
+    if version not in _ARCHIVE_VERSIONS:
+        raise Http404
+    field, _, condition = _ARCHIVE_VERSIONS[version]
+    archives = EventArchive.objects.filter(condition, event_id=event_id)
+    name, data = get_object_or_404(archives.values_list("event__name", field))
+    response = HttpResponse(bytes(data), content_type="application/zip")
+    response["Content-Disposition"] = f'attachment; filename="{slugify(name)}_{version}_archive.zip"'
     return response
 
 
@@ -504,6 +582,9 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         if event != Event.objects.open():
             messages.error(request, "Teams can only be assigned for the open event: import its school list first.")
             return redirect("registration_event_detail", event_id=event_id)
+        if problem := archive_reconciliation_problem(event):
+            messages.error(request, problem)
+            return redirect("registration_event_detail", event_id=event_id)
 
         enrolled_registrations = (
             RegistrationEventEnrollment.objects.filter(
@@ -519,11 +600,14 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         # A school holds one team, whether it was imported or assigned here
         taken = set(SchoolInfo.objects.values_list("school__name_key", flat=True))
         taken |= set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
+        saved_slots = saved_slots_needing_reconciliation(event)
         by_school: defaultdict[str, list[TeamRegistration]] = defaultdict(list)
         for enrollment in enrolled_registrations:
             registration = enrollment.registration
             key = normalize_school_name(registration.school_name)
-            if key in taken:
+            if (slot := saved_slots.get(key)) is not None:
+                messages.error(request, saved_slot_message(registration.school_name, slot))
+            elif key in taken:
                 skipped.append(registration.school_name)
             else:
                 by_school[key].append(registration)
@@ -573,6 +657,8 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                     activate_teams([team])
             except SchoolTakenError, IntegrityError:
                 skipped.append(registration.school_name)
+            except SavedRosterError as refused:
+                messages.error(request, str(refused))
             except TeamTakenError:
                 team_taken.append(registration.school_name)
             else:

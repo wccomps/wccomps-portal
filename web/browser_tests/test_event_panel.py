@@ -78,7 +78,7 @@ def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_brow
             page, status, errors = visit_and_capture_errors(context, f"{live_server.url}/ops/admin/competition/")
             panel = page.locator("#event-panel")
             # The close-out check loads after the page and lists the unfinished work in the section below
-            page.locator("#close-out").get_by_role("link", name="No scorecard email is recorded").wait_for()
+            page.locator("#close-out").get_by_text("No scorecard email is recorded").wait_for()
             text = panel.inner_text()
             action = panel.locator("a.button").first
             assert status == 200

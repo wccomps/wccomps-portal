@@ -109,6 +109,11 @@ class CloseOutForm(TypedConfirmForm, NewEventFields):
         required=False,
         error_messages={"invalid_choice": "That event no longer exists. Reload the page."},
     )
+    preview = forms.RegexField(
+        regex=r"\A[0-9a-f]{64}\Z",
+        max_length=64,
+        error_messages=dict.fromkeys(("required", "invalid"), "Reload and review Close Out before confirming."),
+    )
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}

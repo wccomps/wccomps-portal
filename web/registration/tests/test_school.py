@@ -8,9 +8,11 @@ from django.db import IntegrityError
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+from scoring.models import ServiceScore
 
 from registration.models import (
     Event,
+    EventResult,
     EventTeamAssignment,
     RegistrationContact,
     RegistrationEventEnrollment,
@@ -103,6 +105,57 @@ def test_event_detail_shows_an_imported_assignment_for_an_enrolled_school(gold_t
     assert item.assignment == imported
     assert item.can_assign is False
     assert b"Team 04" in response.content
+
+
+def test_saved_school_must_be_reconciled_not_randomly_assigned_or_unassigned(gold_team_user, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05", is_active=False)
+    school = School.for_name("Saved school")
+    _enrolled(event, school.name)
+    set_team_school(team, school.name, contact_email="c@example.edu")
+    assignment = event.team_assignments.get(school=school)
+    EventResult.objects.create(event=event, school=school, team_number=4, total_score=0, scorecard={})
+    client = Client()
+    client.force_login(gold_team_user)
+    url = reverse("registration_event_detail", args=[event.pk])
+
+    assert not UNASSIGN.search(client.get(url).content.decode())
+    reply = client.post(reverse("registration_unassign_team", args=[assignment.pk]), {"school": school.pk}, follow=True)
+    assert b"Saved scorecards need their school and team number kept together" in reply.content
+    assert event.team_assignments.filter(pk=assignment.pk).exists()
+    assignment.delete()
+    assert SchoolInfo.objects.filter(school=school, team=team).exists()
+    detail = client.get(url).content.decode()
+    assert "<strong>0</strong> ready to assign" in detail and "has a saved card for Team 4" in detail
+    assert not re.search(r">\s*Ready to assign\s*<", detail)
+    assert "Assign Team Numbers" not in detail
+    reply = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+    assert b"has a saved card for Team 4" in reply.content
+    assert not event.team_assignments.exists()
+    assert not Team.objects.filter(is_active=True, team_number=5).exists()
+
+
+@pytest.mark.parametrize("enrolled", [False, True], ids=["imported", "enrolled"])
+def test_wrong_saved_slot_shows_current_unassign_target_and_original_slot(gold_team_user, event, enrolled):
+    team = Team.objects.create(team_number=5, team_name="Team 05")
+    set_team_school(team, "Saved school", contact_email="c@example.edu")
+    assignment = event.team_assignments.get(team=team)
+    if enrolled:
+        _enrolled(event, assignment.school.name)
+    card = EventResult.objects.create(event=event, school=assignment.school, team_number=4, total_score=0, scorecard={})
+    client = _client(gold_team_user)
+    url = reverse("registration_event_detail", args=[event.pk])
+    detail = client.get(url).content.decode()
+    unassign = reverse("registration_unassign_team", args=[assignment.pk])
+    assert "Team 05</strong>" in detail and "has a saved card for Team 4" in detail
+    assert unassign in detail and UNASSIGN.search(detail)
+    assert "Assign Team Numbers" not in detail
+
+    client.post(unassign, {"school": assignment.school_id})
+    assert not event.team_assignments.exists() and not SchoolInfo.objects.filter(team=team).exists()
+    assert event.results.get() == card
+    detail = client.get(url).content.decode()
+    assert "has a saved card for Team 4" in detail and "Team 05</strong>" not in detail
 
 
 def test_assign_teams_skips_a_school_that_already_has_a_team(gold_team_user, event):
@@ -370,12 +423,24 @@ def test_assign_teams_picks_only_teams_with_no_school_in_the_list(gold_team_user
     held = Team.objects.create(team_number=4, team_name="Team 04")
     set_team_school(held, "Other College", contact_email="o@example.edu")
     event.open()
+    scored = Team.objects.create(team_number=3, team_name="Team 03", is_active=False)
+    ServiceScore.objects.create(team=scored, service_points=5)
+    mapped = Team.objects.create(team_number=6, team_name="Team 06", is_active=False)
+    set_team_school(mapped, "Mapped College", contact_email="m@example.edu")
+    ServiceScore.objects.create(team=mapped, service_points=10)
     free = Team.objects.create(team_number=5, team_name="Team 05")
     _enrolled(event, "Example University")
 
     _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]))
 
     assert EventTeamAssignment.objects.get(event=event, school__name="Example University").team == free
+    assert not event.team_assignments.filter(team=scored).exists()
+    assert not event.team_assignments.filter(team=held).exists()
+    assert SchoolInfo.objects.get(team=held).school.name == "Other College"
+    assert event.team_assignments.get(team=mapped).school.name == "Mapped College"
+    assert ServiceScore.objects.get(team=mapped).service_points == 10
+    scored.refresh_from_db()
+    assert not scored.is_active and ServiceScore.objects.get(team=scored).service_points == 5
 
 
 @pytest.mark.parametrize("failure", ["taken", "integrity"])
@@ -580,6 +645,7 @@ def test_unassigning_a_team_with_linked_members_is_refused(gold_team_user, event
     DiscordLink.objects.create(discord_id=44, discord_username="m", user=user, team=team, is_active=True)
     client = Client()
     client.force_login(gold_team_user)
+    assert not UNASSIGN.search(client.get(reverse("registration_event_detail", args=[event.pk])).content.decode())
 
     response = client.post(
         reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), _shown(), follow=True

@@ -13,9 +13,9 @@
             <c-slot name="toolbar">
                 <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
                         variant="change">Edit Event</c-link>
-                {% if has_archive %}
-                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}">Download Close Out Archive (ZIP)</c-link>
-                {% endif %}
+                {% for version, label in archives.items %}
+                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}{% if version != 'close_out' %}?version={{ version }}{% endif %}">Download {{ label }} (ZIP)</c-link>
+                {% endfor %}
             </c-slot>
             <c-detail_grid>
                 <c-detail_row label="Date">
@@ -40,6 +40,9 @@
                 <strong>{{ total_assigned }}</strong> teams assigned,
                 <strong>{{ assignable_count }}</strong> ready to assign
             </p>
+            {% for notice in saved_slot_notices %}
+                <p>{{ notice }}</p>
+            {% endfor %}
             {% if packets_sent %}
                 <p class="text-success">Packets sent for this event, so its teams can no longer be unassigned here.</p>
             {% endif %}
@@ -99,14 +102,17 @@
                         <td>
                             {% if item.assignment %}
                                 <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
+                            {% endif %}
+                            {% if item.assignment_problem %}
+                                <p class="text-muted">{{ item.assignment_problem }}</p>
                             {% elif item.can_assign %}
                                 <span class="text-muted">Ready to assign</span>
-                            {% else %}
+                            {% elif not item.assignment %}
                                 <span class="text-muted">Not eligible</span>
                             {% endif %}
                         </td>
                         <td class="field-actions">
-                            {% if item.assignment and can_unassign %}
+                            {% if item.assignment.pk in removable_assignments %}
                                 <c-form action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
                                         class="d-inline"
                                         data-confirm="Remove team assignment?">

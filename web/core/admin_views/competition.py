@@ -13,15 +13,17 @@ from django.views.decorators.http import require_POST
 from registration.close_out_checks import close_out_warnings
 from registration.models import Event, Season
 from registration.services import (
+    CloseOutCards,
     CloseOutError,
     NewEvent,
     TeamFix,
+    TeamFixAction,
     cancel_event,
     cancel_event_problem,
     clear_leftover_data,
     clear_leftovers_problem,
+    close_out_card_check,
     close_out_event,
-    close_out_fixes,
     close_out_problem,
 )
 from registration.stage import EventStage, event_stage
@@ -186,6 +188,10 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
 def _toggle_competition(request: HttpRequest, authentik_username: str, *, enable: bool) -> StreamingHttpResponse:
     if enable:
         stage = event_stage()
+        if stage.archive_problem:
+            return StreamingHttpResponse(
+                iter([ndjson_done(stage.archive_problem, success=False)]), content_type="application/x-ndjson"
+            )
         if stage.played and not stage.running:
             form = TypedConfirmForm(request.POST)
             if not form.is_valid():
@@ -254,52 +260,89 @@ def _action_reset_passwords(request: HttpRequest, authentik_username: str) -> Js
     return JsonResponse({"success": result.complete, "message": result.summary(), "csv": csv_content})
 
 
-def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
-    yield _progress("Closing out: freezing the results, then clearing the live data", 1, 1)
+def _stream_close_out(target: Event | NewEvent, authentik_username: str, preview: str) -> Iterator[str]:
+    yield _progress("Closing out: archiving the results, then clearing the live data", 1, 1)
     try:
-        outcome = close_out_event(target, authentik_username)
+        outcome = close_out_event(target, authentik_username, preview=preview)
     except CloseOutError as e:
         yield ndjson_done(str(e), success=False)
         return
+    cleanup = ", and queued Discord cleanup" if outcome.discord_cleanup_queued else ""
     yield ndjson_done(
-        f"Closed out {outcome.event.name}: froze {outcome.results} school result(s) and the export archive, "
-        f"deleted {_wiped_summary(outcome.wiped)}, and queued the Discord cleanup (the bot reports it in the ops "
-        f"channel). Next: {event_stage().next_step}"
+        f"Closed out {outcome.event.name}: archived {outcome.results} school result(s), "
+        f"deleted {_wiped_summary(outcome.wiped)}{cleanup}. Next: {event_stage().next_step}"
     )
 
 
 def _action_close_out_check(request: HttpRequest, authentik_username: str) -> JsonResponse:
-    """What would make Close Out refuse, and the unfinished work it would freeze, fetched once the page shows the
-    section: the scorecard check builds every school's scorecard, too slow for the page load, and a failure here
-    must not break the page that holds Start and Stop."""
+    """Check separately from page load so an expensive or failed preview cannot interrupt Start or Stop."""
     try:
         stage = event_stage()
-        warnings = [{"text": w.text, "url": reverse(w.url_name)} for w in close_out_warnings(stage.event)]
         problem = close_out_problem(stage)
-        fixes = [link for fix in close_out_fixes(stage) for link in _fix_links(fix)] if problem else []
+        cards: CloseOutCards | None = None
+        fixes = []
+        if not problem:
+            try:
+                cards = close_out_card_check(stage)
+            except CloseOutError as exc:
+                problem = str(exc)
+                fixes = [link for fix in exc.fixes for link in _fix_links(fix)]
+        warnings = [
+            {"text": w.text, "url": reverse(w.url_name) if w.url_name else None}
+            for w in close_out_warnings(stage.event, cards)
+        ]
+        preview = cards.preview_key(stage.event) if cards is not None else ""
+        summary = (
+            None
+            if cards is None
+            else {
+                "title": "Saved school scorecards to keep" if cards.saved else "Current school scorecards to archive",
+                "schools": [
+                    {
+                        "slot": a.team_number,
+                        "text": (
+                            f"Team {a.team_number} ({a.school_name}): "
+                            f"{'Unranked' if card.score.rank is None else f'Rank {card.score.rank}'}"
+                            f", {card.score.total} points"
+                        ),
+                    }
+                    for a in cards.roster
+                    if (card := cards.schools.get(a.school_id)) is not None
+                ],
+            }
+        )
     except Exception:
         logger.exception("Close-out check failed")
         return JsonResponse({"error": CLOSE_OUT_CHECK_FAILED}, status=500)
-    return JsonResponse({"success": True, "problem": problem, "fixes": fixes, "warnings": warnings})
+    return JsonResponse(
+        {
+            "success": True,
+            "problem": problem,
+            "fixes": fixes,
+            "warnings": warnings,
+            "preview": preview,
+            "summary": summary,
+            "event": str(stage.event.pk) if stage.event else "",
+        }
+    )
 
 
 # The Before you close out section shows it when the on-demand check fails
-CLOSE_OUT_CHECK_FAILED = (
-    "Couldn't check unfinished work. Closing out still works: check grading, tickets and the scorecard emails by hand."
-)
+CLOSE_OUT_CHECK_FAILED = "Couldn't preview Close Out. Reload the page and review the results before confirming."
 
 
 def _fix_links(fix: TeamFix) -> list[dict[str, str]]:
     """Links to where the team's Close Out problem is fixed."""
-    places = [
-        (fix.activate, "Activate Team", "admin_team_detail"),
-        (fix.enter_school, "enter its school", "school_info_edit"),
-        (fix.remove_school, "remove its school", "school_info_remove"),
-    ]
+    activate = ("Activate Team", "admin_team_detail")
+    enter = ("enter its school", "school_info_edit")
+    places = {
+        TeamFixAction.ENTER_SCHOOL: (enter,),
+        TeamFixAction.ACTIVATE_THEN_ENTER_SCHOOL: (activate, enter),
+        TeamFixAction.ACTIVATE_OR_REMOVE_SCHOOL: (activate, ("remove its school", "school_info_remove")),
+    }
     return [
         {"text": f"Team {fix.team_number}: {text}", "url": reverse(url_name, args=[fix.team_number])}
-        for offered, text, url_name in places
-        if offered
+        for text, url_name in places[fix.action]
     ]
 
 
@@ -310,7 +353,8 @@ def _action_close_out_event(request: HttpRequest, authentik_username: str) -> St
             iter([ndjson_done(form.first_error(), success=False)]), content_type="application/x-ndjson"
         )
     return StreamingHttpResponse(
-        run_detached(_stream_close_out(form.target(), authentik_username)), content_type="application/x-ndjson"
+        run_detached(_stream_close_out(form.target(), authentik_username, form.cleaned_data["preview"])),
+        content_type="application/x-ndjson",
     )
 
 
@@ -360,7 +404,7 @@ def _live_context(stage: EventStage) -> dict[str, object]:
 
 
 def _close_out_context(stage: EventStage) -> dict[str, object]:
-    refusal = close_out_problem(stage, check_schools=False)
+    refusal = close_out_problem(stage)
     active_season = Season.objects.active()
     return {
         "close_out_check_failed": CLOSE_OUT_CHECK_FAILED,

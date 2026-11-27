@@ -326,6 +326,35 @@ Without Quotient, inject grading says Quotient is unavailable, box lists stay em
 stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
 15 minutes.
 
+On **Competition → Before you close out**, review the listed schools, ranks, totals, omissions and advisory mail
+notices. **Close Out Event** keeps saved v1 school cards unchanged after checking required fields, detail totals,
+rank bounds and order, saved neighbors, and school-to-slot mapping. It uses current cards only when there are no
+saved results or prior archive. A changed roster or card set requires a reload and fresh preview before
+confirmation. In an existing event, have the roster owner reconcile an unmapped inactive school and slot without
+activating the team.
+The event page shows the current assignment separately from the saved slot that needs reconciliation, including
+imported schools with no enrollment. A saved school with neither an assignment nor an enrollment appears in
+the reconciliation notices.
+With no open event, the recovery workflow for unrecorded live scores uses the live school list.
+
+Do not cancel an open event with saved cards. If it already has Close Out evidence, reconcile it first. An open
+event with an archive but no saved cards also needs reconciliation; do not cancel or replace its roster.
+No recorded send or a different fingerprint is advisory. A latest matching send record missing its fingerprint
+field prevents the preview. Do not send new live cards to replace saved ones. Close Out does not decide attendance,
+approve judging, resend mail, or reconstruct past PDFs or recipients. If Nextcloud is configured when cleanup
+runs, it can delete team accounts and their files. Preserve required files before confirming; the ZIP does not
+include them. Pending teardown is refused while an open event needs archive reconciliation.
+
+Gold can download the Close Out ZIP and any retained older ZIP separately from the event page. The Portal does
+not label retained bytes as Finalize or Close Out without matching event audit evidence; otherwise the label is
+Historical Archive. Close Out captures the roster at that time, existing slot-based packet summaries, and approved
+inject feedback alongside its grades.
+The packet distribution service records the intended school on new rows; admin cannot add or move distributions.
+The school on older unattributed rows remains unknown.
+That field is not evidence of who later received an email or downloaded a packet. Pre-wipe service totals and
+per-service summaries, including those for inactive slots, stay in restricted operator database evidence, not the
+Gold ZIP. Neither capture archives individual Quotient check results or debug output.
+
 Close Out keeps the portal's side of an event in its archive (Download Close Out Archive on the event's page): every
 export, plus each ticket's comments (its Discord thread or Zulip topic as the portal recorded it), its history, and
 each attachment's name, size and SHA-256 (not the file). Quotient's inject submissions and the divisor's log (the

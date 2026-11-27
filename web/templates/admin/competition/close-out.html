@@ -39,7 +39,7 @@
             </c-form_field>
         {% endif %}
         <template x-if="closeOutChecking">
-            <p class="help-text">Checking for unfinished work...</p>
+            <p class="help-text">Preparing the Close Out preview...</p>
         </template>
         <template x-if="closeOutCheckFailed">
             <c-alert variant="warning">
@@ -61,10 +61,10 @@
         <template x-if="hasCloseOutWarnings">
             <div>
                 <template x-if="closeOutProblem">
-                    <p class="help">Also unfinished:</p>
+                    <p class="help">Other notices:</p>
                 </template>
                 <template x-if="closeOutNotBlocked">
-                    <p class="help">These don't block Close Out: it freezes the results as they stand.</p>
+                    <p class="help">These notices don't block Close Out.</p>
                 </template>
                 <ul class="mt-10 ml-20">
                     <template x-for="(warning, index) in closeOutWarnings" :key="index">
@@ -76,13 +76,27 @@
             </div>
         </template>
         <template x-if="closeOutNothingLeft">
-            <p>No unfinished work found, and the scorecards went out with the current scores.</p>
+            <p>No unfinished work found. The recorded scorecard fingerprint matches the set being archived.</p>
         </template>
+        <template x-if="closeOutSummary">
+            <div class="mb-10">
+                <h3 x-text="closeOutSummary.title"></h3>
+                <ul>
+                    <template x-for="school in closeOutSummary.schools" :key="school.slot">
+                        <li x-text="school.text"></li>
+                    </template>
+                </ul>
+            </div>
+        </template>
+        <c-alert variant="warning">
+            If Nextcloud is configured when cleanup runs, it can delete team accounts and their files.
+            Preserve required files before confirming: the Portal archive does not include them.
+        </c-alert>
         <p>
-            Close Out saves each listed school's scorecard as its result for the event, then deletes the live data
+            Close Out saves the event's school scorecards and archive, then deletes the live data
             (scores, tickets, orange assignments and check-ins, team Discord links and queued announcements), resets
             the ticket numbers, closes the event, clears the schedule, the start message and the scoring engine's box
-            list, and queues the Discord cleanup (team channels and roles). Do it after the scorecards are out.
+            list, and queues Discord cleanup (team channels and roles) where configured.
         </p>
         <c-button_row>
             <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">

@@ -1,12 +1,14 @@
-"""Unfinished work shown before a close-out: each kind with its count and the page that finishes it, and whether the
-scorecards went out as they stand now. Warnings never block."""
+"""Unfinished-work links and comparisons with the last recorded scorecard fingerprint, not delivery."""
 
+import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
+from django.test import Client
 from django.urls import reverse
 from orange_team.models import OrangeAssignment, OrangeCheck
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore, ServiceScore
@@ -14,21 +16,25 @@ from scoring.scorecard import build_scorecard_context
 
 from registration.close_out_checks import (
     CloseOutWarning,
-    close_out_warnings,
     scorecards_fingerprint,
 )
+from registration.close_out_checks import (
+    close_out_warnings as notices_for_cards,
+)
 from registration.models import Event, Season
-from registration.services import close_out_event, set_team_school
-from registration.stage import ScorecardsEmailed
+from registration.services import close_out_card_check, close_out_event, current_snapshots, set_team_school
+from registration.stage import ScorecardsEmailed, event_stage
+from registration.tests.shown import close_out_preview
 from team.models import Team
 from ticketing.models import Ticket
 
 pytestmark = pytest.mark.django_db
 
-EMAIL = "scoring:email_scorecards"
-NOT_EMAILED = CloseOutWarning(
-    "No scorecard email is recorded for this event. If you already emailed them, you can close out.", EMAIL
-)
+NOT_EMAILED = CloseOutWarning("No scorecard email is recorded for this event.")
+
+
+def close_out_warnings(event):
+    return notices_for_cards(event, close_out_card_check(event_stage()))
 
 
 @pytest.fixture
@@ -117,7 +123,9 @@ def test_scores_changed_after_the_last_scorecard_email(event):
     _emailed(event)
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
 
-    assert close_out_warnings(event) == [CloseOutWarning("Scores changed after the last scorecard email.", EMAIL)]
+    assert close_out_warnings(event) == [
+        CloseOutWarning("Current school scorecards differ from the last email record.")
+    ]
 
 
 def test_the_latest_scorecard_email_decides(event):
@@ -132,7 +140,7 @@ def test_the_latest_scorecard_email_decides(event):
 def test_failed_scorecard_emails_are_counted(event):
     _emailed(event, failed=1)
 
-    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last send.", EMAIL)]
+    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last recorded send.")]
 
 
 def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
@@ -145,7 +153,17 @@ def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
         return context
 
     with patch("registration.services.build_scorecard_context", with_int_keys):
-        assert scorecards_fingerprint(event) == scorecards_fingerprint(event)
+        snapshots = current_snapshots(event)
+        legacy_payload = {
+            key: (card.scorecard["team"]["team_number"], card.scorecard)
+            for key, card in zip((2, 10), snapshots.values(), strict=True)
+        }
+        old = json.dumps(json.loads(json.dumps(legacy_payload)), sort_keys=True)
+        from scoring.snapshot import scorecard_fingerprint
+
+        assert scorecard_fingerprint(dict(zip((2, 10), snapshots.values(), strict=True))) == (
+            hashlib.sha256(old.encode()).hexdigest()
+        )
 
 
 def test_sends_with_no_event_open_never_count(event):
@@ -154,9 +172,7 @@ def test_sends_with_no_event_open_never_count(event):
     _emailed(None)
 
     assert close_out_warnings(None) == [
-        CloseOutWarning(
-            "No event is open, so scorecard emails can't be checked: make sure the scorecards went out.", EMAIL
-        )
+        CloseOutWarning("No event is open, so scorecard email records cannot be matched to an event.")
     ]
 
 
@@ -176,9 +192,33 @@ def test_a_malformed_send_record_is_an_error_not_a_changed_score(event):
         ScorecardsEmailed.latest(event)
 
 
+@pytest.mark.parametrize("digest_present", [False, True])
+def test_preview_distinguishes_a_missing_fingerprint_field_from_a_null_value(event, gold_team_user, digest_present):
+    from core.models import AuditLog
+
+    details = {"event": event.pk, "teams": 2, "failed": 0}
+    if digest_present:
+        details["scorecards_hash"] = None
+    AuditLog.objects.create(
+        action=ScorecardsEmailed.ACTION,
+        admin_user="gold",
+        target_entity="event",
+        target_id=event.pk,
+        details=details,
+    )
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(reverse("admin_competition_action"), {"action": "close_out_check"})
+    if digest_present:
+        assert response.status_code == 200 and response.json()["preview"]
+        assert any("differ" in warning["text"] for warning in response.json()["warnings"])
+    else:
+        assert response.status_code == 500 and "Couldn't preview Close Out" in response.json()["error"]
+
+
 @pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_warnings_never_block_a_close_out(event):
     InjectScore.objects.create(team=_team(), inject_id="1", inject_name="Memo", points_awarded=Decimal(5))
 
     assert close_out_warnings(event)
-    assert close_out_event(event, "gold").results == 2
+    assert close_out_event(event, "gold", preview=close_out_preview(event)).results == 2

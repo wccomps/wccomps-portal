@@ -9,7 +9,14 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 from registration.models import Event, EventResult, Season
-from registration.services import close_out_event, set_team_school
+from registration.services import (
+    SavedRosterError,
+    close_out_event,
+    current_snapshots,
+    remove_team_school,
+    set_team_school,
+)
+from registration.tests.shown import close_out_preview
 from scoring.models import InjectScore, ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
@@ -32,6 +39,8 @@ def client(gold_team_user):
 
 
 def _close_out(client, **data):
+    if "preview" not in data:
+        data["preview"] = _check(client).json()["preview"] or "0" * 64
     response = client.post(reverse("admin_competition_action"), {"action": "close_out_event", **data})
     lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
     join_detached_runs()
@@ -65,25 +74,28 @@ def _assert_nothing_happened(event=None):
         assert event.is_active
 
 
-def test_close_out_streams_each_step_and_closes_the_open_event(client):
+@pytest.mark.parametrize("discord", [True, False], ids=["with-discord", "without-discord"])
+def test_close_out_streams_each_step_and_closes_the_open_event(client, settings, discord):
+    if not discord:
+        settings.DISCORD_BOT_TOKEN = ""
     event = _open_event()
     _team_with_school()
 
     lines = _close_out(client, open_event=event.pk, confirm="yolo")
 
     assert [line.get("step") for line in lines[:-1]] == [
-        "Closing out: freezing the results, then clearing the live data"
+        "Closing out: archiving the results, then clearing the live data"
     ]
+    cleanup = ", and queued Discord cleanup" if discord else ""
     assert lines[-1] == {
         "done": True,
         "success": True,
-        "message": "Closed out Inv: froze 1 school result(s) and the export archive, deleted 1 ServiceScore, and "
-        "queued the Discord cleanup (the bot reports it in the ops channel). Next: Import the next school list to "
-        "open an event.",
+        "message": f"Closed out Inv: archived 1 school result(s), deleted 1 ServiceScore{cleanup}. "
+        "Next: Import the next school list to open an event.",
     }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
-    assert QueuedTask.objects.filter(task_type="reconcile_teams").count() == 1
+    assert QueuedTask.objects.filter(task_type="reconcile_teams").exists() is discord
 
 
 @pytest.mark.parametrize("typed", [None, "", "no"])
@@ -95,6 +107,44 @@ def test_close_out_needs_the_typed_confirmation(client, typed):
 
     assert lines == [{"done": True, "success": False, "message": 'Type "yolo" to confirm.'}]
     _assert_nothing_happened(event)
+
+
+def test_typed_confirmation_alone_does_not_authorize_close_out(client):
+    event = _open_event()
+    _team_with_school()
+
+    assert _close_out(client, open_event=event.pk, confirm="yolo", preview="")[-1]["message"] == (
+        "Reload and review Close Out before confirming."
+    )
+    _assert_nothing_happened(event)
+
+
+def test_saved_school_pair_survives_clear_or_reassignment_and_can_be_restored(client):
+    event = _open_event()
+    team = _team_with_school()
+    assignment = event.team_assignments.get()
+    school = assignment.school
+    card = current_snapshots(event)[school.pk]
+    EventResult.objects.create(
+        event=event,
+        school=school,
+        team_number=team.team_number,
+        total_score=card.score.total,
+        rank=card.score.rank,
+        scorecard=card.scorecard,
+    )
+
+    response = client.post(reverse("school_info_clear"))
+    assert b"Saved scorecards need their school and team number kept together" in response.content
+    with pytest.raises(SavedRosterError):
+        remove_team_school(team, expected_school_id=school.pk)
+    with pytest.raises(SavedRosterError):
+        set_team_school(team, "Replacement school", contact_email="coach@example.test")
+    assignment.refresh_from_db()
+    assert assignment.school_id == school.pk
+    assignment.delete()
+    set_team_school(team, school.name, contact_email="coach@example.test")
+    assert event.team_assignments.get().school_id == school.pk
 
 
 def test_refused_while_the_competition_runs(client):
@@ -252,7 +302,7 @@ def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(cli
 def test_after_closing_out_the_page_points_at_the_next_import(client):
     event = _open_event()
     _team_with_school()
-    close_out_event(event, "gold")
+    close_out_event(event, "gold", preview=close_out_preview(event))
 
     page = _page(client)
 
@@ -280,35 +330,44 @@ def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
     for inject in ("1", "2", "3"):
         InjectScore.objects.create(team=team, inject_id=inject, inject_name="Memo", points_awarded=Decimal(5))
 
-    assert _check(client).json() == {
-        "success": True,
-        "problem": "",
-        "fixes": [],
-        "warnings": [
-            {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
-            {
-                "text": "No scorecard email is recorded for this event. If you already emailed them, you can close "
-                "out.",
-                "url": reverse("scoring:email_scorecards"),
-            },
-        ],
-    }
+    preview = _check(client).json()
+    assert preview["preview"] and not preview["problem"] and not preview["fixes"]
+    assert preview["warnings"] == [
+        {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
+        {"text": "No scorecard email is recorded for this event.", "url": None},
+    ]
 
 
-def test_the_check_says_what_would_make_close_out_refuse(client):
+@pytest.mark.parametrize(
+    ("has_school", "label", "route"),
+    [
+        (False, "enter its school", "school_info_edit"),
+        (True, "remove its school", "school_info_remove"),
+    ],
+)
+def test_unrecorded_scores_offer_activation_then_only_the_relevant_school_link(client, has_school, label, route):
+    _season()
+    if has_school:
+        team = _team_with_school()
+        Team.objects.filter(pk=team.pk).update(is_active=False)
+    else:
+        team = Team.objects.create(team_number=1, team_name="Team 01", is_active=False)
+        ServiceScore.objects.create(team=team, service_points=Decimal(100))
+
+    assert _check(client).json()["fixes"] == [
+        {"text": "Team 1: Activate Team", "url": reverse("admin_team_detail", args=[1])},
+        {"text": f"Team 1: {label}", "url": reverse(route, args=[1])},
+    ]
+
+
+def test_inactive_assignment_is_an_archive_notice_not_a_refusal(client):
     _open_event()
     _team_with_school()
     Team.objects.filter(team_number=1).update(is_active=False)
 
     response = _check(client).json()
-    assert response["problem"] == (
-        "Team 1 is inactive but holds a school on the list: activate it with Activate Team on its Teams page first, "
-        "or remove its school."
-    )
-    assert response["fixes"] == [
-        {"text": "Team 1: Activate Team", "url": reverse("admin_team_detail", args=[1])},
-        {"text": "Team 1: remove its school", "url": reverse("school_info_remove", args=[1])},
-    ]
+    assert response["problem"] == "" and response["fixes"] == []
+    assert any("Team 1 (School 1, inactive)" in warning["text"] for warning in response["warnings"])
 
 
 def test_a_failing_check_says_so_and_leaves_the_page_working(client):
@@ -328,12 +387,12 @@ def test_the_page_load_does_not_build_scorecards(client):
     _open_event()
     _team_with_school()
 
-    with patch("registration.close_out_checks.scorecards_fingerprint") as fingerprint:
+    with patch("core.admin_views.competition.close_out_card_check") as snapshots:
         page = _page(client)
 
-    fingerprint.assert_not_called()
+    snapshots.assert_not_called()
     assert BUTTON in page
-    assert "Couldn&#x27;t check unfinished work" in page
+    assert "Couldn&#x27;t preview Close Out" in page
 
 
 def test_the_check_needs_admin_or_gold_access(create_user_with_groups):

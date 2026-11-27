@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections, transaction
-from django.db.models import Exists, OuterRef, Q, QuerySet
+from django.db.models import Exists, F, OuterRef, Q, QuerySet
 from django.template.loader import render_to_string
 from django.urls import reverse
 from registration.locks import school_list_lock
@@ -61,9 +61,19 @@ def _create_distributions_for_teams(packet: Packet) -> list[PacketDistribution]:
     """Create the packet's distributions for the recipients that have none, and return them.
 
     Callers hold the school list lock, so the list can't change between choosing the teams and creating the rows."""
-    teams = packet_recipients().exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
+    recipients = (
+        packet_recipients()
+        .exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
+        .annotate(distribution_school_id=F("school_info__school_id"))
+    )
     distributions = PacketDistribution.objects.bulk_create(
-        PacketDistribution(packet=packet, team=team, web_access_enabled=packet.web_access_enabled) for team in teams
+        PacketDistribution(
+            packet=packet,
+            team=team,
+            web_access_enabled=packet.web_access_enabled,
+            school_at_distribution_id=team.distribution_school_id,
+        )
+        for team in recipients
     )
     if distributions:
         logger.info(f"Created {len(distributions)} distributions for packet {packet.id}")

@@ -9,7 +9,8 @@ from django.urls import reverse
 from registration.models import Event, Season
 
 from core.models import UserGroups
-from packets.models import Packet
+from packets.models import Packet, PacketDistribution
+from team.models import Team
 
 pytestmark = pytest.mark.django_db
 
@@ -103,3 +104,19 @@ def test_a_sent_packet_cannot_be_deleted(staff_client):
     assert sent_page.status_code == 403
     assert draft_page.status_code == 200
     assert Packet.objects.filter(pk=sent.pk).exists()
+
+
+def test_distribution_admin_cannot_create_or_move_a_distribution(staff_client):
+    packet = _packet()
+    team = Team.objects.create(team_number=1, team_name="First")
+    other = Team.objects.create(team_number=2, team_name="Second")
+    distribution = PacketDistribution.objects.create(packet=packet, team=team)
+    add_url = reverse("admin:packets_packetdistribution_add")
+    assert staff_client.post(add_url, {"packet": packet.pk, "team": other.pk}).status_code == 403
+    url = reverse("admin:packets_packetdistribution_change", args=[distribution.pk])
+    page = staff_client.get(url).content.decode()
+    assert 'name="team"' not in page and 'name="packet"' not in page
+    inline = staff_client.get(reverse("admin:packets_packet_change", args=[packet.pk])).content.decode()
+    assert 'name="distributions-0-team"' not in inline
+    assert staff_client.post(url, {"packet": packet.pk, "team": other.pk, "email_status": "pending"}).status_code == 302
+    assert PacketDistribution.objects.get(pk=distribution.pk).team_id == team.pk

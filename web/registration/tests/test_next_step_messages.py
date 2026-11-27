@@ -8,10 +8,12 @@ from scoring.models import ServiceScore
 
 from registration.models import Season
 from registration.services import (
+    CloseOutError,
     TeamFix,
+    TeamFixAction,
     cancel_event_problem,
     clear_leftovers_problem,
-    close_out_fixes,
+    close_out_card_check,
     close_out_problem,
     set_team_school,
 )
@@ -45,78 +47,40 @@ def test_a_scored_team_with_no_school_says_where_to_add_it(current_event):
     unlisted = Team.objects.create(team_number=2, team_name="Team 02", is_active=True)
     ServiceScore.objects.create(team=unlisted, service_points=Decimal(1))
 
-    assert close_out_problem(event_stage()) == (
-        "Team 2 has scores but no school. Enter its school on its School Info page first."
-    )
+    with pytest.raises(CloseOutError, match="Team 2 has scores but no school. Enter its school on its School Info"):
+        close_out_card_check(event_stage())
 
 
 def test_an_event_with_no_schools_says_how_to_list_them(current_event):
     team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     ServiceScore.objects.create(team=team, service_points=Decimal(1))
 
-    assert close_out_problem(event_stage()) == (
-        "Invitational (2026) has no schools on its list, so there are no results to keep. Enter its school on its "
-        "School Info page first."
-    )
+    with pytest.raises(CloseOutError, match="the live scores cannot be mapped to schools"):
+        close_out_card_check(event_stage())
 
 
-def test_an_inactive_scored_team_with_no_school_is_activated_first(current_event):
+def test_an_inactive_scored_team_with_no_school_requires_roster_reconciliation(current_event):
     listed = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     set_team_school(listed, "School 1", contact_email="c@example.edu")
     team = Team.objects.create(team_number=2, team_name="Team 02", is_active=False)
     ServiceScore.objects.create(team=team, service_points=Decimal(1))
 
-    stage = event_stage()
-    assert close_out_problem(stage) == (
-        "Team 2 has scores but no school. Activate it with Activate Team on its Teams page, then enter its school on "
-        "its School Info page first."
-    )
-    assert close_out_fixes(stage) == [TeamFix(2, activate=True, enter_school=True, remove_school=False)]
+    with pytest.raises(CloseOutError, match="event roster owner reconcile") as refused:
+        close_out_card_check(event_stage())
+    assert not refused.value.fixes
 
 
-def test_an_inactive_listed_team_offers_removal_only_before_packets_went_out(current_event):
-    from packets.models import Packet
-
-    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+def test_a_mapped_inactive_slot_is_not_a_close_out_blocker(current_event):
+    team = _scored(1)
     set_team_school(team, "School 1", contact_email="c@example.edu")
-    ServiceScore.objects.create(team=team, service_points=Decimal(1))
     Team.objects.filter(pk=team.pk).update(is_active=False)
-
-    assert close_out_problem(event_stage()).endswith("Teams page first, or remove its school.")
-    assert close_out_fixes(event_stage())[0].remove_school
-
-    Packet.objects.create(
-        title="P",
-        file_data=b"x",
-        filename="p.pdf",
-        mime_type="application/pdf",
-        file_size=1,
-        status="completed",
-        event=current_event,
-    )
-    assert close_out_problem(event_stage()).endswith("activate it with Activate Team on its Teams page first.")
-    assert not close_out_fixes(event_stage())[0].remove_school
+    assert not close_out_card_check(event_stage()).schools
 
 
 def _scored(number, *, active=True):
     team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=active)
     ServiceScore.objects.create(team=team, service_points=Decimal(1))
     return team
-
-
-def test_several_inactive_listed_teams_are_named_three_and_a_count(current_event):
-    for number in range(1, 5):
-        set_team_school(_scored(number), f"School {number}", contact_email="c@example.edu")
-    Team.objects.update(is_active=False)
-
-    stage = event_stage()
-    assert close_out_problem(stage) == (
-        "Team 1, Team 2, Team 3 and 1 more are inactive but hold a school on the list: activate them with Activate "
-        "Team on their Teams page first, or remove their schools."
-    )
-    assert close_out_fixes(stage) == [
-        TeamFix(number, activate=True, enter_school=False, remove_school=True) for number in (1, 2, 3)
-    ]
 
 
 @pytest.mark.parametrize(
@@ -129,32 +93,18 @@ def test_scored_teams_with_no_school_are_named_up_to_three_and_each_told_to_ente
     for number in range(2, 2 + unschooled):
         _scored(number)
 
-    stage = event_stage()
-    assert close_out_problem(stage) == (
-        f"{named} have scores but no school. Enter each team's school on its School Info page first."
-    )
-    assert close_out_fixes(stage) == [
-        TeamFix(number, activate=False, enter_school=True, remove_school=False) for number in (2, 3, 4)
-    ]
+    with pytest.raises(CloseOutError, match=f"{named} have scores but no school") as refused:
+        close_out_card_check(event_stage())
+    assert list(refused.value.fixes) == [TeamFix(number, TeamFixAction.ENTER_SCHOOL) for number in (2, 3, 4)]
 
 
-def test_with_nothing_played_there_is_no_team_to_fix(current_event):
-    """An inactive listed team holds back no Close Out while nothing was played: the page offers it no fix."""
-    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
-    set_team_school(team, "School 1", contact_email="c@example.edu")
-    Team.objects.update(is_active=False)
-
-    assert close_out_fixes(event_stage()) == []
-
-
-def test_the_school_checks_wait_for_the_close_out_itself(current_event):
-    """The competition page asks without them, so it offers Close Out; the close-out's own check refuses."""
-    set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
-    Team.objects.update(is_active=False)
+def test_initial_page_stage_check_skips_school_validation(current_event):
+    _scored(1)
 
     stage = event_stage()
-    assert close_out_problem(stage, check_schools=False) == ""
-    assert close_out_problem(stage).startswith("Team 1 is inactive but holds a school on the list")
+    assert close_out_problem(stage) == ""
+    with pytest.raises(CloseOutError, match="no schools on its list"):
+        close_out_card_check(event_stage())
 
 
 def test_with_no_event_open_and_no_active_season_close_out_points_at_the_seasons_page():
@@ -166,26 +116,19 @@ def test_with_no_event_open_and_no_active_season_close_out_points_at_the_seasons
     )
 
 
-def test_scored_teams_with_no_school_some_inactive_are_told_to_activate_those_first(current_event):
+def test_mixed_unmapped_slots_only_link_to_the_active_school_editor(current_event):
     set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
     _scored(2)
     _scored(3, active=False)
 
-    stage = event_stage()
-    assert close_out_problem(stage) == (
-        "Team 2, Team 3 have scores but no school. Activate each inactive one with Activate Team on its Teams page, "
-        "then enter each team's school on its School Info page first."
-    )
-    assert close_out_fixes(stage) == [
-        TeamFix(2, activate=False, enter_school=True, remove_school=False),
-        TeamFix(3, activate=True, enter_school=True, remove_school=False),
-    ]
+    with pytest.raises(CloseOutError, match="For active slots, enter the school") as refused:
+        close_out_card_check(event_stage())
+    assert refused.value.fixes == (TeamFix(2, TeamFixAction.ENTER_SCHOOL),)
 
 
 def test_with_no_event_open_and_an_empty_school_list_the_scores_have_nowhere_to_go():
     Season.objects.create(name="2026", year=2026, is_active=True)
     _scored(1)
 
-    assert close_out_problem(event_stage()) == (
-        "The school list is empty, so there are no results to keep. Enter its school on its School Info page first."
-    )
+    with pytest.raises(CloseOutError, match="The school list is empty, so the live scores cannot be mapped"):
+        close_out_card_check(event_stage())
