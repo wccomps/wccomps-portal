@@ -109,7 +109,10 @@ class FinalScore:
     @classmethod
     def from_standing(cls, standing: Standing) -> FinalScore:
         return cls(
-            standing.team.team_number, standing.team.team_name, standing.rank, standing.total_score,
+            standing.team.team_number,
+            standing.team.team_name,
+            standing.rank,
+            standing.total_score,
             {key: getattr(standing, key) for key in SCORE_COMPONENT_FIELDS},
             sum(line["service_credit"] for line in standing.service_corrections),
             sum(line["sla_credit"] for line in standing.service_corrections),
@@ -124,10 +127,7 @@ class SchoolSnapshot:
 
 def scorecard_fingerprint(schools: dict[int, SchoolSnapshot]) -> str:
     """Preserve the existing mail-audit encoding of school → (slot, serialized card)."""
-    payload = {
-        str(school): (card.score.team_number, card.scorecard)
-        for school, card in schools.items()
-    }
+    payload = {str(school): (card.score.team_number, card.scorecard) for school, card in schools.items()}
     normalized = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(normalized.encode()).hexdigest()
 
@@ -164,7 +164,10 @@ def _fields(row: dict[str, object], *, numbers: str = "", text: str = "", flags:
 
 
 def _validate_v1_details(
-    context: dict[str, object], components: dict[str, Decimal], rank: int | None, score_total: Decimal,
+    context: dict[str, object],
+    components: dict[str, Decimal],
+    rank: int | None,
+    score_total: Decimal,
 ) -> tuple[int, tuple[tuple[int, Decimal], ...]]:
     stats, scaling = context["stats"], context["scaling"]
     if not isinstance(stats, dict) or not isinstance(scaling, dict):
@@ -257,7 +260,12 @@ def _snapshot_number(value: object) -> Decimal:
 
 
 def frozen_final_score(
-    data: dict[str, object], version: int, number: int, name: str, rank: int | None, total: Decimal,
+    data: dict[str, object],
+    version: int,
+    number: int,
+    name: str,
+    rank: int | None,
+    total: Decimal,
 ) -> FinalScore:
     """Read the stored version without reconstructing a live standing."""
     if version != 1:
@@ -266,9 +274,12 @@ def frozen_final_score(
         context = context_from_snapshot(data)
         score, team = context["score"], context["team"]
         if (
-            not isinstance(score, dict) or not isinstance(team, dict)
-            or type(team["team_number"]) is not int or team["team_number"] != number
-            or score["rank"] != rank or (rank is not None and type(score["rank"]) is not int)
+            not isinstance(score, dict)
+            or not isinstance(team, dict)
+            or type(team["team_number"]) is not int
+            or team["team_number"] != number
+            or score["rank"] != rank
+            or (rank is not None and type(score["rank"]) is not int)
             or _snapshot_number(score["total_score"]) != total
         ):
             raise ValueError
@@ -289,7 +300,7 @@ def frozen_final_score(
                 raise ValueError
             raw_credit += raw
             sla_credit += sla
-    except (KeyError, TypeError, ValueError, InvalidOperation, RecursionError):
+    except KeyError, TypeError, ValueError, InvalidOperation, RecursionError:
         raise ValueError("A saved scorecard cannot be read. Nothing was closed out.") from None
     if rank is not None and not 1 <= rank <= count:
         raise ValueError("Saved result rank is outside its recorded cohort. Nothing was closed out.")

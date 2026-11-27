@@ -292,23 +292,38 @@ def _action_close_out_check(request: HttpRequest, authentik_username: str) -> Js
             for w in close_out_warnings(stage.event, cards)
         ]
         preview = cards.preview_key(stage.event) if cards is not None else ""
-        summary = None if cards is None else {
-            "title": "Saved school scorecards to keep" if cards.saved else "Current school scorecards to archive",
-            "schools": [
-                {"slot": a.team_number, "text": (
-                    f"Team {a.team_number} ({a.school_name}): "
-                    f"{'Unranked' if card.score.rank is None else f'Rank {card.score.rank}'}, {card.score.total} points"
-                )}
-                for a in cards.roster if (card := cards.schools.get(a.school_id)) is not None
-            ],
-        }
+        summary = (
+            None
+            if cards is None
+            else {
+                "title": "Saved school scorecards to keep" if cards.saved else "Current school scorecards to archive",
+                "schools": [
+                    {
+                        "slot": a.team_number,
+                        "text": (
+                            f"Team {a.team_number} ({a.school_name}): "
+                            f"{'Unranked' if card.score.rank is None else f'Rank {card.score.rank}'}, {card.score.total} points"
+                        ),
+                    }
+                    for a in cards.roster
+                    if (card := cards.schools.get(a.school_id)) is not None
+                ],
+            }
+        )
     except Exception:
         logger.exception("Close-out check failed")
         return JsonResponse({"error": CLOSE_OUT_CHECK_FAILED}, status=500)
-    return JsonResponse({
-        "success": True, "problem": problem, "fixes": fixes, "warnings": warnings, "preview": preview,
-        "summary": summary, "event": str(stage.event.pk) if stage.event else "",
-    })
+    return JsonResponse(
+        {
+            "success": True,
+            "problem": problem,
+            "fixes": fixes,
+            "warnings": warnings,
+            "preview": preview,
+            "summary": summary,
+            "event": str(stage.event.pk) if stage.event else "",
+        }
+    )
 
 
 # The Before you close out section shows it when the on-demand check fails

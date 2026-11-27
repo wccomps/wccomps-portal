@@ -200,7 +200,11 @@ def test_preview_distinguishes_a_missing_fingerprint_field_from_a_null_value(eve
     if digest_present:
         details["scorecards_hash"] = None
     AuditLog.objects.create(
-        action=ScorecardsEmailed.ACTION, admin_user="gold", target_entity="event", target_id=event.pk, details=details,
+        action=ScorecardsEmailed.ACTION,
+        admin_user="gold",
+        target_entity="event",
+        target_id=event.pk,
+        details=details,
     )
     client = Client()
     client.force_login(gold_team_user)

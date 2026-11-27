@@ -95,10 +95,7 @@ def test_scored_teams_with_no_school_are_named_up_to_three_and_each_told_to_ente
 
     with pytest.raises(CloseOutError, match=f"{named} have scores but no school") as refused:
         close_out_card_check(event_stage())
-    assert list(refused.value.fixes) == [
-        TeamFix(number, TeamFixAction.ENTER_SCHOOL) for number in (2, 3, 4)
-    ]
-
+    assert list(refused.value.fixes) == [TeamFix(number, TeamFixAction.ENTER_SCHOOL) for number in (2, 3, 4)]
 
 
 def test_initial_page_stage_check_skips_school_validation(current_event):

@@ -91,14 +91,17 @@ def close_out_warnings(event: Event | None, cards: CloseOutCards | None) -> list
     if cards is not None:
         omitted = ", ".join(
             f"Team {a.team_number} ({a.school_name}, {'active' if a.is_active else 'inactive'})"
-            for a in cards.roster if a.school_id not in cards.schools
+            for a in cards.roster
+            if a.school_id not in cards.schools
         )
         if omitted:
-            warnings.append(CloseOutWarning(
-                f"No card in the set being archived for: {omitted}. "
-                "The close-time roster still includes these assignments; existing packet distributions "
-                "are archived by slot."
-            ))
+            warnings.append(
+                CloseOutWarning(
+                    f"No card in the set being archived for: {omitted}. "
+                    "The close-time roster still includes these assignments; existing packet distributions "
+                    "are archived by slot."
+                )
+            )
     return warnings + [CloseOutWarning(text) for text in _scorecard_warnings(event, cards)]
 
 
@@ -121,7 +124,8 @@ def _scorecard_warnings(event: Event | None, cards: CloseOutCards | None) -> lis
         warnings.append(_sentence(failed, one, many))
     if cards is not None and emailed.scorecards_hash != cards.fingerprint:
         warnings.append(
-            "Saved scorecards differ from the last scorecard email record." if cards.saved
+            "Saved scorecards differ from the last scorecard email record."
+            if cards.saved
             else "Current school scorecards differ from the last email record."
         )
     return warnings

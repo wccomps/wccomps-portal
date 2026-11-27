@@ -50,8 +50,14 @@ def stopped_event():
     )
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     packet = Packet.objects.create(
-        event=event, title="Synthetic Packet", status="completed", uploaded_by="fixture",
-        filename="example.pdf", file_data=b"%PDF-1.7", file_size=8, mime_type="application/pdf",
+        event=event,
+        title="Synthetic Packet",
+        status="completed",
+        uploaded_by="fixture",
+        filename="example.pdf",
+        file_data=b"%PDF-1.7",
+        file_size=8,
+        mime_type="application/pdf",
     )
     for slot, score in ((1, 100), (41, 200), (50, 150)):
         name = "Inactive Example" if slot != 50 else "Active Example"
@@ -59,42 +65,82 @@ def stopped_event():
         EventTeamAssignment.objects.create(event=event, school=School.for_name(f"Example School {slot}"), team=team)
         PacketDistribution.objects.create(packet=packet, team=team, email_status="sent")
         InjectScore.objects.create(
-            team=team, inject_id="1", inject_name="Memo", points_awarded=12, is_approved=True,
-            feedback=f"Feedback for slot {slot}", feedback_approved=slot == 41,
+            team=team,
+            inject_id="1",
+            inject_name="Memo",
+            points_awarded=12,
+            is_approved=True,
+            feedback=f"Feedback for slot {slot}",
+            feedback_approved=slot == 41,
         )
         ServiceScore.objects.create(team=team, service_points=score, sla_violations=-5)
         ServiceDetail.objects.create(team=team, service_name="Example-HTTPS", points=score, sla_violations=1)
     ServiceDetail.objects.create(
-        team=Team.objects.get(team_number=41), service_name="Example-Private-Only", points=17,
+        team=Team.objects.get(team_number=41),
+        service_name="Example-Private-Only",
+        points=17,
     )
     finding = RedTeamScore.objects.create(is_approved=True, points_per_team=3)
     finding.affected_teams.add(Team.objects.get(team_number=41))
     batch = ServiceCorrectionBatch.objects.create(
-        event=event, service_name="Example-HTTPS", ruling="example-full-void", manifest_sha256="a" * 64,
-        baseline_sha256="b" * 64, portal_baseline_sha256=portal_digest("Example-HTTPS"), service_modifier="1.5",
+        event=event,
+        service_name="Example-HTTPS",
+        ruling="example-full-void",
+        manifest_sha256="a" * 64,
+        baseline_sha256="b" * 64,
+        portal_baseline_sha256=portal_digest("Example-HTTPS"),
+        service_modifier="1.5",
     )
     for slot in (1, 50):
         ServiceCorrection.objects.create(
-            batch=batch, team=Team.objects.get(team_number=slot), quotient_team_id=slot + 100,
-            service_credit=-10, sla_credit=5,
+            batch=batch,
+            team=Team.objects.get(team_number=slot),
+            quotient_team_id=slot + 100,
+            service_credit=-10,
+            sla_credit=5,
         )
     return event, packet, batch
 
 
 def _response(client, event, **fields):
     fields.setdefault("preview", "0" * 64)
-    response = client.post(reverse("admin_competition_action"), {
-        "action": "close_out_event", "open_event": event.pk, "confirm": "yolo", **fields,
-    })
+    response = client.post(
+        reverse("admin_competition_action"),
+        {
+            "action": "close_out_event",
+            "open_event": event.pk,
+            "confirm": "yolo",
+            **fields,
+        },
+    )
     return json.loads(b"".join(response.streaming_content).splitlines()[-1])
 
 
 @pytest.mark.parametrize(
     "failure",
-    ["unassigned", "correction", "malformed", "incomplete", "details", "cohort",
-     "wrong_school", "missing_category", "detail_rank", "category_bound", "neighbor_bound", "missing_detail_rows",
-     "self_neighbor", "duplicate_neighbor", "missing_neighbor", "neighbor_gap", "neighbor_order", "detail_sum",
-     "modifier", "weight", "version"],
+    [
+        "unassigned",
+        "correction",
+        "malformed",
+        "incomplete",
+        "details",
+        "cohort",
+        "wrong_school",
+        "missing_category",
+        "detail_rank",
+        "category_bound",
+        "neighbor_bound",
+        "missing_detail_rows",
+        "self_neighbor",
+        "duplicate_neighbor",
+        "missing_neighbor",
+        "neighbor_gap",
+        "neighbor_order",
+        "detail_sum",
+        "modifier",
+        "weight",
+        "version",
+    ],
 )
 def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     event, packet, batch = stopped_event
@@ -134,6 +180,7 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
             card["stats"]["inject_stats"][0]["points"] = 0
         elif failure.startswith("neighbor_") or failure.endswith("_neighbor"):
             total = snapshot.score.total
+
             def neighbor(rank, score, gap):
                 return {"rank": rank, "total_score": {"$d": str(score)}, "gap": {"$d": str(gap)}}
 
@@ -151,8 +198,12 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
         elif failure == "weight":
             card["scaling"]["service_weight"] = 99
         EventResult.objects.create(
-            event=event, school_id=school, team_number=41 if failure == "wrong_school" else 50,
-            rank=snapshot.score.rank, total_score=snapshot.score.total, scorecard=card,
+            event=event,
+            school_id=school,
+            team_number=41 if failure == "wrong_school" else 50,
+            rank=snapshot.score.rank,
+            total_score=snapshot.score.total,
+            scorecard=card,
             version=2 if failure == "version" else 1,
         )
         expected = {
@@ -180,7 +231,9 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     if failure not in ("unassigned", "correction"):
         kept = EventArchive.objects.get(event=event)
         assert (bytes(kept.data), kept.updated_at, kept.close_out_data) == (
-            b"retained", retained.updated_at, None,
+            b"retained",
+            retained.updated_at,
+            None,
         )
     assert not EventScoringEvidence.objects.filter(event=event).exists()
     assert list(event.team_assignments.order_by("pk").values()) == assignments_before
@@ -204,18 +257,30 @@ def test_saved_cards_agree_on_cohort_rank_and_neighbor_total(stopped_event, gold
             stats["team_count"] = 3
         if conflict == "inverted-ranks":
             peer_rank = 3 - rank
-            stats["neighbors"] = [{
-                "rank": peer_rank, "total_score": {"$d": str(snapshot.score.total)}, "gap": 0,
-            }]
+            stats["neighbors"] = [
+                {
+                    "rank": peer_rank,
+                    "total_score": {"$d": str(snapshot.score.total)},
+                    "gap": 0,
+                }
+            ]
         if conflict == "neighbor-total" and rank == 1:
             claimed = snapshot.score.total - Decimal("100.00")
-            stats["neighbors"] = [{
-                "rank": 2, "total_score": {"$d": str(claimed)}, "gap": -100,
-            }]
+            stats["neighbors"] = [
+                {
+                    "rank": 2,
+                    "total_score": {"$d": str(claimed)},
+                    "gap": -100,
+                }
+            ]
         snapshot.scorecard["score"]["rank"] = rank
         EventResult.objects.create(
-            event=event, school_id=school, team_number=snapshot.score.team_number,
-            rank=rank, total_score=snapshot.score.total, scorecard=snapshot.scorecard,
+            event=event,
+            school_id=school,
+            team_number=snapshot.score.team_number,
+            rank=rank,
+            total_score=snapshot.score.total,
+            scorecard=snapshot.scorecard,
         )
     saved_before = list(event.results.values())
     archive = EventArchive.objects.create(event=event, data=b"old ZIP", retained_kind="finalize")
@@ -261,13 +326,20 @@ def test_stale_gold_preview_refuses_before_archiving_or_wiping(stopped_event, go
 
 @pytest.mark.browser
 def test_preview_response_for_another_open_event_requires_reload(
-    stopped_event, gold_team_user, live_server, pw_browser,
+    stopped_event,
+    gold_team_user,
+    live_server,
+    pw_browser,
 ):
     event, _, _ = stopped_event
     other = Event.objects.create(
-        season=event.season, name="Another event", date=event.date, event_type=event.event_type,
+        season=event.season,
+        name="Another event",
+        date=event.date,
+        event_type=event.event_type,
     )
     with create_session_context(pw_browser, live_server, gold_team_user) as context:
+
         def route_request(route):
             request = route.request
             if not request.url.startswith(live_server.url + "/"):
@@ -290,7 +362,12 @@ def test_preview_response_for_another_open_event_requires_reload(
 @pytest.mark.browser
 @pytest.mark.parametrize("source", ["current", "saved", "saved-only"])
 def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
-    stopped_event, gold_team_user, live_server, pw_browser, mailoutbox, source,
+    stopped_event,
+    gold_team_user,
+    live_server,
+    pw_browser,
+    mailoutbox,
+    source,
 ):
     event, packet, batch = stopped_event
     saved_cards = source != "current"
@@ -304,8 +381,12 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
         for school_id, snapshot in expected.items():
             score = snapshot.score
             saved_ids[school_id] = EventResult.objects.create(
-                event=event, school_id=school_id, team_number=score.team_number, rank=score.rank,
-                total_score=score.total, scorecard=snapshot.scorecard,
+                event=event,
+                school_id=school_id,
+                team_number=score.team_number,
+                rank=score.rank,
+                total_score=score.total,
+                scorecard=snapshot.scorecard,
             ).pk
         Team.objects.filter(team_number=1).update(is_active=False)
         if source == "saved":
@@ -325,9 +406,14 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
     if source == "saved-only":
         client = Client()
         client.force_login(gold_team_user)
-        response = client.post(reverse("admin_competition_action"), {
-            "action": "cancel_event", "open_event": event.pk, "confirm": "yolo",
-        })
+        response = client.post(
+            reverse("admin_competition_action"),
+            {
+                "action": "cancel_event",
+                "open_event": event.pk,
+                "confirm": "yolo",
+            },
+        )
         assert response.status_code == 400 and "has scores, so it can't be cancelled" in response.json()["error"]
         assert Event.objects.get(pk=event.pk).is_active
     assignments = dict(event.team_assignments.values_list("team__team_number", "school_id"))
@@ -374,7 +460,9 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
     for school_id, result in results.items():
         before = expected[school_id]
         assert (result.rank, result.total_score, result.scorecard) == (
-            before.score.rank, before.score.total, before.scorecard,
+            before.score.rank,
+            before.score.total,
+            before.scorecard,
         )
         score = scores[result.team_number]
         assert (result.rank, result.total_score) == (score["rank"], Decimal(score["total_score"]))
@@ -389,7 +477,9 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
         assert {raw[a["team_id"]] for a in evidence["assignments"] if not a["team__is_active"]} == {100, 200}
         assert len(raw_grades) == 3
         assert {row["team_number"]: row["approved_feedback"] for row in raw_grades} == {
-            1: "", 41: "Feedback for slot 41", 50: "",
+            1: "",
+            41: "Feedback for slot 41",
+            50: "",
         }
         assert any(
             row["service_name"] == "Example-Private-Only" and Decimal(row["points"]) == 17
@@ -416,7 +506,10 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
 
 @pytest.mark.browser
 def test_historical_v1_card_and_finalize_zip_survive_close_out(
-    stopped_event, gold_team_user, live_server, pw_browser,
+    stopped_event,
+    gold_team_user,
+    live_server,
+    pw_browser,
 ):
     event, _, _ = stopped_event
     team = Team.objects.create(team_number=37, team_name="Legacy slot")
@@ -435,7 +528,12 @@ def test_historical_v1_card_and_finalize_zip_survive_close_out(
         {"rank": 3, "total_score": {"$d": "3807.99"}, "gap": {"$d": "-0.01"}},
     ]
     result = EventResult.objects.create(
-        event=event, school=school, team_number=37, rank=2, total_score="3808.00", scorecard=card,
+        event=event,
+        school=school,
+        team_number=37,
+        rank=2,
+        total_score="3808.00",
+        scorecard=card,
     )
     old_zip = BytesIO()
     with ZipFile(old_zip, "w") as archive:
@@ -470,7 +568,7 @@ def test_historical_v1_card_and_finalize_zip_survive_close_out(
         with page.expect_download() as new:
             page.get_by_role("link", name="Download Close Out Archive (ZIP)").click()
         with ZipFile(new.value.path()) as archive:
-            row, = json.loads(archive.read("final_scores.json"))["final_scores"]
+            (row,) = json.loads(archive.read("final_scores.json"))["final_scores"]
             assert (row["rank"], row["total_score"], row["service_points"]) == (2, "3808.00", "3101.00")
             assert "exported_at" in row and "calculated_at" not in row
     assert EventArchive.objects.get(event=event).updated_at == historical.updated_at
@@ -485,7 +583,10 @@ def test_historical_v1_card_and_finalize_zip_survive_close_out(
 
 @pytest.mark.browser
 def test_archive_only_event_gets_reconciliation_not_cancel_or_close_out(
-    stopped_event, gold_team_user, live_server, pw_browser,
+    stopped_event,
+    gold_team_user,
+    live_server,
+    pw_browser,
 ):
     event, _, _ = stopped_event
     InjectScore.objects.all().delete()

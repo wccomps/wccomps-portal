@@ -126,8 +126,12 @@ def test_saved_school_pair_survives_clear_or_reassignment_and_can_be_restored(cl
     school = assignment.school
     card = current_snapshots(event)[school.pk]
     EventResult.objects.create(
-        event=event, school=school, team_number=team.team_number, total_score=card.score.total,
-        rank=card.score.rank, scorecard=card.scorecard,
+        event=event,
+        school=school,
+        team_number=team.team_number,
+        total_score=card.score.total,
+        rank=card.score.rank,
+        scorecard=card.scorecard,
     )
 
     response = client.post(reverse("school_info_clear"))

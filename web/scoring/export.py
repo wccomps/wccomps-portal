@@ -180,6 +180,7 @@ def _fetch_ticket_attachments() -> list[DigestedAttachment]:
         .annotate(size=Length("file_data"), sha256=sha256)
     )
 
+
 _FINAL_SCORE_COLUMNS: list[Column[tuple[FinalScore, str]]] = [
     Column("Rank", "rank", lambda sc: sc[0].rank),
     Column("Team", "team", lambda sc: sc[0].team_name),
@@ -190,7 +191,9 @@ _FINAL_SCORE_COLUMNS: list[Column[tuple[FinalScore, str]]] = [
     Column("Orange Points", "orange_points", lambda sc: sc[0].components["orange_points"]),
     Column("Red Deductions", "red_deductions", lambda sc: sc[0].components["red_deductions"]),
     Column(
-        "Incident Recovery Points", "incident_recovery_points", lambda sc: sc[0].components["incident_recovery_points"],
+        "Incident Recovery Points",
+        "incident_recovery_points",
+        lambda sc: sc[0].components["incident_recovery_points"],
     ),
     Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].components["sla_penalties"]),
     Column("Raw Service Credit", "raw_service_credit", lambda sc: sc[0].service_credit),
@@ -385,18 +388,46 @@ def public_event_evidence(event: Event, selected_schools: Collection[int]) -> di
     return {
         "event_id": event.pk,
         "captured_at": timezone.now().isoformat(),
-        "assignments": list(roster.values(
-            "id", "school_id", "school__name", "team_id", "team__team_number", "team__is_active",
-            "registration_id", "has_frozen_scorecard",
-        )),
-        "packets": list(Packet.objects.filter(event=event).order_by("pk").values(
-            "id", "title", "status", "actual_distribution_time", "send_via_email",
-        )),
-        "packet_distributions": list(PacketDistribution.objects.filter(packet__event=event).order_by("pk").values(
-            "id", "packet_id", "team_id", "email_status", "email_sent_at", "web_access_enabled",
-            "download_count", "downloaded_at", "last_downloaded_at",
-            "school_at_distribution_id", "created_at",
-        )),
+        "assignments": list(
+            roster.values(
+                "id",
+                "school_id",
+                "school__name",
+                "team_id",
+                "team__team_number",
+                "team__is_active",
+                "registration_id",
+                "has_frozen_scorecard",
+            )
+        ),
+        "packets": list(
+            Packet.objects.filter(event=event)
+            .order_by("pk")
+            .values(
+                "id",
+                "title",
+                "status",
+                "actual_distribution_time",
+                "send_via_email",
+            )
+        ),
+        "packet_distributions": list(
+            PacketDistribution.objects.filter(packet__event=event)
+            .order_by("pk")
+            .values(
+                "id",
+                "packet_id",
+                "team_id",
+                "email_status",
+                "email_sent_at",
+                "web_access_enabled",
+                "download_count",
+                "downloaded_at",
+                "last_downloaded_at",
+                "school_at_distribution_id",
+                "created_at",
+            )
+        ),
     }
 
 
@@ -419,13 +450,21 @@ def export_all_zip_bytes(close_out: CloseOutExport | None = None) -> bytes:
             datasets = {
                 **DATASETS,
                 "final_scores": replace(
-                    FINAL_SCORES, columns=columns, fetch=lambda: _stamp_final_scores(close_out.scores),
+                    FINAL_SCORES,
+                    columns=columns,
+                    fetch=lambda: _stamp_final_scores(close_out.scores),
                 ),
-                "inject_grades": replace(_INJECT_GRADES, columns=[
-                    *_INJECT_GRADES.columns,
-                    Column("Approved Feedback", "approved_feedback",
-                           lambda grade: grade.feedback if grade.feedback_approved else ""),
-                ]),
+                "inject_grades": replace(
+                    _INJECT_GRADES,
+                    columns=[
+                        *_INJECT_GRADES.columns,
+                        Column(
+                            "Approved Feedback",
+                            "approved_feedback",
+                            lambda grade: grade.feedback if grade.feedback_approved else "",
+                        ),
+                    ],
+                ),
             }
         for dataset in datasets.values():
             csv_str, json_str = dataset.render_pair()

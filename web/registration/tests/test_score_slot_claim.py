@@ -153,9 +153,15 @@ def test_admin_first_score_serializes_with_automatic_claim(roster, admin_client,
 
     def admin_add():
         try:
-            return admin_client.post(reverse("admin:scoring_servicescore_add"), {
-                "team": team.pk, "service_points": "40.00", "sla_violations": "0", "_save": "Save",
-            })
+            return admin_client.post(
+                reverse("admin:scoring_servicescore_add"),
+                {
+                    "team": team.pk,
+                    "service_points": "40.00",
+                    "sla_violations": "0",
+                    "_save": "Save",
+                },
+            )
         finally:
             connections.close_all()
 
@@ -184,8 +190,17 @@ def test_admin_first_score_serializes_with_automatic_claim(roster, admin_client,
 
     # A normal edit of the committed row is still accepted.
     score = ServiceScore.objects.get(team=team)
-    assert admin_client.post(reverse("admin:scoring_servicescore_change", args=[score.pk]), {
-        "team": team.pk, "service_points": "45.00", "sla_violations": "0", "_save": "Save",
-    }).status_code == 302
+    assert (
+        admin_client.post(
+            reverse("admin:scoring_servicescore_change", args=[score.pk]),
+            {
+                "team": team.pk,
+                "service_points": "45.00",
+                "sla_violations": "0",
+                "_save": "Save",
+            },
+        ).status_code
+        == 302
+    )
     score.refresh_from_db()
     assert score.service_points == 45

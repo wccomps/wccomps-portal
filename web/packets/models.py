@@ -174,7 +174,10 @@ class PacketDistribution(models.Model):
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE)
     # Intended school when this slot's distribution row was created, not proof of who received or downloaded it.
     school_at_distribution = models.ForeignKey(
-        "registration.School", null=True, on_delete=models.PROTECT, editable=False,
+        "registration.School",
+        null=True,
+        on_delete=models.PROTECT,
+        editable=False,
     )
 
     objects = PacketDistributionQuerySet.as_manager()

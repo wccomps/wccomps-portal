@@ -208,9 +208,12 @@ def set_team_school(
         raise SavedRosterError(f"Team {team.team_number} has scores. Have the roster owner reconcile that slot.")
     renaming = rename and info is not None
     school = _rename(info.school, school_name, event) if rename and info else School.for_name(school_name)
-    if event is not None and event.results.filter(
-        Q(team_number=team.team_number) | Q(school=school)
-    ).exclude(team_number=team.team_number, school=school).exists():
+    if (
+        event is not None
+        and event.results.filter(Q(team_number=team.team_number) | Q(school=school))
+        .exclude(team_number=team.team_number, school=school)
+        .exists()
+    ):
         raise SavedRosterError(SAVED_ROSTER)
     holder: SchoolInfo | EventTeamAssignment | None = (
         SchoolInfo.objects.filter(school=school).exclude(team=team).select_related("team").first()
@@ -464,10 +467,14 @@ def import_problem(event: Event | NewEvent) -> str:
     if open_now and open_now != event:
         instead = Action.CANCEL if stage.stage == Stage.READY else Action.CLOSE_OUT
         return f"{open_now} is still open. {stage.instruction(instead)} Then import the list for another event."
-    if isinstance(event, Event) and event != open_now and (
-        EventArchive.objects.filter(event=event).exists()
-        or EventScoringEvidence.objects.filter(event=event).exists()
-        or event.results.exists()
+    if (
+        isinstance(event, Event)
+        and event != open_now
+        and (
+            EventArchive.objects.filter(event=event).exists()
+            or EventScoringEvidence.objects.filter(event=event).exists()
+            or event.results.exists()
+        )
     ):
         return f"{event} has retained results or archive evidence; its roster cannot be replaced."
     if packets_sent(open_now):
@@ -767,9 +774,7 @@ def _close_out(target: Event | NewEvent, actor: str, preview: str) -> CloseOutOu
     with _locked_transition(lambda stage: _stale_target(target, stage) or close_out_problem(stage)) as (config, stage):
         cards = close_out_card_check(stage)
         if not constant_time_compare(preview, cards.preview_key(stage.event)):
-            raise CloseOutError(
-                "The Close Out preview changed. Reload and review it again. Nothing was closed out."
-            )
+            raise CloseOutError("The Close Out preview changed. Reload and review it again. Nothing was closed out.")
         event = _locked_target(target, stage)
         results = _freeze_results(event, cards)
         wiped = wipe_competition_data()
@@ -816,9 +821,15 @@ def _close_out_roster(event: Event | None) -> list[CloseOutAssignment]:
     return [
         CloseOutAssignment(*row)
         for row in holders.order_by("team__team_number").values_list(
-            "team_id", "team__team_number", "team__team_name", "team__is_active", "school_id", "school__name",
+            "team_id",
+            "team__team_number",
+            "team__team_name",
+            "team__is_active",
+            "school_id",
+            "school__name",
         )
     ]
+
 
 def current_snapshots(event: Event | None, standings: list[Standing] | None = None) -> dict[int, SchoolSnapshot]:
     """Each school assigned at the event (with none, on the school list) whose team is active, by id, with its
@@ -892,13 +903,17 @@ def _validate_mapping(event: Event | None, roster: list[CloseOutAssignment]) -> 
             problem += " For active slots, enter the school on the School Info page."
     else:
         problem += f" {enter[0].upper()}{enter[1:]} first."
-    raise CloseOutError(problem, (
-        TeamFix(
-            team.team_number,
-            TeamFixAction.ENTER_SCHOOL if team.is_active else TeamFixAction.ACTIVATE_THEN_ENTER_SCHOOL,
-        )
-        for team in unlisted[:SHOWN] if event is None or team.is_active
-    ))
+    raise CloseOutError(
+        problem,
+        (
+            TeamFix(
+                team.team_number,
+                TeamFixAction.ENTER_SCHOOL if team.is_active else TeamFixAction.ACTIVATE_THEN_ENTER_SCHOOL,
+            )
+            for team in unlisted[:SHOWN]
+            if event is None or team.is_active
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -936,8 +951,12 @@ def close_out_card_check(stage: EventStage) -> CloseOutCards:
                         f"{saved_slot_message(result.school.name, result.team_number)} Nothing was closed out."
                     )
                 score = frozen_final_score(
-                    result.scorecard, result.version, result.team_number, assignment.team_name,
-                    result.rank, result.total_score,
+                    result.scorecard,
+                    result.version,
+                    result.team_number,
+                    assignment.team_name,
+                    result.rank,
+                    result.total_score,
                 )
                 schools[result.school_id] = SchoolSnapshot(score, result.scorecard)
             validate_frozen_ranks(card.score for card in schools.values())
@@ -952,21 +971,32 @@ def _freeze_results(event: Event, cards: CloseOutCards) -> int:
     if not cards.saved:
         EventResult.objects.bulk_create(
             EventResult(
-                event=event, school_id=school, team_number=card.score.team_number, rank=card.score.rank,
-                total_score=card.score.total, scorecard=card.scorecard, version=SNAPSHOT_VERSION,
+                event=event,
+                school_id=school,
+                team_number=card.score.team_number,
+                rank=card.score.rank,
+                total_score=card.score.total,
+                scorecard=card.scorecard,
+                version=SNAPSHOT_VERSION,
             )
             for school, card in cards.schools.items()
         )
-    archive = export_all_zip_bytes(CloseOutExport(
-        [card.score for card in cards.schools.values()], public_event_evidence(event, cards.schools),
-    ))
+    archive = export_all_zip_bytes(
+        CloseOutExport(
+            [card.score for card in cards.schools.values()],
+            public_event_evidence(event, cards.schools),
+        )
+    )
     if not EventArchive.objects.filter(event=event, close_out_data__isnull=True).update(close_out_data=archive):
         EventArchive.objects.create(event=event, close_out_data=archive)
     team_ids = event.team_assignments.values("team_id")
-    EventScoringEvidence.objects.create(event=event, data={
-        "service_scores": list(ServiceScore.objects.filter(team_id__in=team_ids).values()),
-        "service_details": list(ServiceDetail.objects.filter(team_id__in=team_ids).values()),
-    })
+    EventScoringEvidence.objects.create(
+        event=event,
+        data={
+            "service_scores": list(ServiceScore.objects.filter(team_id__in=team_ids).values()),
+            "service_details": list(ServiceDetail.objects.filter(team_id__in=team_ids).values()),
+        },
+    )
     event.is_finalized = True
     event.save(update_fields=["is_finalized", "updated_at"])
     return len(cards.schools)

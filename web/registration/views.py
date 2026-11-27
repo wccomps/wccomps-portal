@@ -415,8 +415,11 @@ class EventPageRow:
     @property
     def can_assign(self) -> bool:
         return (
-            self.assignment_open and not self.assignment_problem and self.assignment is None
-            and self.registration is not None and self.registration.status == "approved"
+            self.assignment_open
+            and not self.assignment_problem
+            and self.assignment is None
+            and self.registration is not None
+            and self.registration.status == "approved"
         )
 
 
@@ -451,18 +454,21 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         name_key = normalize_school_name(registration.school_name)
         assignment = by_registration.get(enrollment.registration_id) or by_school.get(name_key)
         school = assignment.school if assignment else None
-        rows.append(EventPageRow(
-            registration,
-            assignment,
-            assignment_open=event.is_active and not archive_problem,
-            assignment_problem=assignment_problem(school.name, school.name_key) if school else (
-                assignment_problem(registration.school_name, name_key)
-            ),
-        ))
+        rows.append(
+            EventPageRow(
+                registration,
+                assignment,
+                assignment_open=event.is_active and not archive_problem,
+                assignment_problem=assignment_problem(school.name, school.name_key)
+                if school
+                else (assignment_problem(registration.school_name, name_key)),
+            )
+        )
     matched = {row.assignment.pk for row in rows if row.assignment}
     rows.extend(
         EventPageRow(
-            assignment.registration, assignment,
+            assignment.registration,
+            assignment,
             assignment_problem=assignment_problem(assignment.school.name, assignment.school.name_key),
         )
         for assignment in sorted(assignments, key=lambda a: a.team.team_number)
@@ -475,8 +481,13 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     linked = set(linked_roster_teams().values_list("pk", flat=True)) if event.is_active and not sent else set()
     status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
     removable = {
-        a.pk for a in assignments if event.is_active and not sent and not archive_problem
-        and a.team.team_number not in saved_slots and a.team_id not in linked
+        a.pk
+        for a in assignments
+        if event.is_active
+        and not sent
+        and not archive_problem
+        and a.team.team_number not in saved_slots
+        and a.team_id not in linked
     }
     context = {
         "event": event,
@@ -488,8 +499,9 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "assignable_count": sum(row.can_assign for row in rows),
         "saved_slot_notices": [
             saved_slot_message(name, slot)
-            for name, slot in event.results.filter(school__name_key__in=missing_rows)
-            .values_list("school__name", "team_number")
+            for name, slot in event.results.filter(school__name_key__in=missing_rows).values_list(
+                "school__name", "team_number"
+            )
         ],
         "packets_sent": sent,
         "removable_assignments": removable,
@@ -503,7 +515,8 @@ _HAS_RETAINED = Q(data__isnull=False)
 _HAS_CAPTURE = Q(close_out_data__isnull=False)
 _ARCHIVE_VERSIONS: dict[str, tuple[Combinable, str, Q]] = {
     "close_out": (
-        Coalesce("close_out_data", "data"), "Close Out Archive",
+        Coalesce("close_out_data", "data"),
+        "Close Out Archive",
         _HAS_CAPTURE | (_HAS_RETAINED & Q(retained_kind="close_out")),
     ),
     "finalize": (F("data"), "retained Finalize Archive", _HAS_RETAINED & Q(retained_kind="finalize")),
@@ -512,9 +525,12 @@ _ARCHIVE_VERSIONS: dict[str, tuple[Combinable, str, Q]] = {
 
 
 def _available_archives(event: Event) -> dict[str, str]:
-    flags = EventArchive.objects.filter(event=event).values(
-        **{version: condition for version, (_, _, condition) in _ARCHIVE_VERSIONS.items()}
-    ).first() or {}
+    flags = (
+        EventArchive.objects.filter(event=event)
+        .values(**{version: condition for version, (_, _, condition) in _ARCHIVE_VERSIONS.items()})
+        .first()
+        or {}
+    )
     return {version: label for version, (_, label, _) in _ARCHIVE_VERSIONS.items() if flags.get(version)}
 
 

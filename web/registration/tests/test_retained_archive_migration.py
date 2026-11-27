@@ -34,13 +34,19 @@ def test_legacy_downloads_keep_bytes_and_timestamp_under_the_proven_capture_type
         }
         for label, audits in scenarios.items():
             event = event_model.objects.create(
-                season=season, name=label, date=date(2030, 1, 1), event_type="invitational",
+                season=season,
+                name=label,
+                date=date(2030, 1, 1),
+                event_type="invitational",
             )
             row = archive_model.objects.create(event=event, data=label.encode())
             captures[label] = (event.pk, row.updated_at)
             for action, offset in audits:
                 entry = audit_model.objects.create(
-                    action=action, target_entity="event", target_id=event.pk, admin_user="gold",
+                    action=action,
+                    target_entity="event",
+                    target_id=event.pk,
+                    admin_user="gold",
                 )
                 audit_model.objects.filter(pk=entry.pk).update(created_at=row.updated_at + timedelta(seconds=offset))
     finally:

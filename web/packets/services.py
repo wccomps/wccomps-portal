@@ -68,7 +68,9 @@ def _create_distributions_for_teams(packet: Packet) -> list[PacketDistribution]:
     )
     distributions = PacketDistribution.objects.bulk_create(
         PacketDistribution(
-            packet=packet, team=team, web_access_enabled=packet.web_access_enabled,
+            packet=packet,
+            team=team,
+            web_access_enabled=packet.web_access_enabled,
             school_at_distribution_id=team.distribution_school_id,
         )
         for team in recipients

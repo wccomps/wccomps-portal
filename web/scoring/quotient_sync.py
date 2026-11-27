@@ -269,9 +269,11 @@ def _check_storable(row: models.Model, what: str) -> None:
 def _score_slot_identities(event_id: int | None) -> dict[int, tuple[int, tuple[int, int] | None]]:
     # A missing assignment is also part of the slot identity.
     by_team = {
-        team: (pk, school) for team, pk, school in (
+        team: (pk, school)
+        for team, pk, school in (
             EventTeamAssignment.objects.filter(event_id=event_id).values_list("team_id", "pk", "school_id")
-            if event_id is not None else SchoolInfo.objects.values_list("team_id", "pk", "school_id")
+            if event_id is not None
+            else SchoolInfo.objects.values_list("team_id", "pk", "school_id")
         )
     }
     return {number: (pk, by_team.get(pk)) for number, pk in Team.objects.values_list("team_number", "pk")}
@@ -335,7 +337,8 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         current_slots = _score_slot_identities(event_id)
         if any(
             original_slots.get(row.team_number) != current_slots.get(row.team_number)
-            for row in export_data if row.team_number
+            for row in export_data
+            if row.team_number
         ):
             raise ValueError("A team slot changed school or identity during score sync; no scores were imported.")
         check_sync(event_id, export_data, uptimes_data)
