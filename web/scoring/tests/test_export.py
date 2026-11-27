@@ -726,7 +726,7 @@ class TestFinalScoresExport:
             "Incident Recovery Points",
             "SLA Penalties",
             "Point Adjustments",
-            "Exported At",
+            "Calculated At",
         ]
 
         for header in required_headers:
@@ -773,7 +773,7 @@ class TestFinalScoresExport:
             "incident_recovery_points",
             "sla_penalties",
             "point_adjustments",
-            "exported_at",
+            "calculated_at",
         ]
 
         for field in required_fields:

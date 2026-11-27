@@ -2,13 +2,13 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import cast
+from typing import TypedDict, cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.forms import CheckboxSelectMultiple
-from django.http import HttpRequest, HttpResponse, QueryDict
+from django.http import Http404, HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
@@ -444,6 +444,7 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
 
     sent = packets_sent(event)
     status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
+    archives = EventArchive.objects.filter(event=event)
     context = {
         "event": event,
         "status_word": status_word,
@@ -455,19 +456,37 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "packets_sent": sent,
         # Only the open event's teams can be unassigned, and only until packets go out
         "can_unassign": event.is_active and not sent,
-        "has_archive": EventArchive.objects.filter(event=event).exists(),
+        "has_close_out_archive": not event.is_active and archives.exists(),
+        "has_legacy_archive": (
+            archives.exists() if event.is_active else archives.filter(close_out_data__isnull=False).exists()
+        ),
     }
 
     return render(request, "registration/events/detail.html", context)
 
 
+class _ArchiveFlags(TypedDict):
+    has_separate_close_out: bool
+
+
 @require_GET
 @require_permission("gold_team")
 def event_archive(request: HttpRequest, event_id: int) -> HttpResponse:
-    """The zip Close Out took of the event's live data before deleting it."""
-    archive = get_object_or_404(EventArchive.objects.select_related("event"), event_id=event_id)
-    response = HttpResponse(bytes(archive.data), content_type="application/zip")
-    response["Content-Disposition"] = f'attachment; filename="{slugify(archive.event.name)}_close_out_archive.zip"'
+    """Download the Close Out capture or the retained historical Finalize ZIP."""
+    archives = EventArchive.objects.defer("data", "close_out_data").select_related("event").annotate(
+        has_separate_close_out=Q(close_out_data__isnull=False),
+    )
+    archive: WithAnnotations[EventArchive, _ArchiveFlags] = get_object_or_404(archives, event_id=event_id)
+    has_separate_close_out = archive.has_separate_close_out
+    historical = request.GET.get("version") == "finalize"
+    if historical and not (archive.event.is_active or has_separate_close_out):
+        raise Http404
+    data = archive.close_out_data if not historical and has_separate_close_out else archive.data
+    if data is None:
+        raise Http404
+    suffix = "finalize_archive" if historical else "close_out_archive"
+    response = HttpResponse(bytes(data), content_type="application/zip")
+    response["Content-Disposition"] = f'attachment; filename="{slugify(archive.event.name)}_{suffix}.zip"'
     return response
 
 
@@ -573,7 +592,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                     activate_teams([team])
             except SchoolTakenError, IntegrityError:
                 skipped.append(registration.school_name)
-            except TeamTakenError:
+            except TeamTakenError, SchoolChangedError:
                 team_taken.append(registration.school_name)
             else:
                 assigned += 1

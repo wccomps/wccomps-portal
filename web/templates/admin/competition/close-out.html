@@ -39,7 +39,7 @@
             </c-form_field>
         {% endif %}
         <template x-if="closeOutChecking">
-            <p class="help-text">Checking for unfinished work...</p>
+            <p class="help-text">Preparing the Close Out preview...</p>
         </template>
         <template x-if="closeOutCheckFailed">
             <c-alert variant="warning">
@@ -78,11 +78,27 @@
         <template x-if="closeOutNothingLeft">
             <p>No unfinished work found. The recorded scorecard fingerprint matches the set being archived.</p>
         </template>
+        <template x-if="closeOutSummary">
+            <details open>
+                <summary x-text="closeOutSummary.title"></summary>
+                <ul>
+                    <template x-for="school in closeOutSummary.schools" :key="school.slot">
+                        <li x-text="school.text"></li>
+                    </template>
+                </ul>
+            </details>
+        </template>
+        <template x-if="closeOutNextcloud">
+            <c-alert variant="warning">
+                Nextcloud cleanup deletes all team accounts and their files. Preserve any required files before
+                confirming: the Portal archive does not include them.
+            </c-alert>
+        </template>
         <p>
             Close Out saves the event's school scorecards and archive, then deletes the live data
             (scores, tickets, orange assignments and check-ins, team Discord links and queued announcements), resets
             the ticket numbers, closes the event, clears the schedule, the start message and the scoring engine's box
-            list, and queues the Discord cleanup (team channels and roles). Do it after the scorecards are out.
+            list, and queues the Discord cleanup (team channels and roles).
         </p>
         <c-button_row>
             <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">

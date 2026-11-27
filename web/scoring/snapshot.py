@@ -5,12 +5,15 @@ snapshot unchanged. Decimals are stored as {"$d": "<str>"} and decoded back, so 
 Decimals a live scorecard gives them.
 """
 
+import hashlib
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from typing import cast
 
-from .calculator import SCORE_COMPONENT_FIELDS, Standing
+from .calculator import SCORE_COMPONENT_FIELDS, Scaling, Standing
 from .models import OrangeTeamScore, RedTeamScore
 
 SNAPSHOT_VERSION = 1
@@ -99,6 +102,86 @@ class FinalScore:
         )
 
 
+@dataclass(frozen=True)
+class SchoolSnapshot:
+    score: FinalScore
+    scorecard: dict[str, object]
+
+
+def scorecard_fingerprint(schools: dict[int, SchoolSnapshot]) -> str:
+    """Preserve the existing mail-audit encoding of school → (slot, serialized card)."""
+    payload = {
+        school: (cast(dict[str, int], card.scorecard["team"])["team_number"], card.scorecard)
+        for school, card in schools.items()
+    }
+    normalized = json.dumps(json.loads(json.dumps(payload)), sort_keys=True)
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def validate_frozen_ranks(scores: Iterable[FinalScore]) -> None:
+    """V1 ranked cards descend by total; a saved school subset may have gaps or tied totals."""
+    ranked = sorted((score.rank, score.total) for score in scores if score.rank is not None)
+    for (rank, total), (next_rank, next_total) in pairwise(ranked):
+        if rank == next_rank or total < next_total:
+            raise ValueError("Saved result ranks conflict. Nothing was closed out.")
+
+
+def _rows(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list) or not all(isinstance(row, dict) for row in value):
+        raise ValueError
+    return cast(list[dict[str, object]], value)
+
+
+def _fields(row: dict[str, object], *, numbers: str = "", text: str = "", flags: str = "") -> None:
+    for key in numbers.split():
+        _snapshot_number(row[key])
+    if any(not isinstance(row[key], str) for key in text.split()):
+        raise ValueError
+    if any(type(row[key]) is not bool for key in flags.split()):
+        raise ValueError
+
+
+def _validate_details(context: dict[str, object]) -> int:
+    stats, scaling = context["stats"], context["scaling"]
+    if not isinstance(stats, dict) or not isinstance(scaling, dict):
+        raise ValueError
+    count = stats["team_count"]
+    if type(count) is not int or count < 0:
+        raise ValueError
+    _snapshot_number(stats["total_delta"])
+    for key in Scaling.__required_keys__:
+        _snapshot_number(scaling[key])
+    if not isinstance(stats["insights"], list) or not all(isinstance(item, str) for item in stats["insights"]):
+        raise ValueError
+    categories = stats["category_ranks"]
+    if not isinstance(categories, dict):
+        raise ValueError
+    for row in _rows(list(categories.values())):
+        _fields(row, numbers="rank avg min max value delta", flags="below_avg")
+    for row in _rows(stats["service_stats"]):
+        _fields(row, numbers="points rank avg delta sla_violations", text="name", flags="below_avg")
+    for row in _rows(stats["inject_stats"]):
+        _fields(row, numbers="points rank avg max delta", text="name feedback", flags="below_avg")
+        if row.get("max_points") is not None:
+            _snapshot_number(row["max_points"])
+    for row in _rows(stats["neighbors"]):
+        _fields(row, numbers="rank total_score gap")
+    for row in _rows(context["red_scores"]):
+        _fields(row, numbers="points_per_team", text="affected_boxes_display affected_service")
+        attack = row["attack_type"]
+        if attack is not None and (not isinstance(attack, dict) or not isinstance(attack.get("name"), str)):
+            raise ValueError
+        if not isinstance(row["outcomes_display"], list) or not all(
+            isinstance(item, str) for item in row["outcomes_display"]
+        ):
+            raise ValueError
+    for row in _rows(context["orange_scores"]):
+        _fields(row, numbers="points_awarded", text="description")
+        if row.get("max_points") is not None:
+            _snapshot_number(row["max_points"])
+    return count
+
+
 def _snapshot_number(value: object) -> Decimal:
     if type(value) not in (Decimal, int, str):
         raise ValueError
@@ -111,7 +194,7 @@ def _snapshot_number(value: object) -> Decimal:
 def frozen_final_score(
     data: dict[str, object], version: int, number: int, name: str, rank: int | None, total: Decimal,
 ) -> FinalScore:
-    """Validate the frozen v1 export inputs without rewriting the stored card or creating live scoring state."""
+    """Validate required v1 card contents without rewriting them or reconstructing a live standing."""
     try:
         context = context_from_snapshot(data)
         score, team = context["score"], context["team"]
@@ -120,10 +203,9 @@ def frozen_final_score(
             or type(team["team_number"]) is not int or team["team_number"] != number
             or score["rank"] != rank or (rank is not None and type(score["rank"]) is not int)
             or _snapshot_number(score["total_score"]) != total
-            or not isinstance(context["stats"], dict) or not isinstance(context["scaling"], dict)
-            or not isinstance(context["red_scores"], list) or not isinstance(context["orange_scores"], list)
         ):
             raise ValueError
+        count = _validate_details(context)
         components = {field: _snapshot_number(score[field]) for field in SCORE_COMPONENT_FIELDS}
         for field in ("red_total", "inject_total", "orange_total", "service_total", "service_sla_total"):
             _snapshot_number(context[field])
@@ -144,4 +226,6 @@ def frozen_final_score(
             sla_credit += sla
     except (KeyError, TypeError, ValueError, InvalidOperation, RecursionError):
         raise ValueError("A saved scorecard cannot be read. Nothing was closed out.") from None
+    if rank is not None and not 1 <= rank <= count:
+        raise ValueError("Saved result rank is outside its recorded cohort. Nothing was closed out.")
     return FinalScore(number, name, rank, total, components, raw_credit, sla_credit)

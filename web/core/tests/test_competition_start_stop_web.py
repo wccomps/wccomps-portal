@@ -253,8 +253,8 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     assert '@click="clearLeftovers"' not in page
     assert response.status_code == 400
     assert response.json()["error"] == (
-        "These scores are not recorded at any event yet and no event was ever closed out. Finish grading, then email "
-        "every school its scorecard with Email Scorecards. Close out the event with Close Out Event on the "
+        "These scores are not recorded at any event yet and no event was ever closed out. Finish grading and review "
+        "the current school cards with Email Scorecards. Close out the event with Close Out Event on the "
         "Competition page; with no event open, it asks for the event's name, date and type."
     )
     assert ServiceScore.objects.exists()

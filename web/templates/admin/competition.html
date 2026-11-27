@@ -282,6 +282,9 @@ document.addEventListener('alpine:init', () => {
         closeOutProblem: '',
         closeOutFixes: [],
         closeOutWarnings: [],
+        closeOutPreview: '',
+        closeOutSummary: null,
+        closeOutNextcloud: false,
 
         init() {
             if (this.closeOutOffered) this.checkCloseOut();
@@ -294,7 +297,7 @@ document.addEventListener('alpine:init', () => {
         get closeOutNothingLeft() {
             return this.closeOutChecked && !this.closeOutProblem && this.closeOutWarnings.length === 0;
         },
-        get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
+        get closeOutBlocked() { return this.loading || this.closeOutChecking || !this.closeOutPreview; },
 
         get stopQuestion() {
             return 'Stop the competition?\n\n'
@@ -318,6 +321,9 @@ document.addEventListener('alpine:init', () => {
                     this.closeOutProblem = result.problem;
                     this.closeOutFixes = result.fixes;
                     this.closeOutWarnings = result.warnings;
+                    this.closeOutPreview = result.preview;
+                    this.closeOutSummary = result.summary;
+                    this.closeOutNextcloud = result.nextcloud_cleanup;
                     this.closeOutChecked = true;
                 } else {
                     this.closeOutCheckFailed = true;
@@ -329,13 +335,18 @@ document.addEventListener('alpine:init', () => {
         },
 
         closeOutEvent() {
+            if (this.closeOutBlocked) return;
+            const nextcloud = this.closeOutNextcloud
+                ? '\nNextcloud cleanup deletes all team accounts and their files. The Portal archive does not include those files.\n'
+                : '';
             const typed = typedConfirm('CLOSE OUT THE EVENT?\n\n' +
-                'This freezes the event’s school scorecards and archive, then deletes the live scores, tickets ' +
-                'and blue team Discord links, closes the event and queues the Discord cleanup.\n' +
-                'It cannot be undone: finish grading and email the scorecards first.');
+                'This archives the reviewed school scorecards, deletes live scores, tickets and blue team Discord links, ' +
+                'closes the event and queues Discord cleanup.\n' + nextcloud +
+                'This cannot be undone. Review the archive set and notices before proceeding.');
             if (typed) {
                 this.doStreamAction('close_out_event', {
                     confirm: typed,
+                    preview: this.closeOutPreview,
                     open_event: this.openEvent,
                     new_name: this.closeOutName,
                     new_date: this.closeOutDate,

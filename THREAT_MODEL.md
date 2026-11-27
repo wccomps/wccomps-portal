@@ -51,15 +51,18 @@ during an event.
    `QueueProcessor._record`, `TaskProgress.still_running`, `TaskProgress.while_running`; `web/core/admin.py`
    `QueuedTaskAdmin.retry_failed_tasks`). For broadcasts queued before starts recorded them,
    `web/core/migrations/0024_scrub_start_broadcasts.py` scrubs the finished ones and hands unfinished ones to the next reset.
-11. **Event records kept after Close Out**: the close-out archive (`EventArchive.data`, `web/registration/models.py`),
-   written in the Close Out transaction before the wipe and never deleted: every export dataset, with every team's
+11. **Event records kept after Close Out**: the Gold-only Close Out ZIP (`EventArchive`, `web/registration/models.py`)
+   is written in the Close Out transaction before the wipe and never deleted. If a legacy Finalize ZIP exists it
+   is retained unchanged. The Close Out ZIP contains the export datasets, including every team's
    ticket comments (their Discord threads and Zulip topics as the portal recorded them), ticket history and
    attachment names, sizes and SHA-256 (not the files) (`web/registration/services.py` `_freeze_results`;
    `web/scoring/export.py` `DATASETS`). Only Gold Team downloads it (`web/registration/views.py` `event_archive`), as
    it does the same datasets live (`web/scoring/views/export.py`). The archive contains the roster at Close Out and
-   slot-based packet distribution records. Raw service scores and checks are retained separately in
-   `EventScoringEvidence` in the same transaction; they have no Portal download or admin view. Off the portal, the
-   scoring host's archive script
+   slot-based packet distribution summaries (intended school at row creation for new distributions, not a receipt).
+   Pre-wipe team service totals and per-service points, uptime and violation summaries are retained separately in
+   `EventScoringEvidence` in the same transaction, with no Portal download or admin view. Individual Quotient
+   checks and potentially sensitive debug/error output are not archived by Close Out. Off the portal, the scoring
+   host's archive script
    writes a tarball of the teams' inject uploads and the divisor log of runner source addresses
    (`web/quotient/archive_scoring_host.py`).
 12. **Quotient admin login** (`web/portal/settings.py` `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD`): reads every team's

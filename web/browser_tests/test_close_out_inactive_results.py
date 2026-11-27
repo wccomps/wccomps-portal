@@ -1,16 +1,27 @@
 import json
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 from packets.models import Packet, PacketDistribution
 from playwright.sync_api import expect
 from registration.close_out_checks import scorecards_fingerprint
-from registration.models import Event, EventResult, EventScoringEvidence, EventTeamAssignment, School, Season
+from registration.models import (
+    Event,
+    EventArchive,
+    EventResult,
+    EventScoringEvidence,
+    EventTeamAssignment,
+    School,
+    Season,
+)
 from registration.services import current_snapshots
 from registration.stage import ScorecardsEmailed
 from scoring.models import (
@@ -68,13 +79,16 @@ def stopped_event():
 
 
 def _response(client, event, **fields):
+    fields.setdefault("preview", "0" * 64)
     response = client.post(reverse("admin_competition_action"), {
         "action": "close_out_event", "open_event": event.pk, "confirm": "yolo", **fields,
     })
     return json.loads(b"".join(response.streaming_content).splitlines()[-1])
 
 
-@pytest.mark.parametrize("failure", ["unassigned", "correction", "malformed", "incomplete", "wrong_school"])
+@pytest.mark.parametrize(
+    "failure", ["unassigned", "correction", "malformed", "incomplete", "details", "cohort", "wrong_school"]
+)
 def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     event, packet, batch = stopped_event
     client = Client()
@@ -93,14 +107,22 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
             card["score"]["service_corrections"] = [{}]
         elif failure == "incomplete":
             del card["score"]["inject_points"]
+        elif failure == "details":
+            card["stats"] = {}
+        elif failure == "cohort":
+            card["stats"]["team_count"] = 0
         EventResult.objects.create(
             event=event, school_id=school, team_number=41 if failure == "wrong_school" else 50,
-            rank=snapshot.standing.rank, total_score=snapshot.standing.total_score, scorecard=card,
+            rank=snapshot.score.rank, total_score=snapshot.score.total, scorecard=card,
         )
-        expected = "does not match" if failure == "wrong_school" else "A saved scorecard cannot be read"
+        expected = {
+            "wrong_school": "do not match",
+            "cohort": "rank is outside its recorded cohort",
+        }.get(failure, "A saved scorecard cannot be read")
     saved_before = list(event.results.values())
     preview = client.post(reverse("admin_competition_action"), {"action": "close_out_check"}).json()
     assert expected in preview["problem"]
+    assert not preview["preview"]
     if failure == "unassigned":
         assert "event roster owner" in preview["problem"] and preview["fixes"] == []
     queued = set(QueuedTask.objects.values_list("pk", flat=True))
@@ -113,6 +135,50 @@ def test_close_out_keeps_genuine_guards(stopped_event, gold_team_user, failure):
     assert set(QueuedTask.objects.values_list("pk", flat=True)) == queued
 
 
+def test_saved_ranks_cannot_contradict_their_totals(stopped_event, gold_team_user):
+    event, _, _ = stopped_event
+    Team.objects.filter(team_number=1).update(is_active=True)
+    client = Client()
+    client.force_login(gold_team_user)
+    url = reverse("admin_competition_action")
+    preview = client.post(url, {"action": "close_out_check"}).json()["preview"]
+    for school, snapshot in current_snapshots(event).items():
+        rank = 3 - snapshot.score.rank
+        snapshot.scorecard["score"]["rank"] = rank
+        EventResult.objects.create(
+            event=event, school_id=school, team_number=snapshot.score.team_number,
+            rank=rank, total_score=snapshot.score.total, scorecard=snapshot.scorecard,
+        )
+    assert "Saved result ranks conflict" in client.post(url, {"action": "close_out_check"}).json()["problem"]
+    assert "Saved result ranks conflict" in _response(client, event, preview=preview)["message"]
+    assert ServiceScore.objects.count() == 3 and Event.objects.get(pk=event.pk).is_active
+    assert not EventArchive.objects.filter(event=event).exists()
+
+
+@pytest.mark.browser
+def test_stale_gold_preview_refuses_before_archiving_or_wiping(stopped_event, gold_team_user, live_server, pw_browser):
+    event, _, _ = stopped_event
+    Team.objects.filter(team_number=1).update(is_active=True)
+    with create_session_context(pw_browser, live_server, gold_team_user) as context:
+        context.route(
+            "**/*",
+            lambda route: route.continue_() if route.request.url.startswith(live_server.url + "/") else route.abort(),
+        )
+        page = context.new_page()
+        page.on("dialog", lambda dialog: dialog.accept("yolo"))
+        page.goto(live_server.url + reverse("admin_competition"))
+        expect(page.get_by_text("Team 1 (Example School 1):", exact=False)).to_be_visible()
+        Team.objects.filter(team_number=1).update(is_active=False)
+        page.get_by_role("button", name="Close Out Event").click()
+        expect(page.get_by_text("The school scorecards or roster changed.", exact=False)).to_be_visible()
+        assert Event.objects.get(pk=event.pk).is_active and ServiceScore.objects.count() == 3
+        assert not event.results.exists() and not EventArchive.objects.filter(event=event).exists()
+        page.reload()
+        expect(page.get_by_text("Team 1 (Example School 1, inactive)", exact=False)).to_be_visible()
+        page.get_by_role("button", name="Close Out Event").click()
+        expect(page.get_by_text("archived 1 school result(s)", exact=False)).to_be_visible()
+
+
 @pytest.mark.browser
 @pytest.mark.parametrize("source", ["current", "saved", "saved-only"])
 def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
@@ -123,19 +189,21 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
     if saved_cards:
         Team.objects.filter(team_number=1).update(is_active=True)
     expected = current_snapshots(event)
-    assert {s.standing.team.team_number for s in expected.values()} == ({1, 50} if saved_cards else {50})
+    assert {s.score.team_number for s in expected.values()} == ({1, 50} if saved_cards else {50})
     saved_ids = {}
     if saved_cards:
         Event.objects.filter(pk=event.pk).update(is_finalized=True)
         for school_id, snapshot in expected.items():
-            standing = snapshot.standing
+            score = snapshot.score
             saved_ids[school_id] = EventResult.objects.create(
-                event=event, school_id=school_id, team_number=standing.team.team_number, rank=standing.rank,
-                total_score=standing.total_score, scorecard=snapshot.scorecard,
+                event=event, school_id=school_id, team_number=score.team_number, rank=score.rank,
+                total_score=score.total, scorecard=snapshot.scorecard,
             ).pk
         Team.objects.filter(team_number=1).update(is_active=False)
         if source == "saved":
             InjectScore.objects.filter(team__team_number=50).update(points_awarded=99)
+            team = Team.objects.create(team_number=37, team_name="Extra active", is_active=True)
+            EventTeamAssignment.objects.create(event=event, team=team, school=School.for_name("Omitted school"))
         else:
             InjectScore.objects.all().delete()
             RedTeamScore.objects.all().delete()
@@ -144,7 +212,8 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
             ServiceCorrectionBatch.objects.filter(pk=batch.pk).update(revoked_at=timezone.now())
             Packet.objects.filter(pk=packet.pk).update(send_via_email=False)
             packet.distributions.update(email_status="pending")
-    ScorecardsEmailed(event.pk, 1, 0, scorecards_fingerprint(event)).record("gold")
+    if source != "saved-only":
+        ScorecardsEmailed(event.pk, 1, 0, scorecards_fingerprint(event)).record("gold")
     if source == "saved-only":
         client = Client()
         client.force_login(gold_team_user)
@@ -162,13 +231,17 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
         page = context.new_page()
         page.on("dialog", lambda dialog: dialog.accept("yolo"))
         page.goto(live_server.url + reverse("admin_competition"))
-        slots = "41" if saved_cards else "1, 41"
-        expect(page.get_by_role("link", name=f"Inactive slots {slots} have no card", exact=False)).to_be_visible()
+        expect(page.get_by_text("Team 41 (Example School 41, inactive)", exact=False)).to_be_visible()
         if saved_cards:
-            saved_notice = f"will keep the {len(expected)} saved school scorecard(s)"
-            expect(page.get_by_text(saved_notice, exact=False)).to_be_visible()
+            expect(page.get_by_text("Saved school scorecards to keep", exact=True)).to_be_visible()
+        if source == "saved":
+            expect(page.get_by_text("Team 37 (Omitted school, active)", exact=False)).to_be_visible()
             expect(page.get_by_text("Saved scorecards differ from the last scorecard email record.")).to_be_visible()
         if source == "saved-only":
+            expect(page.get_by_text("No scorecard email is recorded for this event.")).to_be_visible()
+            event_panel = page.locator("#event-panel")
+            expect(event_panel.get_by_text("Close out the event with Close Out Event", exact=False)).to_be_visible()
+            expect(page.locator("#steps_list").get_by_role("link", name="Email All Scorecards")).to_have_count(0)
             expect(page.get_by_role("button", name="Cancel Event", exact=True)).to_have_count(0)
         close = page.get_by_role("button", name="Close Out Event")
         expect(close).to_be_enabled()
@@ -193,7 +266,7 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
     for school_id, result in results.items():
         before = expected[school_id]
         assert (result.rank, result.total_score, result.scorecard) == (
-            before.standing.rank, before.standing.total_score, before.scorecard,
+            before.score.rank, before.score.total, before.scorecard,
         )
         score = scores[result.team_number]
         assert (result.rank, result.total_score) == (score["rank"], Decimal(score["total_score"]))
@@ -221,9 +294,69 @@ def test_gold_freezes_only_existing_cards_and_archives_inactive_evidence(
     assert {row["email_status"] for row in evidence["packet_distributions"]} == {
         "pending" if source == "saved-only" else "sent"
     }
-    assert list(Team.objects.filter(is_active=True).values_list("team_number", flat=True)) == [50]
+    active = set(Team.objects.filter(is_active=True).values_list("team_number", flat=True))
+    assert active == ({37, 50} if source == "saved" else {50})
     assert not AuditLog.objects.filter(action="team_activated").exists()
     assert not QueuedTask.objects.filter(task_type="sync_member_roles").exists()
-    assert packet.distributions.count() == event.team_assignments.count() == 3
+    assert packet.distributions.count() == 3 and event.team_assignments.count() == len(assignments)
     assert ServiceCorrection.objects.filter(batch=batch, service_credit=-10, sla_credit=5).count() == 2
     assert not ServiceScore.objects.exists() and not mailoutbox
+
+
+@pytest.mark.browser
+def test_historical_v1_card_and_finalize_zip_survive_close_out(
+    stopped_event, gold_team_user, live_server, pw_browser, settings,
+):
+    event, _, _ = stopped_event
+    team = Team.objects.create(team_number=37, team_name="Legacy slot")
+    school = School.for_name("Legacy school")
+    EventTeamAssignment.objects.create(event=event, team=team, school=school)
+    fixture = Path(__file__).parents[1] / "scoring/tests/fixtures/scorecard_snapshot_v1.json"
+    card = json.loads(fixture.read_text())
+    result = EventResult.objects.create(
+        event=event, school=school, team_number=37, rank=2, total_score="3808.00", scorecard=card,
+    )
+    old_zip = BytesIO()
+    with ZipFile(old_zip, "w") as archive:
+        archive.writestr("original-finalize.txt", "Original synthetic ZIP")
+    historical = EventArchive.objects.create(event=event, data=old_zip.getvalue())
+    settings.NEXTCLOUD_URL = "https://example.invalid"
+    settings.NEXTCLOUD_USERNAME = "synthetic"
+    settings.NEXTCLOUD_PASSWORD = "synthetic"
+    prompts = []
+    with create_session_context(pw_browser, live_server, gold_team_user) as context:
+        context.route(
+            "**/*",
+            lambda route: route.continue_() if route.request.url.startswith(live_server.url + "/") else route.abort(),
+        )
+        page = context.new_page()
+
+        def confirm(dialog):
+            prompts.append(dialog.message)
+            dialog.accept("yolo")
+
+        page.on("dialog", confirm)
+        page.goto(live_server.url + reverse("admin_competition"))
+        expect(page.get_by_text("Team 37 (Legacy school): Rank 2, 3808.00 points")).to_be_visible()
+        expect(page.get_by_text("Preserve any required files", exact=False)).to_be_visible()
+        page.get_by_role("button", name="Close Out Event").click()
+        expect(page.get_by_text("archived 1 school result(s)", exact=False)).to_be_visible()
+        assert "Nextcloud cleanup deletes all team accounts and their files." in prompts[0]
+        page.goto(live_server.url + reverse("registration_event_detail", args=[event.pk]))
+        with page.expect_download() as old:
+            page.get_by_role("link", name="Download retained Finalize Archive (ZIP)").click()
+        assert old.value.path().read_bytes() == old_zip.getvalue()
+        with page.expect_download() as new:
+            page.get_by_role("link", name="Download Close Out Archive (ZIP)").click()
+        with ZipFile(new.value.path()) as archive:
+            row, = json.loads(archive.read("final_scores.json"))["final_scores"]
+            assert (row["rank"], row["total_score"], row["service_points"]) == (2, "3808.00", "3101.00")
+            assert "exported_at" in row and "calculated_at" not in row
+    assert EventArchive.objects.get(event=event).updated_at == historical.updated_at
+    result.refresh_from_db()
+    assert result.scorecard == card
+    unprivileged = Client()
+    unprivileged.force_login(User.objects.create_user("unprivileged"))
+    archive_url = reverse("registration_event_archive", args=[event.pk])
+    assert unprivileged.get(archive_url).status_code == 403
+    assert unprivileged.get(archive_url + "?version=finalize").status_code == 403

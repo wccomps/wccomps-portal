@@ -1,6 +1,6 @@
 import json
 import zipfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from io import BytesIO, StringIO
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db.models import BinaryField, CharField, Exists, F, Func, OuterRef, Value
+from django.db.models import BinaryField, Case, CharField, F, Func, Value, When
 from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
@@ -200,7 +200,7 @@ FINAL_SCORES = Dataset[tuple[FinalScore, str]](
         Column("Raw Service Credit", "raw_service_credit", lambda sc: sc[0].service_credit),
         Column("SLA Credit", "sla_credit", lambda sc: sc[0].sla_credit),
         Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].components["point_adjustments"]),
-        Column("Exported At", "exported_at", lambda sc: sc[1]),
+        Column("Calculated At", "calculated_at", lambda sc: sc[1]),
     ],
     _fetch_final_scores,
 )
@@ -377,17 +377,17 @@ def export_dataset(name: str, export_format: str) -> HttpResponse:
     return response
 
 
-def _event_evidence(event: Event) -> dict[str, object]:
-    """Close-time roster and slot-based delivery/download summaries, not historical school attribution."""
+def public_event_evidence(event: Event, selected_schools: Collection[int]) -> dict[str, object]:
+    """Close-time roster and slot-based packet summaries, without restricted scoring inputs."""
     roster = event.team_assignments.annotate(
-        has_frozen_scorecard=Exists(event.results.filter(school_id=OuterRef("school_id")))
+        has_frozen_scorecard=Case(When(school_id__in=list(selected_schools), then=True), default=False)
     ).order_by("team__team_number")
     return {
         "event_id": event.pk,
         "captured_at": timezone.now().isoformat(),
         "assignments": list(roster.values(
             "id", "school_id", "school__name", "team_id", "team__team_number", "team__is_active",
-            "registration_id", "assigned_at", "has_frozen_scorecard",
+            "registration_id", "has_frozen_scorecard",
         )),
         "packets": list(Packet.objects.filter(event=event).order_by("pk").values(
             "id", "title", "status", "actual_distribution_time", "send_via_email",
@@ -395,23 +395,39 @@ def _event_evidence(event: Event) -> dict[str, object]:
         "packet_distributions": list(PacketDistribution.objects.filter(packet__event=event).order_by("pk").values(
             "id", "packet_id", "team_id", "email_status", "email_sent_at", "web_access_enabled",
             "download_count", "downloaded_at", "last_downloaded_at",
+            "school_at_distribution_id", "created_at",
         )),
     }
 
 
-def export_all_zip_bytes(*, event: Event | None = None, final_scores: list[FinalScore] | None = None) -> bytes:
-    """Every dataset as CSV and JSON, plus event-bound evidence when called from Close Out."""
+@dataclass(frozen=True)
+class CloseOutExport:
+    scores: Sequence[FinalScore]
+    evidence: dict[str, object]
+
+
+def export_all_zip_bytes(close_out: CloseOutExport | None = None) -> bytes:
+    """Render all datasets; a Close Out capture uses the selected scores and its public evidence."""
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        datasets = DATASETS if final_scores is None else {
-            **DATASETS, "final_scores": replace(FINAL_SCORES, fetch=lambda: _stamp_final_scores(final_scores)),
-        }
+        datasets = DATASETS
+        if close_out is not None:
+            columns = [
+                *FINAL_SCORES.columns[:-1],
+                Column[tuple[FinalScore, str]]("Exported At", "exported_at", lambda sc: sc[1]),
+            ]
+            datasets = {
+                **DATASETS,
+                "final_scores": replace(
+                    FINAL_SCORES, columns=columns, fetch=lambda: _stamp_final_scores(close_out.scores),
+                ),
+            }
         for dataset in datasets.values():
             csv_str, json_str = dataset.render_pair()
             zip_file.writestr(f"{dataset.filename}.csv", csv_str)
             zip_file.writestr(f"{dataset.filename}.json", json_str)
-        if event is not None:
-            evidence = json.dumps(_event_evidence(event), cls=DjangoJSONEncoder, indent=2)
+        if close_out is not None:
+            evidence = json.dumps(close_out.evidence, cls=DjangoJSONEncoder, indent=2)
             zip_file.writestr("event_evidence.json", evidence)
     return zip_buffer.getvalue()
 

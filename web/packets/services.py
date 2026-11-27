@@ -62,8 +62,13 @@ def _create_distributions_for_teams(packet: Packet) -> list[PacketDistribution]:
 
     Callers hold the school list lock, so the list can't change between choosing the teams and creating the rows."""
     teams = packet_recipients().exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
+    recipients = teams.values_list("pk", "school_info__school_id")
     distributions = PacketDistribution.objects.bulk_create(
-        PacketDistribution(packet=packet, team=team, web_access_enabled=packet.web_access_enabled) for team in teams
+        PacketDistribution(
+            packet=packet, team_id=team_id, web_access_enabled=packet.web_access_enabled,
+            school_at_distribution_id=school_id,
+        )
+        for team_id, school_id in recipients
     )
     if distributions:
         logger.info(f"Created {len(distributions)} distributions for packet {packet.id}")

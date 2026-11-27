@@ -322,7 +322,7 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         try:
             deleted = clear_school_list()
-        except (PacketsSentError, TeamLinkedError) as refused:
+        except (PacketsSentError, SchoolChangedError, TeamLinkedError) as refused:
             error = str(refused)
         else:
             logger.info(f"Cleared school info by {request.user.username}")

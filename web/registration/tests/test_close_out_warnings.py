@@ -1,5 +1,4 @@
-"""Unfinished work shown before a close-out: each kind with its count and the page that finishes it, and whether the
-scorecards went out as they stand now. Warnings never block."""
+"""Unfinished-work links and comparisons with the last recorded scorecard fingerprint, not delivery."""
 
 from datetime import date
 from decimal import Decimal
@@ -27,14 +26,11 @@ from ticketing.models import Ticket
 
 pytestmark = pytest.mark.django_db
 
-EMAIL = "scoring:email_scorecards"
-NOT_EMAILED = CloseOutWarning(
-    "No scorecard email is recorded for this event. If you already emailed them, you can close out.", EMAIL
-)
+NOT_EMAILED = CloseOutWarning("No scorecard email is recorded for this event.")
 
 
 def close_out_warnings(event):
-    return notices_for_cards(event, close_out_card_check(event)[2])
+    return notices_for_cards(event, close_out_card_check(event))
 
 
 @pytest.fixture
@@ -123,7 +119,9 @@ def test_scores_changed_after_the_last_scorecard_email(event):
     _emailed(event)
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
 
-    assert close_out_warnings(event) == [CloseOutWarning("Scores changed after the last scorecard email.", EMAIL)]
+    assert close_out_warnings(event) == [
+        CloseOutWarning("Current school scorecards differ from the last email record.")
+    ]
 
 
 def test_the_latest_scorecard_email_decides(event):
@@ -138,7 +136,7 @@ def test_the_latest_scorecard_email_decides(event):
 def test_failed_scorecard_emails_are_counted(event):
     _emailed(event, failed=1)
 
-    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last send.", EMAIL)]
+    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last send.")]
 
 
 def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
@@ -160,9 +158,7 @@ def test_sends_with_no_event_open_never_count(event):
     _emailed(None)
 
     assert close_out_warnings(None) == [
-        CloseOutWarning(
-            "No event is open, so scorecard emails can't be checked: make sure the scorecards went out.", EMAIL
-        )
+        CloseOutWarning("No event is open, so scorecard email records cannot be matched to an event.")
     ]
 
 

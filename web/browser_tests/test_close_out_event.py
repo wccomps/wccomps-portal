@@ -50,10 +50,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
             page.goto(f"{live_server.url}/ops/admin/competition/")
             # The check loads after the page, with a link to where each item is finished
             page.get_by_role("link", name="1 inject grade is not approved.").wait_for()
-            assert page.get_by_role(
-                "link",
-                name="No scorecard email is recorded for this event. If you already emailed them, you can close out.",
-            ).is_visible()
+            assert page.get_by_text("No scorecard email is recorded for this event.", exact=True).is_visible()
 
             if typed != "yolo":
                 # Setup queues tasks of its own (a team given a school gets its Nextcloud account reset)
@@ -76,7 +73,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
         context.close()
 
 
-def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
+def test_a_failing_preview_blocks_close_out_but_not_other_controls(live_server, pw_browser):
     _open_event_with_a_score()
     user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
@@ -91,9 +88,8 @@ def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
             patch("core.admin_views.competition.close_out_warnings", side_effect=RuntimeError("scoring broke")),
         ):
             page.goto(f"{live_server.url}/ops/admin/competition/")
-            page.get_by_role("alert").get_by_text("Couldn't check unfinished work.").wait_for()
-            assert "Couldn't check unfinished work." in page.locator("#close-out").inner_text()
-            assert page.get_by_role("button", name="Close Out Event").is_enabled()
+            page.get_by_role("alert").get_by_text("Couldn't preview Close Out.").wait_for()
+            assert page.get_by_role("button", name="Close Out Event").is_disabled()
             page.get_by_role("button", name="Advanced: reset team passwords, start the competition again").click()
             assert page.get_by_role("button", name="Start Competition Again").is_enabled()
     finally:
@@ -205,7 +201,7 @@ def test_a_blocking_problem_comes_first_and_the_warnings_never_say_go_ahead(live
             assert "has no schools on its list" in text
             assert text.index("has no schools on its list") < text.index("1 inject grade is not approved.")
             assert "Other notices" in text
-            assert "don't block" not in text
+            assert "If you already emailed them, you can close out" not in text
             assert page.get_by_role("button", name="Close Out Event").is_disabled()
     finally:
         context.close()

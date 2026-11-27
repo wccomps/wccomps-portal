@@ -353,17 +353,18 @@ class EventResult(models.Model):
 
 
 class EventArchive(models.Model):
-    """The event's full export zip, for whatever the scorecard didn't keep; written at Close Out."""
+    """The original saved ZIP and, if it was taken at Finalize, the separate Close Out ZIP."""
 
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
     data = models.BinaryField()
+    close_out_data = models.BinaryField(null=True, editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 
 
 class EventScoringEvidence(models.Model):
     """Raw pre-wipe service inputs. Operator database access only; no admin or download route."""
 
-    event = models.OneToOneField(Event, on_delete=models.PROTECT)
+    event = models.OneToOneField(Event, on_delete=models.PROTECT, primary_key=True)
     data = models.JSONField(encoder=DjangoJSONEncoder)
 
 

@@ -218,6 +218,7 @@ def event_panel(facts: EventFacts) -> EventPanel:
     steps = [
         ShownStep(action, _state(action, facts.stage), DETAILS[action](facts) if action in DETAILS else "")
         for action in STEPS
+        if action != Action.FINISH or not facts.stage.saved_cards
     ]
     return EventPanel(facts, steps)
 

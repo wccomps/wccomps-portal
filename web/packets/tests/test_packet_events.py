@@ -8,6 +8,7 @@ import pytest
 from django.test import Client, TestCase
 from django.urls import reverse
 from registration.models import Event
+from registration.services import set_team_school
 
 from core.tests.detached import join_detached_runs
 from packets.models import Packet, PacketDistribution
@@ -102,6 +103,22 @@ def test_distribute_packet_stamps_the_open_event(current_event):
 
     packet.refresh_from_db()
     assert packet.event == current_event
+
+
+def test_distribution_keeps_intended_school_without_attributing_legacy_rows(current_event, team_1):
+    original = set_team_school(team_1, "Original school", contact_email="coach@example.test").school
+    legacy = PacketDistribution.objects.create(packet=_packet(current_event), team=team_1)
+    packet = _packet(None, title="New packet", status="draft")
+    packet.send_via_email = False
+    packet.save()
+
+    PacketDistributionService().distribute_packet(packet)
+    replacement = set_team_school(team_1, "Replacement school", contact_email="coach@example.test").school
+
+    assert replacement.pk != original.pk
+    assert packet.distributions.get(team=team_1).school_at_distribution_id == original.pk
+    legacy.refresh_from_db()
+    assert legacy.school_at_distribution_id is None
 
 
 def test_distribute_packet_with_no_open_event_is_refused():

@@ -9,7 +9,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 from registration.models import Event, EventResult, Season
-from registration.services import close_out_event, set_team_school
+from registration.services import SavedRosterError, close_out_event, remove_team_school, set_team_school
 from scoring.models import InjectScore, ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
@@ -32,6 +32,8 @@ def client(gold_team_user):
 
 
 def _close_out(client, **data):
+    if "preview" not in data:
+        data["preview"] = _check(client).json()["preview"] or "0" * 64
     response = client.post(reverse("admin_competition_action"), {"action": "close_out_event", **data})
     lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
     join_detached_runs()
@@ -72,7 +74,7 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
     lines = _close_out(client, open_event=event.pk, confirm="yolo")
 
     assert [line.get("step") for line in lines[:-1]] == [
-        "Closing out: freezing the results, then clearing the live data"
+        "Closing out: archiving the results, then clearing the live data"
     ]
     assert lines[-1] == {
         "done": True,
@@ -95,6 +97,36 @@ def test_close_out_needs_the_typed_confirmation(client, typed):
 
     assert lines == [{"done": True, "success": False, "message": 'Type "yolo" to confirm.'}]
     _assert_nothing_happened(event)
+
+
+def test_typed_confirmation_alone_does_not_authorize_close_out(client):
+    event = _open_event()
+    _team_with_school()
+
+    assert _close_out(client, open_event=event.pk, confirm="yolo", preview="")[-1]["message"] == (
+        "Reload and review Close Out before confirming."
+    )
+    _assert_nothing_happened(event)
+
+
+def test_saved_school_pair_survives_clear_or_reassignment_and_can_be_restored(client):
+    event = _open_event()
+    team = _team_with_school()
+    assignment = event.team_assignments.get()
+    school = assignment.school
+    EventResult.objects.create(event=event, school=school, team_number=team.team_number, total_score=100)
+
+    response = client.post(reverse("school_info_clear"))
+    assert b"Saved scorecards need their school and team number kept together" in response.content
+    with pytest.raises(SavedRosterError):
+        remove_team_school(team, expected_school_id=school.pk)
+    with pytest.raises(SavedRosterError):
+        set_team_school(team, "Replacement school", contact_email="coach@example.test")
+    assignment.refresh_from_db()
+    assert assignment.school_id == school.pk
+    assignment.delete()
+    set_team_school(team, school.name, contact_email="coach@example.test")
+    assert event.team_assignments.get().school_id == school.pk
 
 
 def test_refused_while_the_competition_runs(client):
@@ -280,19 +312,12 @@ def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
     for inject in ("1", "2", "3"):
         InjectScore.objects.create(team=team, inject_id=inject, inject_name="Memo", points_awarded=Decimal(5))
 
-    assert _check(client).json() == {
-        "success": True,
-        "problem": "",
-        "fixes": [],
-        "warnings": [
-            {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
-            {
-                "text": "No scorecard email is recorded for this event. If you already emailed them, you can close "
-                "out.",
-                "url": reverse("scoring:email_scorecards"),
-            },
-        ],
-    }
+    preview = _check(client).json()
+    assert preview["preview"] and not preview["problem"] and not preview["fixes"]
+    assert preview["warnings"] == [
+        {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
+        {"text": "No scorecard email is recorded for this event.", "url": None},
+    ]
 
 
 @pytest.mark.parametrize(
@@ -324,7 +349,7 @@ def test_inactive_assignment_is_an_archive_notice_not_a_refusal(client):
 
     response = _check(client).json()
     assert response["problem"] == "" and response["fixes"] == []
-    assert any("Inactive slots 1 have no card" in warning["text"] for warning in response["warnings"])
+    assert any("Team 1 (School 1, inactive)" in warning["text"] for warning in response["warnings"])
 
 
 def test_a_failing_check_says_so_and_leaves_the_page_working(client):
@@ -344,12 +369,12 @@ def test_the_page_load_does_not_build_scorecards(client):
     _open_event()
     _team_with_school()
 
-    with patch("registration.services.current_snapshots") as snapshots:
+    with patch("core.admin_views.competition.close_out_card_check") as snapshots:
         page = _page(client)
 
     snapshots.assert_not_called()
     assert BUTTON in page
-    assert "Couldn&#x27;t check unfinished work" in page
+    assert "Couldn&#x27;t preview Close Out" in page
 
 
 def test_the_check_needs_admin_or_gold_access(create_user_with_groups):

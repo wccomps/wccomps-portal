@@ -104,7 +104,7 @@ ACTIONS: dict[Action, ActionText] = {
         "When the competition ends, stop it with Stop Competition on the Competition page.", "Stop the competition"
     ),
     Action.FINISH: ActionText(
-        "Finish grading, then email every school its scorecard with Email Scorecards.", "Email scorecards"
+        "Finish grading and review the current school cards with Email Scorecards.", "Email scorecards"
     ),
     Action.CLOSE_OUT: ActionText(
         "Close out the event with Close Out Event on the Competition page; with no event open, it asks for the "
@@ -158,6 +158,7 @@ class EventStage:
     closed_out_before: bool
     packets_sent: bool
     scorecards_emailed: bool
+    saved_cards: bool = False
 
     @property
     def played(self) -> bool:
@@ -190,6 +191,8 @@ class EventStage:
     def next_action(self) -> Action:
         if self.running:
             return Action.STOP
+        if self.saved_cards:
+            return Action.CLOSE_OUT
         actions = STAGE_ACTIONS[self.stage]
         return next((action for action in actions[:-1] if not self.done(action)), actions[-1])
 
@@ -238,8 +241,9 @@ def event_stage() -> EventStage:
     event = Event.objects.open()
     scores = scored_teams().exists()
     live_data = scores or live_competition_data_exists()
+    saved_cards = event is not None and event.results.exists()
     if event is not None:
-        stage = Stage.PLAYED if scores or event.results.exists() else Stage.READY
+        stage = Stage.PLAYED if scores or saved_cards else Stage.READY
     elif scores:
         stage = Stage.UNRECORDED
     else:
@@ -252,4 +256,5 @@ def event_stage() -> EventStage:
         closed_out_before=Event.objects.filter(is_finalized=True).exists(),
         packets_sent=packets_sent(event),
         scorecards_emailed=stage in (Stage.PLAYED, Stage.UNRECORDED) and _scorecards_emailed(event),
+        saved_cards=saved_cards,
     )
