@@ -328,19 +328,24 @@ stop's score sync step fails (the stop still completes), and the worker logs the
 
 On **Competition → Before you close out**, review the listed schools, ranks, totals, omissions and advisory mail
 notices. **Close Out Event** keeps saved v1 school cards unchanged after checking the required card contents,
-ranks and school-to-slot mapping. If there are no saved cards it freezes the normal current set. A changed roster
-or card set requires a reload and fresh preview before confirmation. In an existing event, do not activate an
+ranks and school-to-slot mapping. It uses current cards only when there are no saved results or prior archive.
+It refuses inconsistent saved evidence. A changed roster or card set requires a reload and fresh preview before
+confirmation. In an existing event, do not activate an
 unmapped inactive slot to bypass the check: have the roster owner reconcile the school and slot. With no open
 event, the recovery workflow for unrecorded live scores uses the live school list.
 
-An open event with saved cards must be closed out, not canceled. A missing or different mail fingerprint is
-advisory; do not send new live cards to replace saved ones. Close Out does not decide attendance, approve judging,
-resend mail, or reconstruct old PDFs or recipients. If Nextcloud cleanup is shown, preserve required files
-before confirming: the queued cleanup deletes team accounts and their files, which are not in the archive.
+An open event with saved cards must be closed out, not canceled. An open event with an existing archive but no
+saved cards requires reconciliation; do not cancel or replace its roster. A missing or different mail fingerprint
+is advisory; do not send new live cards to replace saved ones. Close Out does not decide attendance, approve
+judging, resend mail, or reconstruct old PDFs or recipients. Preserve required Nextcloud files before confirming:
+if Nextcloud is configured when the worker runs, the queued cleanup deletes team accounts and their files.
+The archive does not include those files.
 
-Gold can download the Close Out ZIP and, if present, the unchanged legacy Finalize ZIP from the event page.
-Close Out captures the roster at that time and slot-based packet summaries, including the email mode. New packet
-distribution rows retain their intended school at creation; a missing school on an older row remains unknown.
+Gold can download the Close Out ZIP and any retained older ZIP separately from the event page. The Portal does
+not label a historical capture as Close Out when its capture type was not recorded. Close Out captures the roster
+at that time, existing slot-based packet summaries, and approved inject feedback alongside its grades.
+The packet distribution service records the intended school on new rows; admin cannot add or move distributions.
+The school on older unattributed rows remains unknown.
 That field is not evidence of who later received an email or downloaded a packet. Pre-wipe service totals and
 per-service summaries, including those for inactive slots, stay in restricted operator database evidence, not the
 Gold ZIP. Neither capture archives individual Quotient check results or debug output.

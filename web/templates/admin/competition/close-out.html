@@ -88,12 +88,10 @@
                 </ul>
             </div>
         </template>
-        <template x-if="closeOutNextcloud">
-            <c-alert variant="warning">
-                Nextcloud cleanup deletes all team accounts and their files. Preserve any required files before
-                confirming: the Portal archive does not include them.
-            </c-alert>
-        </template>
+        <c-alert variant="warning">
+            If Nextcloud is configured when the worker runs, its cleanup deletes all team accounts and their files.
+            Preserve required files before confirming: the Portal archive does not include them.
+        </c-alert>
         <p>
             Close Out saves the event's school scorecards and archive, then deletes the live data
             (scores, tickets, orange assignments and check-ins, team Discord links and queued announcements), resets

@@ -353,10 +353,10 @@ class EventResult(models.Model):
 
 
 class EventArchive(models.Model):
-    """The original saved ZIP and, if it was taken at Finalize, the separate Close Out ZIP."""
+    """Retained pre-migration bytes and an explicitly identified Close Out capture."""
 
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
-    data = models.BinaryField()
+    data = models.BinaryField(null=True, editable=False)
     close_out_data = models.BinaryField(null=True, editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 

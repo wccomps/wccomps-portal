@@ -16,6 +16,7 @@ from registration.services import (
     remove_team_school,
     set_team_school,
 )
+from registration.tests.shown import close_out_preview
 from scoring.models import InjectScore, ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
@@ -294,7 +295,7 @@ def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(cli
 def test_after_closing_out_the_page_points_at_the_next_import(client):
     event = _open_event()
     _team_with_school()
-    close_out_event(event, "gold")
+    close_out_event(event, "gold", preview=close_out_preview(event))
 
     page = _page(client)
 

@@ -58,7 +58,9 @@ during an event.
    attachment names, sizes and SHA-256 (not the files) (`web/registration/services.py` `_freeze_results`;
    `web/scoring/export.py` `DATASETS`). Only Gold Team downloads it (`web/registration/views.py` `event_archive`), as
    it does the same datasets live (`web/scoring/views/export.py`). The archive contains the roster at Close Out and
-   slot-based packet distribution summaries (intended school at row creation for new distributions, not a receipt).
+   slot-based packet distribution summaries. The locked distribution service records intended school on new rows
+   (not a receipt); the admin cannot add distributions or edit their packet or team identity. Unattributed older
+   rows remain unknown. The Gold-only Close Out ZIP retains approved inject feedback alongside its grades.
    Pre-wipe team service totals and per-service points, uptime and violation summaries are retained separately in
    `EventScoringEvidence` in the same transaction, with no Portal download or admin view. Individual Quotient
    checks and potentially sensitive debug/error output are not archived by Close Out. Off the portal, the scoring

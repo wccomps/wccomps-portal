@@ -13,7 +13,7 @@ from core.models import AuditLog, CompetitionConfig
 from team.models import Team
 from ticketing.models import Ticket
 
-from .models import Event
+from .models import Event, EventArchive, EventScoringEvidence
 
 # The audit actions Close Out Event and Clear leftover data record: no live data from before either is left
 EVENT_CLOSED_OUT = "event_closed_out"
@@ -149,7 +149,7 @@ def scored_teams() -> QuerySet[Team]:
 class EventStage:
     """The stage, the open event, whether the competition runs, whether there is any live data (scores, tickets,
     Discord links, ...), whether any event was closed out before, whether a packet went out for the open event, and
-    whether the scorecards were emailed for the scores now live."""
+    whether a scorecard email run was recorded."""
 
     stage: Stage
     event: Event | None
@@ -159,6 +159,7 @@ class EventStage:
     packets_sent: bool
     scorecards_emailed: bool
     saved_cards: bool = False
+    archive_problem: str = ""
 
     @property
     def played(self) -> bool:
@@ -168,6 +169,8 @@ class EventStage:
     @property
     def status(self) -> str:
         sentence = STAGE_SENTENCES[self.stage].format(event=self.event)
+        if self.archive_problem:
+            return self.archive_problem
         return f"{sentence} The competition is running." if self.running else sentence
 
     def done(self, action: Action) -> bool:
@@ -191,7 +194,7 @@ class EventStage:
     def next_action(self) -> Action:
         if self.running:
             return Action.STOP
-        if self.saved_cards:
+        if self.saved_cards or self.archive_problem:
             return Action.CLOSE_OUT
         actions = STAGE_ACTIONS[self.stage]
         return next((action for action in actions[:-1] if not self.done(action)), actions[-1])
@@ -242,8 +245,9 @@ def event_stage() -> EventStage:
     scores = scored_teams().exists()
     live_data = scores or live_competition_data_exists()
     saved_cards = event is not None and event.results.exists()
+    archive_problem = archive_reconciliation_problem(event, saved_cards)
     if event is not None:
-        stage = Stage.PLAYED if scores or saved_cards else Stage.READY
+        stage = Stage.PLAYED if scores or saved_cards or archive_problem else Stage.READY
     elif scores:
         stage = Stage.UNRECORDED
     else:
@@ -257,4 +261,21 @@ def event_stage() -> EventStage:
         packets_sent=packets_sent(event),
         scorecards_emailed=stage in (Stage.PLAYED, Stage.UNRECORDED) and _scorecards_emailed(event),
         saved_cards=saved_cards,
+        archive_problem=archive_problem,
     )
+
+
+def archive_reconciliation_problem(event: Event | None, saved_cards: bool | None = None) -> str:
+    if event is None:
+        return ""
+    archives = EventArchive.objects.filter(event=event)
+    if (
+        EventScoringEvidence.objects.filter(event=event).exists()
+        or archives.filter(close_out_data__isnull=False).exists()
+    ):
+        return "This open event already has Close Out evidence. Have the event operator reconcile it first."
+    if saved_cards is None:
+        saved_cards = event.results.exists()
+    if not saved_cards and archives.exists():
+        return "This open event has an archive but no saved scorecards. Have the event operator reconcile it."
+    return ""

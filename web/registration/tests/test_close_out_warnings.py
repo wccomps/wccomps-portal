@@ -21,6 +21,7 @@ from registration.close_out_checks import (
 from registration.models import Event, Season
 from registration.services import close_out_card_check, close_out_event, set_team_school
 from registration.stage import ScorecardsEmailed
+from registration.tests.shown import close_out_preview
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -136,7 +137,7 @@ def test_the_latest_scorecard_email_decides(event):
 def test_failed_scorecard_emails_are_counted(event):
     _emailed(event, failed=1)
 
-    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last send.")]
+    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last recorded send.")]
 
 
 def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
@@ -183,4 +184,4 @@ def test_warnings_never_block_a_close_out(event):
     InjectScore.objects.create(team=_team(), inject_id="1", inject_name="Memo", points_awarded=Decimal(5))
 
     assert close_out_warnings(event)
-    assert close_out_event(event, "gold").results == 2
+    assert close_out_event(event, "gold", preview=close_out_preview(event)).results == 2

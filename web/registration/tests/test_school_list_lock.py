@@ -26,7 +26,7 @@ from registration.services import (
     remove_team_school,
     set_team_school,
 )
-from registration.tests.shown import new_event
+from registration.tests.shown import close_out_preview, new_event
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -166,8 +166,9 @@ def test_closing_out_takes_the_lock_before_reading_the_open_event(team):
     set_team_school(team, "Example University", contact_email="c@example.edu")
     ServiceScore.objects.create(team=team, service_points=1)
 
+    preview = close_out_preview(event)
     with CaptureQueriesContext(connection) as queries:
-        close_out_event(event, "gold")
+        close_out_event(event, "gold", preview=preview)
 
     _assert_locks_before_reading_the_open_event(queries)
 
@@ -179,8 +180,9 @@ def test_opening_an_event_for_the_current_schools_takes_the_lock(team):
 
     ServiceScore.objects.create(team=team, service_points=1)
 
+    preview = close_out_preview(None)
     with CaptureQueriesContext(connection) as queries:
-        close_out_event(new_event("Invitational", date(2026, 10, 3), "invitational"), "gold")
+        close_out_event(new_event("Invitational", date(2026, 10, 3), "invitational"), "gold", preview=preview)
 
     _assert_locks_before_reading_the_open_event(queries)
 

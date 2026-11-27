@@ -13,12 +13,9 @@
             <c-slot name="toolbar">
                 <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
                         variant="change">Edit Event</c-link>
-                {% if has_close_out_archive %}
-                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}">Download Close Out Archive (ZIP)</c-link>
-                {% endif %}
-                {% if has_legacy_archive %}
-                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}?version=finalize">Download retained Finalize Archive (ZIP)</c-link>
-                {% endif %}
+                {% for version, label in archives.items %}
+                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}{% if version != 'close_out' %}?version={{ version }}{% endif %}">Download {{ label }} (ZIP)</c-link>
+                {% endfor %}
             </c-slot>
             <c-detail_grid>
                 <c-detail_row label="Date">
@@ -109,7 +106,7 @@
                             {% endif %}
                         </td>
                         <td class="field-actions">
-                            {% if item.assignment and can_unassign %}
+                            {% if item.assignment.pk in removable_assignments %}
                                 <c-form action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
                                         class="d-inline"
                                         data-confirm="Remove team assignment?">

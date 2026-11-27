@@ -15,6 +15,7 @@ from django.utils import timezone
 from quotient.client import TeamUptime, _service_export
 from registration.services import close_out_event, close_out_problem, set_team_school
 from registration.stage import event_stage
+from registration.tests.shown import close_out_preview
 
 from core.models import AuditLog, CompetitionConfig
 from core.services.competition import run_competition
@@ -162,7 +163,7 @@ def test_sync_can_revalue_raw_scores_without_revaluing_an_applied_credit(correct
 def test_close_out_freezes_corrections_and_unaltered_service_history(correction):
     team, event, _, apply, _, _ = correction
     call_command("service_correction", "apply", *apply, "--expect-composite", "9")
-    close_out_event(event, "operator")
+    close_out_event(event, "operator", preview=close_out_preview(event))
     result = event.results.get(team_number=team.team_number)
     assert result.total_score == Decimal(104)
     frozen = context_from_snapshot(result.scorecard)
@@ -177,7 +178,8 @@ def test_close_out_freezes_corrections_and_unaltered_service_history(correction)
     ]
     service_detail = frozen["stats"]["service_stats"][0]
     assert (service_detail["points"], service_detail["sla_violations"]) == (Decimal(100), 1)
-    with ZipFile(BytesIO(event.archive.data)) as archive:
+    assert event.archive.close_out_data is not None
+    with ZipFile(BytesIO(event.archive.close_out_data)) as archive:
         rows = csv.DictReader(StringIO(archive.read("final_scores.csv").decode()))
         row = next(row for row in rows if int(row["Team Number"]) == team.team_number)
         assert (row["Raw Service Credit"], row["SLA Credit"]) == ("4", "5")

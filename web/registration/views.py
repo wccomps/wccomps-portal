@@ -2,11 +2,11 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TypedDict, cast
+from typing import cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.forms import CheckboxSelectMultiple
 from django.http import Http404, HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
@@ -26,6 +26,7 @@ from .locks import school_list_lock
 from .models import (
     Event,
     EventArchive,
+    EventResult,
     EventTeamAssignment,
     RegistrationEventEnrollment,
     RegistrationOpen,
@@ -38,6 +39,7 @@ from .models import (
 from .services import (
     EventKeptError,
     PacketsSentError,
+    SavedRosterError,
     SchoolChangedError,
     SchoolTakenError,
     TeamLinkedError,
@@ -52,6 +54,7 @@ from .services import (
     season_delete_problem,
     set_team_school,
 )
+from .stage import archive_reconciliation_problem
 
 
 class RegistrationPageStatus(StrEnum):
@@ -443,8 +446,13 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     )
 
     sent = packets_sent(event)
+    archive_problem = archive_reconciliation_problem(event) if event.is_active else ""
+    saved_slots = set(event.results.values_list("team_number", flat=True)) if event.is_active and not sent else set()
     status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
-    archives = EventArchive.objects.filter(event=event)
+    removable = {
+        a.pk for a in assignments if event.is_active and not sent and not archive_problem
+        and a.team.team_number not in saved_slots
+    }
     context = {
         "event": event,
         "status_word": status_word,
@@ -452,41 +460,50 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "rows": rows,
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
-        "assignable_count": sum(1 for row in rows if row.can_assign),
+        "assignable_count": 0 if archive_problem else sum(1 for row in rows if row.can_assign),
         "packets_sent": sent,
-        # Only the open event's teams can be unassigned, and only until packets go out
-        "can_unassign": event.is_active and not sent,
-        "has_close_out_archive": not event.is_active and archives.exists(),
-        "has_legacy_archive": (
-            archives.exists() if event.is_active else archives.filter(close_out_data__isnull=False).exists()
-        ),
+        "removable_assignments": removable,
+        "archives": _available_archives(event),
     }
 
     return render(request, "registration/events/detail.html", context)
 
 
-class _ArchiveFlags(TypedDict):
-    has_separate_close_out: bool
+_KNOWN_FINALIZE = Q(close_out_data__isnull=False) | (
+    Q(event__is_active=True) & Q(Exists(EventResult.objects.filter(event_id=OuterRef("event_id"))))
+)
+_ARCHIVE_VERSIONS = {
+    "close_out": ("close_out_data", "Close Out Archive", Q(close_out_data__isnull=False)),
+    "finalize": ("data", "retained Finalize Archive", Q(data__isnull=False) & _KNOWN_FINALIZE),
+    "historical": ("data", "Historical Archive (capture type unrecorded)", Q(data__isnull=False) & ~_KNOWN_FINALIZE),
+}
+
+
+def _available_archives(event: Event) -> dict[str, str]:
+    flags = EventArchive.objects.filter(event=event).annotate(
+        **{version: condition for version, (_, _, condition) in _ARCHIVE_VERSIONS.items()}
+    ).values_list(*_ARCHIVE_VERSIONS).first()
+    if flags is None:
+        return {}
+    return {
+        version: label
+        for (version, (_, label, _)), available in zip(_ARCHIVE_VERSIONS.items(), flags, strict=True)
+        if available
+    }
 
 
 @require_GET
 @require_permission("gold_team")
 def event_archive(request: HttpRequest, event_id: int) -> HttpResponse:
-    """Download the Close Out capture or the retained historical Finalize ZIP."""
-    archives = EventArchive.objects.defer("data", "close_out_data").select_related("event").annotate(
-        has_separate_close_out=Q(close_out_data__isnull=False),
-    )
-    archive: WithAnnotations[EventArchive, _ArchiveFlags] = get_object_or_404(archives, event_id=event_id)
-    has_separate_close_out = archive.has_separate_close_out
-    historical = request.GET.get("version") == "finalize"
-    if historical and not (archive.event.is_active or has_separate_close_out):
+    """Read only the requested capture; never substitute historical bytes for a missing Close Out."""
+    version = request.GET.get("version", "close_out")
+    if version not in _ARCHIVE_VERSIONS:
         raise Http404
-    data = archive.close_out_data if not historical and has_separate_close_out else archive.data
-    if data is None:
-        raise Http404
-    suffix = "finalize_archive" if historical else "close_out_archive"
+    field, _, condition = _ARCHIVE_VERSIONS[version]
+    archives = EventArchive.objects.filter(condition, event_id=event_id)
+    name, data = get_object_or_404(archives.values_list("event__name", field))
     response = HttpResponse(bytes(data), content_type="application/zip")
-    response["Content-Disposition"] = f'attachment; filename="{slugify(archive.event.name)}_{suffix}.zip"'
+    response["Content-Disposition"] = f'attachment; filename="{slugify(name)}_{version}_archive.zip"'
     return response
 
 
@@ -523,6 +540,9 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         if event != Event.objects.open():
             messages.error(request, "Teams can only be assigned for the open event: import its school list first.")
             return redirect("registration_event_detail", event_id=event_id)
+        if problem := archive_reconciliation_problem(event):
+            messages.error(request, problem)
+            return redirect("registration_event_detail", event_id=event_id)
 
         enrolled_registrations = (
             RegistrationEventEnrollment.objects.filter(
@@ -538,12 +558,18 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         # A school holds one team, whether it was imported or assigned here
         taken = set(SchoolInfo.objects.values_list("school__name_key", flat=True))
         taken |= set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
+        saved_slots = dict(event.results.values_list("school__name_key", "team_number"))
         by_school: defaultdict[str, list[TeamRegistration]] = defaultdict(list)
         for enrollment in enrolled_registrations:
             registration = enrollment.registration
             key = normalize_school_name(registration.school_name)
             if key in taken:
                 skipped.append(registration.school_name)
+            elif key in saved_slots:
+                messages.error(
+                    request, f"{registration.school_name} has a saved card for Team {saved_slots[key]}. "
+                    "Have the roster owner reconcile that school and slot.",
+                )
             else:
                 by_school[key].append(registration)
 
@@ -592,7 +618,9 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                     activate_teams([team])
             except SchoolTakenError, IntegrityError:
                 skipped.append(registration.school_name)
-            except TeamTakenError, SchoolChangedError:
+            except SavedRosterError as refused:
+                messages.error(request, str(refused))
+            except TeamTakenError:
                 team_taken.append(registration.school_name)
             else:
                 assigned += 1

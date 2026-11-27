@@ -2,11 +2,15 @@
 
 from datetime import date
 
-from registration.models import Season
-from registration.services import NewEvent, NewSeason
+from registration.models import Event, Season
+from registration.services import NewEvent, NewSeason, close_out_card_check
 
 
 def new_event(name: str, day: date, event_type: str, season: NewSeason | None = None) -> NewEvent:
     """A NewEvent as a page would post it now: with the id of the season it shows as active."""
     active = Season.objects.active()
     return NewEvent(name, day, event_type, active.pk if active else None, season)
+
+
+def close_out_preview(event: Event | None) -> str:
+    return close_out_card_check(event).preview_key(event)

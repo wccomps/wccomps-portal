@@ -276,15 +276,7 @@ document.addEventListener('alpine:init', () => {
         closeOutSeenSeason: '{{ active_season.pk|default_if_none:"" }}',
         openEvent: '{{ panel.stage.event.pk|default_if_none:"" }}',
         closeOutOffered: {{ can_close_out|yesno:"true,false" }},
-        closeOutChecking: false,
-        closeOutChecked: false,
-        closeOutCheckFailed: false,
-        closeOutProblem: '',
-        closeOutFixes: [],
-        closeOutWarnings: [],
-        closeOutPreview: '',
-        closeOutSummary: null,
-        closeOutNextcloud: false,
+        closeOutState: {status: 'loading'},
 
         init() {
             if (this.closeOutOffered) this.checkCloseOut();
@@ -292,12 +284,18 @@ document.addEventListener('alpine:init', () => {
 
         get closeOutStreaming() { return this.streamAction === 'close_out_event'; },
         get notCloseOutStreaming() { return !this.closeOutStreaming; },
+        get closeOutChecking() { return this.closeOutState.status === 'loading'; },
+        get closeOutCheckFailed() { return this.closeOutState.status === 'failed'; },
+        get closeOutProblem() { return this.closeOutState.result?.problem || ''; },
+        get closeOutFixes() { return this.closeOutState.result?.fixes || []; },
+        get closeOutWarnings() { return this.closeOutState.result?.warnings || []; },
+        get closeOutSummary() { return this.closeOutState.result?.summary; },
         get hasCloseOutWarnings() { return this.closeOutWarnings.length > 0; },
         get closeOutNotBlocked() { return !this.closeOutProblem; },
         get closeOutNothingLeft() {
-            return this.closeOutChecked && !this.closeOutProblem && this.closeOutWarnings.length === 0;
+            return this.closeOutState.status === 'complete' && !this.closeOutProblem && !this.hasCloseOutWarnings;
         },
-        get closeOutBlocked() { return this.loading || this.closeOutChecking || !this.closeOutPreview; },
+        get closeOutBlocked() { return this.loading || !this.closeOutState.result?.preview; },
 
         get stopQuestion() {
             return 'Stop the competition?\n\n'
@@ -314,39 +312,26 @@ document.addEventListener('alpine:init', () => {
         },
 
         async checkCloseOut() {
-            this.closeOutChecking = true;
             try {
                 const result = await wcPost(actionUrl, { action: 'close_out_check' });
-                if (result.success) {
-                    this.closeOutProblem = result.problem;
-                    this.closeOutFixes = result.fixes;
-                    this.closeOutWarnings = result.warnings;
-                    this.closeOutPreview = result.preview;
-                    this.closeOutSummary = result.summary;
-                    this.closeOutNextcloud = result.nextcloud_cleanup;
-                    this.closeOutChecked = true;
-                } else {
-                    this.closeOutCheckFailed = true;
-                }
+                this.closeOutState = result.success ? {status: 'complete', result} : {status: 'failed'};
             } catch (e) {
-                this.closeOutCheckFailed = true;
+                this.closeOutState = {status: 'failed'};
             }
-            this.closeOutChecking = false;
         },
 
         closeOutEvent() {
             if (this.closeOutBlocked) return;
-            const nextcloud = this.closeOutNextcloud
-                ? '\nNextcloud cleanup deletes all team accounts and their files. The Portal archive does not include those files.\n'
-                : '';
             const typed = typedConfirm('CLOSE OUT THE EVENT?\n\n' +
                 'This archives the reviewed school scorecards, deletes live scores, tickets and blue team Discord links, ' +
-                'closes the event and queues Discord cleanup.\n' + nextcloud +
+                'closes the event and queues Discord cleanup.\n' +
+                'If Nextcloud is configured when the worker runs, it deletes all team accounts and their files. ' +
+                'The Portal archive does not include those files.\n' +
                 'This cannot be undone. Review the archive set and notices before proceeding.');
             if (typed) {
                 this.doStreamAction('close_out_event', {
                     confirm: typed,
-                    preview: this.closeOutPreview,
+                    preview: this.closeOutState.result.preview,
                     open_event: this.openEvent,
                     new_name: this.closeOutName,
                     new_date: this.closeOutDate,

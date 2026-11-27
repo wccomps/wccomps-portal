@@ -7,6 +7,11 @@ class Migration(migrations.Migration):
     dependencies = [("registration", "0016_remove_teamregistration_edit_token")]
 
     operations = [
+        migrations.AlterField(
+            model_name="eventarchive",
+            name="data",
+            field=models.BinaryField(editable=False, null=True),
+        ),
         migrations.AddField(
             model_name="eventarchive",
             name="close_out_data",

@@ -180,29 +180,45 @@ def _fetch_ticket_attachments() -> list[DigestedAttachment]:
         .annotate(size=Length("file_data"), sha256=sha256)
     )
 
+_FINAL_SCORE_COLUMNS: list[Column[tuple[FinalScore, str]]] = [
+    Column("Rank", "rank", lambda sc: sc[0].rank),
+    Column("Team", "team", lambda sc: sc[0].team_name),
+    Column("Team Number", "team_number", lambda sc: sc[0].team_number),
+    Column("Total Score", "total_score", lambda sc: sc[0].total),
+    Column("Service Points", "service_points", lambda sc: sc[0].components["service_points"]),
+    Column("Inject Points", "inject_points", lambda sc: sc[0].components["inject_points"]),
+    Column("Orange Points", "orange_points", lambda sc: sc[0].components["orange_points"]),
+    Column("Red Deductions", "red_deductions", lambda sc: sc[0].components["red_deductions"]),
+    Column(
+        "Incident Recovery Points", "incident_recovery_points", lambda sc: sc[0].components["incident_recovery_points"],
+    ),
+    Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].components["sla_penalties"]),
+    Column("Raw Service Credit", "raw_service_credit", lambda sc: sc[0].service_credit),
+    Column("SLA Credit", "sla_credit", lambda sc: sc[0].sla_credit),
+    Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].components["point_adjustments"]),
+]
 FINAL_SCORES = Dataset[tuple[FinalScore, str]](
     "final_scores",
-    [
-        Column("Rank", "rank", lambda sc: sc[0].rank),
-        Column("Team", "team", lambda sc: sc[0].team_name),
-        Column("Team Number", "team_number", lambda sc: sc[0].team_number),
-        Column("Total Score", "total_score", lambda sc: sc[0].total),
-        Column("Service Points", "service_points", lambda sc: sc[0].components["service_points"]),
-        Column("Inject Points", "inject_points", lambda sc: sc[0].components["inject_points"]),
-        Column("Orange Points", "orange_points", lambda sc: sc[0].components["orange_points"]),
-        Column("Red Deductions", "red_deductions", lambda sc: sc[0].components["red_deductions"]),
-        Column(
-            "Incident Recovery Points",
-            "incident_recovery_points",
-            lambda sc: sc[0].components["incident_recovery_points"],
-        ),
-        Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].components["sla_penalties"]),
-        Column("Raw Service Credit", "raw_service_credit", lambda sc: sc[0].service_credit),
-        Column("SLA Credit", "sla_credit", lambda sc: sc[0].sla_credit),
-        Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].components["point_adjustments"]),
-        Column("Calculated At", "calculated_at", lambda sc: sc[1]),
-    ],
+    [*_FINAL_SCORE_COLUMNS, Column("Calculated At", "calculated_at", lambda sc: sc[1])],
     _fetch_final_scores,
+)
+
+_INJECT_GRADES = Dataset[InjectScore](
+    "inject_grades",
+    [
+        Column("Team", "team", lambda g: g.team.team_name),
+        Column("Team Number", "team_number", lambda g: g.team.team_number),
+        Column("Inject ID", "inject_id", lambda g: g.inject_id),
+        Column("Inject Name", "inject_name", lambda g: g.inject_name),
+        Column("Max Points", "max_points", lambda g: g.max_points),
+        Column("Points Awarded", "points_awarded", lambda g: g.points_awarded),
+        Column("Approved", "is_approved", lambda g: g.is_approved),
+        Column("Approved By", "approved_by", lambda g: g.approved_by.username if g.approved_by else None),
+        Column("Approved At", "approved_at", lambda g: g.approved_at.isoformat() if g.approved_at else None),
+        Column("Graded By", "graded_by", lambda g: g.graded_by.username if g.graded_by else None),
+        Column("Graded At", "graded_at", lambda g: g.graded_at.isoformat()),
+    ],
+    _fetch_inject_grades,
 )
 
 
@@ -277,23 +293,7 @@ DATASETS: dict[str, ExportableDataset] = {
         ],
         _fetch_orange_adjustments,
     ),
-    "inject_grades": Dataset[InjectScore](
-        "inject_grades",
-        [
-            Column("Team", "team", lambda g: g.team.team_name),
-            Column("Team Number", "team_number", lambda g: g.team.team_number),
-            Column("Inject ID", "inject_id", lambda g: g.inject_id),
-            Column("Inject Name", "inject_name", lambda g: g.inject_name),
-            Column("Max Points", "max_points", lambda g: g.max_points),
-            Column("Points Awarded", "points_awarded", lambda g: g.points_awarded),
-            Column("Approved", "is_approved", lambda g: g.is_approved),
-            Column("Approved By", "approved_by", lambda g: g.approved_by.username if g.approved_by else None),
-            Column("Approved At", "approved_at", lambda g: g.approved_at.isoformat() if g.approved_at else None),
-            Column("Graded By", "graded_by", lambda g: g.graded_by.username if g.graded_by else None),
-            Column("Graded At", "graded_at", lambda g: g.graded_at.isoformat()),
-        ],
-        _fetch_inject_grades,
-    ),
+    "inject_grades": _INJECT_GRADES,
     "final_scores": FINAL_SCORES,
     "tickets": Dataset[Ticket](
         "tickets",
@@ -413,7 +413,7 @@ def export_all_zip_bytes(close_out: CloseOutExport | None = None) -> bytes:
         datasets = DATASETS
         if close_out is not None:
             columns = [
-                *FINAL_SCORES.columns[:-1],
+                *_FINAL_SCORE_COLUMNS,
                 Column[tuple[FinalScore, str]]("Exported At", "exported_at", lambda sc: sc[1]),
             ]
             datasets = {
@@ -421,6 +421,11 @@ def export_all_zip_bytes(close_out: CloseOutExport | None = None) -> bytes:
                 "final_scores": replace(
                     FINAL_SCORES, columns=columns, fetch=lambda: _stamp_final_scores(close_out.scores),
                 ),
+                "inject_grades": replace(_INJECT_GRADES, columns=[
+                    *_INJECT_GRADES.columns,
+                    Column("Approved Feedback", "approved_feedback",
+                           lambda grade: grade.feedback if grade.feedback_approved else ""),
+                ]),
             }
         for dataset in datasets.values():
             csv_str, json_str = dataset.render_pair()

@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from registration.models import (
     Event,
+    EventResult,
     EventTeamAssignment,
     RegistrationContact,
     RegistrationEventEnrollment,
@@ -103,6 +104,28 @@ def test_event_detail_shows_an_imported_assignment_for_an_enrolled_school(gold_t
     assert item.assignment == imported
     assert item.can_assign is False
     assert b"Team 04" in response.content
+
+
+def test_saved_school_must_be_reconciled_not_randomly_assigned_or_unassigned(gold_team_user, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05", is_active=False)
+    school = School.for_name("Saved school")
+    _enrolled(event, school.name)
+    assignment = EventTeamAssignment.objects.create(event=event, school=school, team=team)
+    EventResult.objects.create(event=event, school=school, team_number=4, total_score=0, scorecard={})
+    client = Client()
+    client.force_login(gold_team_user)
+    url = reverse("registration_event_detail", args=[event.pk])
+
+    assert not UNASSIGN.search(client.get(url).content.decode())
+    reply = client.post(reverse("registration_unassign_team", args=[assignment.pk]), {"school": school.pk}, follow=True)
+    assert b"Saved scorecards need their school and team number kept together" in reply.content
+    assert event.team_assignments.filter(pk=assignment.pk).exists()
+    assignment.delete()
+    reply = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+    assert b"has a saved card for Team 4" in reply.content
+    assert not event.team_assignments.exists()
+    assert not Team.objects.filter(is_active=True, team_number=5).exists()
 
 
 def test_assign_teams_skips_a_school_that_already_has_a_team(gold_team_user, event):

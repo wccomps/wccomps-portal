@@ -27,7 +27,6 @@ from scoring.snapshot import (
 
 from core.competition_utils import WipedData, wipe_competition_data
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
-from core.nextcloud import nextcloud_configured
 from core.queued_tasks import (
     ClearTeamChannels,
     CompetitionStatusChanged,
@@ -54,7 +53,16 @@ from .models import (
     collapse_whitespace,
     normalize_school_name,
 )
-from .stage import EVENT_CLOSED_OUT, LEFTOVER_DATA_CLEARED, Action, EventStage, Stage, event_stage, scored_teams
+from .stage import (
+    EVENT_CLOSED_OUT,
+    LEFTOVER_DATA_CLEARED,
+    Action,
+    EventStage,
+    Stage,
+    archive_reconciliation_problem,
+    event_stage,
+    scored_teams,
+)
 
 
 class PacketsSentError(Exception):
@@ -194,6 +202,8 @@ def set_team_school(
     if not isinstance(shown_school, Held) and school_shown(info) != shown_school:
         raise SchoolChangedError(f"Team {team.team_number}'s school changed since you opened this page; reload.")
     event = Event.objects.open()
+    if problem := archive_reconciliation_problem(event):
+        raise SavedRosterError(problem)
     renaming = rename and info is not None
     school = _rename(info.school, school_name, event) if rename and info else School.for_name(school_name)
     if event is not None and event.results.filter(
@@ -323,6 +333,8 @@ def remove_team_school(team: Team, expected_school_id: int | None = None) -> Non
     if DiscordLink.objects.filter(team=team, is_active=True).exists():
         raise TeamLinkedError(LINKED_TEAM_REMOVE)
     event = Event.objects.open()
+    if problem := archive_reconciliation_problem(event):
+        raise SavedRosterError(problem)
     if expected_school_id is not None:
         current = SchoolInfo.objects.filter(team=team).values_list("school_id", flat=True).first()
         if current is None and event is not None:
@@ -349,6 +361,8 @@ def clear_school_list() -> int:
     """
     school_list_lock()
     event = Event.objects.open()
+    if problem := archive_reconciliation_problem(event):
+        raise SavedRosterError(problem)
     if packets_sent(event):
         raise PacketsSentError(
             f"Packets have already been sent for {event}. Close it out instead (Close Out Event on the Competition "
@@ -442,9 +456,17 @@ def import_problem(event: Event | NewEvent) -> str:
     """Why this event can't be imported into now, or ''."""
     stage = event_stage()
     open_now = stage.event
+    if stage.archive_problem:
+        return stage.archive_problem
     if open_now and open_now != event:
         instead = Action.CANCEL if stage.stage == Stage.READY else Action.CLOSE_OUT
         return f"{open_now} is still open. {stage.instruction(instead)} Then import the list for another event."
+    if isinstance(event, Event) and event != open_now and (
+        EventArchive.objects.filter(event=event).exists()
+        or EventScoringEvidence.objects.filter(event=event).exists()
+        or event.results.exists()
+    ):
+        return f"{event} has retained results or archive evidence; its roster cannot be replaced."
     if packets_sent(open_now):
         return (
             f"Packets have already been sent for {open_now}. Re-importing reassigns team numbers, so sent credentials "
@@ -532,7 +554,8 @@ ADD_NEEDS_OPEN_EVENT = "Add schools needs the open event. Use Replace for an eve
 
 def add_problem(event: Event | NewEvent) -> str:
     """Why schools can't be added to this event now, or ''. Only the open event's list can grow."""
-    return "" if Event.objects.open() == event else ADD_NEEDS_OPEN_EVENT
+    open_event = Event.objects.open()
+    return archive_reconciliation_problem(open_event) if open_event == event else ADD_NEEDS_OPEN_EVENT
 
 
 def free_teams(event: Event) -> QuerySet[Team]:
@@ -622,6 +645,8 @@ def _running_refusal(stage: EventStage) -> str:
 
 def close_out_problem(stage: EventStage) -> str:
     """A stage-level refusal, independent of the expensive school and card preview."""
+    if stage.archive_problem:
+        return stage.archive_problem
     if stage.running:
         return _running_refusal(stage)
     if stage.stage == Stage.READY:
@@ -676,8 +701,6 @@ def _locked_target(target: Event | NewEvent, stage: EventStage) -> Event:
 
 @dataclass(frozen=True)
 class CloseOutOutcome:
-    """The event closed, how many school results its archive contains, and what was deleted and reset."""
-
     event: Event
     results: int
     wiped: WipedData
@@ -690,7 +713,7 @@ CHANGED_WHILE_CLOSING_OUT = "Something changed while closing out; nothing was ch
 CLOSE_OUT_DURING_RUN = "A competition start or stop is running. Close out when it finishes."
 
 
-def close_out_event(target: Event | NewEvent, actor: str, *, preview: str | None = None) -> CloseOutOutcome:
+def close_out_event(target: Event | NewEvent, actor: str, *, preview: str) -> CloseOutOutcome:
     """Close out the event (see _close_out). As the outermost transaction it runs at REPEATABLE READ, so the results
     it freezes, the archive and the rows it deletes are one snapshot: a score changed meanwhile makes it refuse with
     CHANGED_WHILE_CLOSING_OUT, writing nothing, and rows created after its snapshot stay as live data. It must be the
@@ -718,16 +741,13 @@ def _refusing_conflicts() -> Iterator[None]:
 
 
 @transaction.atomic
-def _close_out(target: Event | NewEvent, actor: str, preview: str | None) -> CloseOutOutcome:
-    """Freeze the event's results and export archive, then delete the live data, close the event, reset the schedule,
-    start message, Quotient box list and queued announcements, and queue the Discord teardown, all committed together.
-    target is what the page showed: the open event, or with none open the new event to record the scores at. The
-    school list stays until the next import replaces it. Under _locked_transition."""
+def _close_out(target: Event | NewEvent, actor: str, preview: str) -> CloseOutOutcome:
+    """Archive selected cards and evidence before wiping live data; the school list survives for the next import."""
     with _locked_transition(lambda stage: _stale_target(target, stage) or close_out_problem(stage)) as (config, stage):
         cards = close_out_card_check(stage.event)
-        if preview is not None and not constant_time_compare(preview, cards.preview_key(stage.event)):
+        if not constant_time_compare(preview, cards.preview_key(stage.event)):
             raise CloseOutError(
-                "The school scorecards or roster changed. Reload and review Close Out again. Nothing was closed out."
+                "The Close Out preview changed. Reload and review it again. Nothing was closed out."
             )
         event = _locked_target(target, stage)
         results = _freeze_results(event, cards)
@@ -871,43 +891,36 @@ class CloseOutCards:
         return scorecard_fingerprint(self.schools)
 
     def preview_key(self, event: Event | None) -> str:
-        reviewed = (event.pk if event else None, self.saved, self.fingerprint, self.roster, nextcloud_configured())
+        reviewed = (event.pk if event else None, self.saved, self.fingerprint, self.roster)
         return salted_hmac("close-out-preview", repr(reviewed), algorithm="sha256").hexdigest()
 
 
 def close_out_card_check(event: Event | None) -> CloseOutCards:
     """Select the cards used by both Gold's preview and the transactional Close Out."""
+    if problem := archive_reconciliation_problem(event):
+        raise CloseOutError(problem)
     roster = _close_out_roster(event)
-    if event is not None and EventScoringEvidence.objects.filter(event=event).exists():
-        raise CloseOutError("This event already has Close Out evidence. Have the event operator reconcile it first.")
     _validate_mapping(event, roster)
     if event is not None and (saved := list(event.results.all())):
         assignments = {a.school_id: a for a in roster}
         schools = {}
-        for result in saved:
-            assignment = assignments.get(result.school_id)
-            if assignment is None or assignment.team_number != result.team_number:
-                raise CloseOutError(
-                    "The saved school and team number do not match the event's current roster. "
-                    "Have the event roster owner reconcile the pair. Nothing was closed out."
-                )
-            try:
+        try:
+            for result in saved:
+                assignment = assignments.get(result.school_id)
+                if assignment is None or assignment.team_number != result.team_number:
+                    raise CloseOutError(
+                        "The saved school and team number do not match the event's current roster. "
+                        "Have the event roster owner reconcile the pair. Nothing was closed out."
+                    )
                 score = frozen_final_score(
                     result.scorecard, result.version, result.team_number, assignment.team_name,
                     result.rank, result.total_score,
                 )
-            except ValueError as exc:
-                raise CloseOutError(str(exc)) from None
-            schools[result.school_id] = SchoolSnapshot(score, result.scorecard)
-        try:
+                schools[result.school_id] = SchoolSnapshot(score, result.scorecard)
             validate_frozen_ranks(card.score for card in schools.values())
         except ValueError as exc:
             raise CloseOutError(str(exc)) from None
         return CloseOutCards(True, roster, schools)
-    if event is not None and EventArchive.objects.filter(event=event).exists():
-        raise CloseOutError(
-            "This open event has an archive but no saved scorecards. Have the event operator reconcile it."
-        )
     return CloseOutCards(False, roster, _current_snapshots({a.team_id: a.school_id for a in roster}))
 
 
@@ -925,7 +938,7 @@ def _freeze_results(event: Event, cards: CloseOutCards) -> int:
         [card.score for card in cards.schools.values()], public_event_evidence(event, cards.schools),
     ))
     if not EventArchive.objects.filter(event=event, close_out_data__isnull=True).update(close_out_data=archive):
-        EventArchive.objects.create(event=event, data=archive)
+        EventArchive.objects.create(event=event, close_out_data=archive)
     team_ids = event.team_assignments.values("team_id")
     EventScoringEvidence.objects.create(event=event, data={
         "service_scores": list(ServiceScore.objects.filter(team_id__in=team_ids).values()),
@@ -948,6 +961,8 @@ def _team_list(numbers: list[int]) -> str:
 def clear_leftovers_problem(stage: EventStage) -> str:
     """Why Clear leftover data can't run now, or ''. It deletes live data no open event holds: data with no scores,
     or scores once some event was closed out (before that, scores are an event that ran without an import)."""
+    if stage.archive_problem:
+        return stage.archive_problem
     if stage.running:
         return _running_refusal(stage)
     if stage.event is not None:
@@ -988,6 +1003,8 @@ def _clear_leftover_data(actor: str) -> WipedData:
 
 def discord_cleanup_problem(stage: EventStage) -> str:
     """Why /competition cleanup-competition can't run now, or ''."""
+    if stage.archive_problem:
+        return stage.archive_problem
     if stage.running:
         return _running_refusal(stage)
     if stage.event is not None:
@@ -998,6 +1015,8 @@ def discord_cleanup_problem(stage: EventStage) -> str:
 def teardown_problem(stage: EventStage, open_event_id: int | None) -> str:
     """Why a queued Discord teardown can't run now, or '': not while the competition runs, nor once the open event
     is no longer the one it was queued for (open_event_id; None, none open)."""
+    if stage.archive_problem:
+        return stage.archive_problem
     if stage.running:
         return _running_refusal(stage)
     if (stage.event.pk if stage.event else None) == open_event_id:
@@ -1074,6 +1093,8 @@ def reset_for_discord_cleanup(actor: str) -> DiscordCleanupReset:
 
 def cancel_event_problem(stage: EventStage) -> str:
     """Why the open event can't be cancelled now, or ''. Only an event no team has scored: scores are closed out."""
+    if stage.archive_problem:
+        return stage.archive_problem
     if stage.running:
         return _running_refusal(stage)
     if stage.event is None:
@@ -1114,6 +1135,8 @@ def event_delete_problem(event: Event) -> str:
     """Why the event can't be deleted, or ''. Open, finalized and assigned events are kept as season history."""
     if event.is_active:
         return f"{event} is open: the live scores and school list belong to it."
+    if EventArchive.objects.filter(event=event).exists() or EventScoringEvidence.objects.filter(event=event).exists():
+        return f"{event} has archive evidence, which is kept."
     if event.is_finalized or EventResult.objects.filter(event=event).exists():
         return f"{event} has finalized results, which are kept."
     if event.team_assignments.exists():

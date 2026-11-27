@@ -54,7 +54,6 @@ from core.forms import (
     TypedConfirmForm,
 )
 from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig
-from core.nextcloud import nextcloud_configured
 from core.services.competition import (
     KEEP,
     ConfigEditError,
@@ -304,7 +303,7 @@ def _action_close_out_check(request: HttpRequest, authentik_username: str) -> Js
         return JsonResponse({"error": CLOSE_OUT_CHECK_FAILED}, status=500)
     return JsonResponse({
         "success": True, "problem": problem, "fixes": fixes, "warnings": warnings, "preview": preview,
-        "summary": summary, "nextcloud_cleanup": nextcloud_configured(),
+        "summary": summary,
     })
 
 

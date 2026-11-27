@@ -96,13 +96,14 @@ def close_out_warnings(event: Event | None, cards: CloseOutCards | None) -> list
         if omitted:
             warnings.append(CloseOutWarning(
                 f"No card in the set being archived for: {omitted}. "
-                "The close-time roster and packet summaries still include these assignments."
+                "The close-time roster still includes these assignments; existing packet distributions "
+                "are archived by slot."
             ))
     return warnings + [CloseOutWarning(text) for text in _scorecard_warnings(event, cards)]
 
 
 def scorecards_fingerprint(event: Event | None, standings: list[Standing] | None = None) -> str:
-    """A hash of every school's scorecard from standings (by default, computed now)."""
+    """Fingerprint of assigned schools' current cards in the supplied or freshly computed standings."""
     return scorecard_fingerprint(current_snapshots(event, standings))
 
 
@@ -115,7 +116,8 @@ def _scorecard_warnings(event: Event | None, cards: CloseOutCards | None) -> lis
         return ["No scorecard email is recorded for this event."]
     warnings = []
     if failed := emailed.failed:
-        one, many = "scorecard email failed in the last send", "scorecard emails failed in the last send"
+        one = "scorecard email failed in the last recorded send"
+        many = "scorecard emails failed in the last recorded send"
         warnings.append(_sentence(failed, one, many))
     if cards is not None and emailed.scorecards_hash != cards.fingerprint:
         warnings.append(

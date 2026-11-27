@@ -13,10 +13,22 @@ from decimal import Decimal, InvalidOperation
 from itertools import pairwise
 from typing import cast
 
-from .calculator import SCORE_COMPONENT_FIELDS, Scaling, Standing
+from .calculator import SCORE_COMPONENT_FIELDS, Standing
 from .models import OrangeTeamScore, RedTeamScore
 
 SNAPSHOT_VERSION = 1
+
+# Stored v1 contract, independent of the live calculator and current writer version.
+_V1_CATEGORIES = {
+    "service_points": "services",
+    "inject_points": "injects",
+    "orange_points": "orange",
+    "red_deductions": "red",
+    "sla_penalties": "sla",
+    "incident_recovery_points": "recovery",
+    "point_adjustments": "adjustments",
+}
+_V1_SCALED = ("service", "inject", "orange")
 _DECIMAL = "$d"
 
 
@@ -91,6 +103,7 @@ class FinalScore:
     components: dict[str, Decimal]
     service_credit: int
     sla_credit: int
+    cohort: int | None = None
 
     @classmethod
     def from_standing(cls, standing: Standing) -> FinalScore:
@@ -120,7 +133,10 @@ def scorecard_fingerprint(schools: dict[int, SchoolSnapshot]) -> str:
 
 def validate_frozen_ranks(scores: Iterable[FinalScore]) -> None:
     """V1 ranked cards descend by total; a saved school subset may have gaps or tied totals."""
-    ranked = sorted((score.rank, score.total) for score in scores if score.rank is not None)
+    frozen = list(scores)
+    if len({score.cohort for score in frozen}) > 1:
+        raise ValueError("Saved result cohorts conflict. Nothing was closed out.")
+    ranked = sorted((score.rank, score.total) for score in frozen if score.rank is not None)
     for (rank, total), (next_rank, next_total) in pairwise(ranked):
         if rank == next_rank or total < next_total:
             raise ValueError("Saved result ranks conflict. Nothing was closed out.")
@@ -141,7 +157,7 @@ def _fields(row: dict[str, object], *, numbers: str = "", text: str = "", flags:
         raise ValueError
 
 
-def _validate_details(context: dict[str, object]) -> int:
+def _validate_v1_details(context: dict[str, object], components: dict[str, Decimal], ranked: bool) -> int:
     stats, scaling = context["stats"], context["scaling"]
     if not isinstance(stats, dict) or not isinstance(scaling, dict):
         raise ValueError
@@ -149,23 +165,34 @@ def _validate_details(context: dict[str, object]) -> int:
     if type(count) is not int or count < 0:
         raise ValueError
     _snapshot_number(stats["total_delta"])
-    for key in Scaling.__required_keys__:
-        _snapshot_number(scaling[key])
+    weights = [_snapshot_number(scaling[f"{name}_weight"]) for name in _V1_SCALED]
+    if any(not 0 <= weight <= 100 for weight in weights) or sum(weights) != 100:
+        raise ValueError
+    for name in _V1_SCALED:
+        _snapshot_number(scaling[f"{name}_raw"])
+        if _snapshot_number(scaling[f"{name}_modifier"]) < 0:
+            raise ValueError
     if not isinstance(stats["insights"], list) or not all(isinstance(item, str) for item in stats["insights"]):
         raise ValueError
     categories = stats["category_ranks"]
     if not isinstance(categories, dict):
         raise ValueError
+    if ranked and any(components[field] and name not in categories for field, name in _V1_CATEGORIES.items()):
+        raise ValueError
     for row in _rows(list(categories.values())):
-        _fields(row, numbers="rank avg min max value delta", flags="below_avg")
+        _positive_rank(row["rank"])
+        _fields(row, numbers="avg min max value delta", flags="below_avg")
     for row in _rows(stats["service_stats"]):
-        _fields(row, numbers="points rank avg delta sla_violations", text="name", flags="below_avg")
+        _positive_rank(row["rank"])
+        _fields(row, numbers="points avg delta sla_violations", text="name", flags="below_avg")
     for row in _rows(stats["inject_stats"]):
-        _fields(row, numbers="points rank avg max delta", text="name feedback", flags="below_avg")
+        _positive_rank(row["rank"])
+        _fields(row, numbers="points avg max delta", text="name feedback", flags="below_avg")
         if row.get("max_points") is not None:
             _snapshot_number(row["max_points"])
     for row in _rows(stats["neighbors"]):
-        _fields(row, numbers="rank total_score gap")
+        _positive_rank(row["rank"])
+        _fields(row, numbers="total_score gap")
     for row in _rows(context["red_scores"]):
         _fields(row, numbers="points_per_team", text="affected_boxes_display affected_service")
         attack = row["attack_type"]
@@ -182,6 +209,11 @@ def _validate_details(context: dict[str, object]) -> int:
     return count
 
 
+def _positive_rank(value: object) -> None:
+    if type(value) is not int or value < 1:
+        raise ValueError
+
+
 def _snapshot_number(value: object) -> Decimal:
     if type(value) not in (Decimal, int, str):
         raise ValueError
@@ -194,19 +226,21 @@ def _snapshot_number(value: object) -> Decimal:
 def frozen_final_score(
     data: dict[str, object], version: int, number: int, name: str, rank: int | None, total: Decimal,
 ) -> FinalScore:
-    """Validate required v1 card contents without rewriting them or reconstructing a live standing."""
+    """Read the stored version without reconstructing a live standing."""
+    if version != 1:
+        raise ValueError("A saved scorecard uses an unsupported version. Nothing was closed out.")
     try:
         context = context_from_snapshot(data)
         score, team = context["score"], context["team"]
         if (
-            version != SNAPSHOT_VERSION or not isinstance(score, dict) or not isinstance(team, dict)
+            not isinstance(score, dict) or not isinstance(team, dict)
             or type(team["team_number"]) is not int or team["team_number"] != number
             or score["rank"] != rank or (rank is not None and type(score["rank"]) is not int)
             or _snapshot_number(score["total_score"]) != total
         ):
             raise ValueError
-        count = _validate_details(context)
-        components = {field: _snapshot_number(score[field]) for field in SCORE_COMPONENT_FIELDS}
+        components = {field: _snapshot_number(score[field]) for field in _V1_CATEGORIES}
+        count = _validate_v1_details(context, components, rank is not None)
         for field in ("red_total", "inject_total", "orange_total", "service_total", "service_sla_total"):
             _snapshot_number(context[field])
         corrections = score.get("service_corrections", [])
@@ -219,8 +253,8 @@ def frozen_final_score(
             ):
                 raise ValueError
             raw, sla = line["service_credit"], line["sla_credit"]
-            _snapshot_number(line["service_modifier"])
-            if type(raw) is not int or type(sla) is not int or sla < 0:
+            modifier = _snapshot_number(line["service_modifier"])
+            if modifier < 0 or type(raw) is not int or type(sla) is not int or sla < 0:
                 raise ValueError
             raw_credit += raw
             sla_credit += sla
@@ -228,4 +262,4 @@ def frozen_final_score(
         raise ValueError("A saved scorecard cannot be read. Nothing was closed out.") from None
     if rank is not None and not 1 <= rank <= count:
         raise ValueError("Saved result rank is outside its recorded cohort. Nothing was closed out.")
-    return FinalScore(number, name, rank, total, components, raw_credit, sla_credit)
+    return FinalScore(number, name, rank, total, components, raw_credit, sla_credit, count)
